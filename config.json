@@ -1,0 +1,40 @@
+{
+  "gop_cache": 0,
+
+  "rtmp": {
+    "enable": true,
+    "addr": "0.0.0.0:1935"
+  },
+
+  "rtsp": {
+    "enable": true,
+    "addr": "0.0.0.0:554",
+    "password": "123456"
+  },
+
+  "webrtc": {
+    "port": 8000,
+    "transport": "UDP"
+  },
+
+  "gb28181": {
+    "port": "50000-60000",
+    "transport": "UDP|TCP"
+  },
+
+  "record": {
+    "format": "mp4",
+    "path": ""
+  },
+
+  "hook": {
+    "on_publish": "http://localhost:8080/api/v1/live/publish/auth",
+    "on_publish_done": "http://localhost:8080/api/v1/live/publishdone",
+    "on_play" : "http://localhost:8080/api/v1/live/play/auth",
+    "on_play_done" : "http://localhost:8080/api/v1/live/playdone",
+
+    "on_record": "",
+    "on_idle_timeout": "",
+    "on_recv_timeout": ""
+  }
+}
