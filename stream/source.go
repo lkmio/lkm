@@ -5,7 +5,7 @@ import (
 	"github.com/yangjiechina/live-server/transcode"
 )
 
-type TransMuxerId uint32
+type TransStreamId uint32
 
 // SourceType Source 推流类型
 type SourceType uint32
@@ -61,7 +61,7 @@ type ISource interface {
 	AddSink(sink ISink) bool
 
 	// RemoveSink 删除Sink/**
-	RemoveSink(tid TransMuxerId, sinkId string) bool
+	RemoveSink(tid TransStreamId, sinkId string) bool
 
 	// Close 关闭Source
 	// 停止一切封装和转发流以及转码工作
@@ -78,14 +78,14 @@ type SourceImpl struct {
 	type_ SourceType
 	state SessionState
 
-	deMuxer          ITransDeMuxer
-	recordSink       ISink
-	audioTranscoders []transcode.ITranscoder
-	videoTranscoders []transcode.ITranscoder
-	transcodeStreams []utils.AVStream
+	deMuxer          ITransDeMuxer           //负责从推流协议中解析出AVStream和AVPacket
+	recordSink       ISink                   //每个Source唯一的一个录制流
+	audioTranscoders []transcode.ITranscoder //音频解码器
+	videoTranscoders []transcode.ITranscoder //视频解码器
+	transcodeStreams []utils.AVStream        //从音视频解码器中获得的AVStream
 
 	//所有的输出协议, 持有Sink
-	transMuxers map[Protocol]map[TransMuxerId]ITransMuxer
+	transStreams map[TransStreamId]TransStream
 }
 
 func (s *SourceImpl) Id() string {
@@ -123,7 +123,7 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 	panic("implement me")
 }
 
-func (s *SourceImpl) RemoveSink(tid TransMuxerId, sinkId string) bool {
+func (s *SourceImpl) RemoveSink(tid TransStreamId, sinkId string) bool {
 	//TODO implement me
 	panic("implement me")
 }

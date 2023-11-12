@@ -17,6 +17,7 @@ func NewPublisher(sourceId string) *Publisher {
 	return publisher
 }
 
+// OnVideo 从rtmpchunk解析过来的数据包
 func (p *Publisher) OnVideo(data []byte, ts uint32) {
 	_ = p.deMuxer.InputVideo(data, ts)
 }
