@@ -2,8 +2,10 @@ package stream
 
 import "github.com/yangjiechina/avformat/utils"
 
+type SinkId string
+
 type ISink interface {
-	Id() string
+	Id() SinkId
 
 	Input(data []byte)
 
@@ -11,15 +13,22 @@ type ISink interface {
 
 	SourceId() string
 
-	Protocol() int
+	Protocol() Protocol
 
 	State() int
 
 	SetState(state int)
 
-	DisableVideo() bool
+	EnableVideo() bool
 
+	// SetEnableVideo 允许客户端只拉取音频流
 	SetEnableVideo(enable bool)
+
+	// DesiredAudioCodecId 允许客户端拉取指定的音频流
+	DesiredAudioCodecId() utils.AVCodecID
+
+	// DesiredVideoCodecId DescribeVideoCodecId 允许客户端拉取指定的视频流
+	DesiredVideoCodecId() utils.AVCodecID
 
 	Close()
 }
@@ -28,7 +37,7 @@ func AddSinkToWaitingQueue(streamId string, sink ISink) {
 
 }
 
-func RemoveSinkFromWaitingQueue(streamId, sinkId string) ISink {
+func RemoveSinkFromWaitingQueue(streamId, sinkId SinkId) ISink {
 	return nil
 }
 
@@ -37,11 +46,16 @@ func PopWaitingSinks(streamId string) []ISink {
 }
 
 type SinkImpl struct {
+	id          string
+	protocol    Protocol
+	enableVideo bool
+
+	desiredAudioCodecId utils.AVCodecID
+	desiredVideoCodecId utils.AVCodecID
 }
 
 func (s *SinkImpl) Id() string {
-	//TODO implement me
-	panic("implement me")
+	return s.id
 }
 
 func (s *SinkImpl) Input(data []byte) {
@@ -59,9 +73,8 @@ func (s *SinkImpl) SourceId() string {
 	panic("implement me")
 }
 
-func (s *SinkImpl) Protocol() int {
-	//TODO implement me
-	panic("implement me")
+func (s *SinkImpl) Protocol() Protocol {
+	return s.protocol
 }
 
 func (s *SinkImpl) State() int {
@@ -74,18 +87,15 @@ func (s *SinkImpl) SetState(state int) {
 	panic("implement me")
 }
 
-func (s *SinkImpl) DisableVideo() bool {
-	//TODO implement me
-	panic("implement me")
+func (s *SinkImpl) EnableVideo() bool {
+	return s.enableVideo
 }
 
 func (s *SinkImpl) SetEnableVideo(enable bool) {
-	//TODO implement me
-	panic("implement me")
+	s.enableVideo = enable
 }
 
 func (s *SinkImpl) Close() {
 	//TODO implement me
 	panic("implement me")
 }
-

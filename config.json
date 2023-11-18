@@ -1,5 +1,6 @@
 {
   "gop_cache": 0,
+  "probe_timeout": 2000,
 
   "rtmp": {
     "enable": true,

@@ -8,8 +8,9 @@ import (
 	"net/http"
 )
 
+// Session 负责除RTMP连接和断开以外的所有生命周期处理
 type Session interface {
-	Input(conn net.Conn, data []byte) error
+	Input(conn net.Conn, data []byte) error //接受网络数据包再交由Stack处理
 
 	Close()
 }
@@ -44,13 +45,13 @@ func (s *sessionImpl) OnPublish(app, stream_ string, response chan avformat.Hook
 
 func (s *sessionImpl) OnPlay(app, stream string, response chan avformat.HookState) {
 	s.streamId = app + "/" + stream
-	sink := &Sink{}
-	s.SessionImpl.OnPlay(sink, nil, func() {
-		s.handle = sink
-		response <- http.StatusOK
-	}, func(state avformat.HookState) {
-		response <- state
-	})
+	//sink := &Sink{}
+	//s.SessionImpl.OnPlay(sink, nil, func() {
+	//	s.handle = sink
+	//	response <- http.StatusOK
+	//}, func(state avformat.HookState) {
+	//	response <- state
+	//})
 }
 
 func (s *sessionImpl) Input(conn net.Conn, data []byte) error {
@@ -58,6 +59,4 @@ func (s *sessionImpl) Input(conn net.Conn, data []byte) error {
 }
 
 func (s *sessionImpl) Close() {
-	//TODO implement me
-	panic("implement me")
 }

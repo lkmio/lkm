@@ -1,14 +1,14 @@
 package stream
 
 import (
+	"github.com/yangjiechina/avformat"
 	"github.com/yangjiechina/avformat/utils"
 	"github.com/yangjiechina/live-server/transcode"
+	"time"
 )
 
-type TransStreamId uint32
-
 // SourceType Source 推流类型
-type SourceType uint32
+type SourceType byte
 
 // Protocol 输出协议
 type Protocol uint32
@@ -56,7 +56,7 @@ type ISource interface {
 	// TranscodeStreams 返回转码的Streams
 	TranscodeStreams() []utils.AVStream
 
-	// AddSink 添加Sink, 在此之前Sink已经握手、授权通过. 如果Source还未WriteHeader，将Sink添加到等待队列.
+	// AddSink 添加Sink, 在此之前请确保Sink已经握手、授权通过. 如果Source还未WriteHeader，将Sink添加到等待队列.
 	// 匹配拉流的编码器, 创建TransMuxer或向存在TransMuxer添加Sink
 	AddSink(sink ISink) bool
 
@@ -82,20 +82,22 @@ type SourceImpl struct {
 	recordSink       ISink                   //每个Source唯一的一个录制流
 	audioTranscoders []transcode.ITranscoder //音频解码器
 	videoTranscoders []transcode.ITranscoder //视频解码器
-	transcodeStreams []utils.AVStream        //从音视频解码器中获得的AVStream
+	originStreams    StreamManager           //推流的音视频Streams
+	allStreams       StreamManager           //推流Streams+转码器获得的Streams
+
+	completed  bool
+	probeTimer *time.Timer
 
 	//所有的输出协议, 持有Sink
-	transStreams map[TransStreamId]TransStream
+	transStreams map[TransStreamId]ITransStream
 }
 
 func (s *SourceImpl) Id() string {
-	//TODO implement me
-	panic("implement me")
+	return s.Id_
 }
 
 func (s *SourceImpl) Input(data []byte) {
-	//TODO implement me
-	panic("implement me")
+	s.deMuxer.Input(data)
 }
 
 func (s *SourceImpl) CreateTransDeMuxer() ITransDeMuxer {
@@ -109,18 +111,70 @@ func (s *SourceImpl) CreateTranscoder(src utils.AVStream, dst utils.AVStream) tr
 }
 
 func (s *SourceImpl) OriginStreams() []utils.AVStream {
-	//TODO implement me
-	panic("implement me")
+	return s.originStreams.All()
 }
 
 func (s *SourceImpl) TranscodeStreams() []utils.AVStream {
-	//TODO implement me
-	panic("implement me")
+	return s.allStreams.All()
+}
+
+func IsSupportMux(protocol Protocol, audioCodecId, videoCodecId utils.AVCodecID) bool {
+	if ProtocolRtmp == protocol || ProtocolFlv == protocol {
+
+	}
+
+	return true
 }
 
 func (s *SourceImpl) AddSink(sink ISink) bool {
-	//TODO implement me
-	panic("implement me")
+	// 暂时不考虑多路视频流，意味着只能1路视频流和多路音频流，同理originStreams和allStreams里面的Stream互斥. 同时多路音频流的Codec必须一致
+	audioCodecId, videoCodecId := sink.DesiredAudioCodecId(), sink.DesiredVideoCodecId()
+	audioStream := s.originStreams.FindStreamWithType(utils.AVMediaTypeAudio)
+	videoStream := s.originStreams.FindStreamWithType(utils.AVMediaTypeVideo)
+
+	disableAudio := audioStream == nil
+	disableVideo := videoStream == nil || !sink.EnableVideo()
+	if disableAudio && disableVideo {
+		return false
+	}
+
+	//不支持对期望编码的流封装. 降级
+	if (utils.AVCodecIdNONE != audioCodecId || utils.AVCodecIdNONE != videoCodecId) && !IsSupportMux(sink.Protocol(), audioCodecId, videoCodecId) {
+		audioCodecId = utils.AVCodecIdNONE
+		videoCodecId = utils.AVCodecIdNONE
+	}
+
+	if !disableAudio && utils.AVCodecIdNONE == audioCodecId {
+		audioCodecId = audioStream.CodecId()
+	}
+	if !disableVideo && utils.AVCodecIdNONE == videoCodecId {
+		videoCodecId = videoStream.CodecId()
+	}
+
+	//创建音频转码器
+	if !disableAudio && audioCodecId != audioStream.CodecId() {
+		avformat.Assert(false)
+	}
+
+	//创建视频转码器
+	if !disableVideo && videoCodecId != videoStream.CodecId() {
+		avformat.Assert(false)
+	}
+
+	var streams [5]utils.AVStream
+	var index int
+	for _, stream := range s.originStreams.All() {
+		if disableVideo && stream.Type() == utils.AVMediaTypeVideo {
+			continue
+		}
+
+		streams[index] = stream
+		index++
+	}
+
+	//transStreamId := GenerateTransStreamId(sink.Protocol(), streams[:]...)
+	TransStreamFactory(sink.Protocol(), streams[:])
+	return false
 }
 
 func (s *SourceImpl) RemoveSink(tid TransStreamId, sinkId string) bool {
@@ -134,21 +188,32 @@ func (s *SourceImpl) Close() {
 }
 
 func (s *SourceImpl) OnDeMuxStream(stream utils.AVStream) {
-	//TODO implement me
-	panic("implement me")
+	s.originStreams.Add(stream)
+	s.allStreams.Add(stream)
+	if len(s.originStreams.All()) == 1 {
+		s.probeTimer = time.AfterFunc(time.Duration(AppConfig.ProbeTimeout)*time.Millisecond, s.writeHeader)
+	}
+}
+
+// 从DeMuxer解析完Stream后, 处理等待Sinks
+func (s *SourceImpl) writeHeader() {
+	avformat.Assert(!s.completed)
+	s.probeTimer.Stop()
+	s.completed = true
+
+	sinks := PopWaitingSinks(s.Id_)
+	for _, sink := range sinks {
+		s.AddSink(sink)
+	}
 }
 
 func (s *SourceImpl) OnDeMuxStreamDone() {
-	//TODO implement me
-	panic("implement me")
+	s.writeHeader()
 }
 
-func (s *SourceImpl) OnDeMuxPacket(index int, packet *utils.AVPacket2) {
-	//TODO implement me
-	panic("implement me")
+func (s *SourceImpl) OnDeMuxPacket(index int, packet utils.AVPacket) {
+
 }
 
 func (s *SourceImpl) OnDeMuxDone() {
-	//TODO implement me
-	panic("implement me")
 }

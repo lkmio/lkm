@@ -51,6 +51,8 @@ func init() {
 }
 
 type AppConfig_ struct {
-	Rtmp RtmpConfig
-	Hook HookConfig
+	GOPCache     int `json:"gop_cache"` //缓存GOP个数，不是时长
+	ProbeTimeout int `json:"probe_timeout"`
+	Rtmp         RtmpConfig
+	Hook         HookConfig
 }
