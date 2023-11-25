@@ -1,7 +1,7 @@
 package stream
 
 import (
-	"github.com/yangjiechina/avformat"
+	"fmt"
 	"github.com/yangjiechina/avformat/utils"
 	"github.com/yangjiechina/live-server/transcode"
 	"time"
@@ -84,6 +84,7 @@ type SourceImpl struct {
 	videoTranscoders []transcode.ITranscoder //视频解码器
 	originStreams    StreamManager           //推流的音视频Streams
 	allStreams       StreamManager           //推流Streams+转码器获得的Streams
+	buffers          []StreamBuffer
 
 	completed  bool
 	probeTimer *time.Timer
@@ -153,12 +154,12 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 
 	//创建音频转码器
 	if !disableAudio && audioCodecId != audioStream.CodecId() {
-		avformat.Assert(false)
+		utils.Assert(false)
 	}
 
 	//创建视频转码器
 	if !disableVideo && videoCodecId != videoStream.CodecId() {
-		avformat.Assert(false)
+		utils.Assert(false)
 	}
 
 	var streams [5]utils.AVStream
@@ -172,32 +173,53 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 		index++
 	}
 
-	//transStreamId := GenerateTransStreamId(sink.Protocol(), streams[:]...)
-	TransStreamFactory(sink.Protocol(), streams[:])
+	transStreamId := GenerateTransStreamId(sink.Protocol(), streams[:]...)
+	transStream, ok := s.transStreams[transStreamId]
+	if ok {
+		transStream = TransStreamFactory(sink.Protocol(), streams[:])
+		s.transStreams[transStreamId] = transStream
+
+		for i := 0; i < index; i++ {
+			transStream.AddTrack(streams[i])
+		}
+
+		_ = transStream.WriteHeader()
+	}
+
+	transStream.AddSink(sink)
 	return false
 }
 
 func (s *SourceImpl) RemoveSink(tid TransStreamId, sinkId string) bool {
-	//TODO implement me
-	panic("implement me")
+	return true
 }
 
 func (s *SourceImpl) Close() {
-	//TODO implement me
-	panic("implement me")
+
 }
 
 func (s *SourceImpl) OnDeMuxStream(stream utils.AVStream) {
+	if s.completed {
+		fmt.Printf("添加Stream失败 Source: %s已经WriteHeader", s.Id_)
+		return
+	}
+
 	s.originStreams.Add(stream)
 	s.allStreams.Add(stream)
 	if len(s.originStreams.All()) == 1 {
 		s.probeTimer = time.AfterFunc(time.Duration(AppConfig.ProbeTimeout)*time.Millisecond, s.writeHeader)
 	}
+
+	//为每个Stream创建对于的Buffer
+	if AppConfig.GOPCache > 0 {
+		buffer := NewStreamBuffer(int64(AppConfig.GOPCache))
+		s.buffers = append(s.buffers, buffer)
+	}
 }
 
 // 从DeMuxer解析完Stream后, 处理等待Sinks
 func (s *SourceImpl) writeHeader() {
-	avformat.Assert(!s.completed)
+	utils.Assert(!s.completed)
 	s.probeTimer.Stop()
 	s.completed = true
 
@@ -212,7 +234,14 @@ func (s *SourceImpl) OnDeMuxStreamDone() {
 }
 
 func (s *SourceImpl) OnDeMuxPacket(index int, packet utils.AVPacket) {
+	if AppConfig.GOPCache > 0 {
+		buffer := s.buffers[packet.Index()]
+		buffer.AddPacket(packet, packet.KeyFrame(), packet.Dts())
+	}
 
+	for _, stream := range s.transStreams {
+		stream.Input(packet)
+	}
 }
 
 func (s *SourceImpl) OnDeMuxDone() {

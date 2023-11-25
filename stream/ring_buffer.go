@@ -14,6 +14,8 @@ type RingBuffer interface {
 	Tail() interface{}
 
 	Size() int
+
+	All() ([]interface{}, []interface{})
 }
 
 func NewRingBuffer(capacity int) RingBuffer {
@@ -74,4 +76,12 @@ func (r *ringBuffer) Tail() interface{} {
 
 func (r *ringBuffer) Size() int {
 	return r.size
+}
+
+func (r *ringBuffer) All() ([]interface{}, []interface{}) {
+	if r.head < r.tail {
+		return r.data[r.head:r.tail], nil
+	} else {
+		return r.data[r.head:], r.data[:r.tail]
+	}
 }

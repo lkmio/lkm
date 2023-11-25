@@ -1,8 +1,8 @@
 package rtmp
 
 import (
-	"github.com/yangjiechina/avformat"
 	"github.com/yangjiechina/avformat/transport"
+	"github.com/yangjiechina/avformat/utils"
 	"net"
 )
 
@@ -17,7 +17,7 @@ type serverImpl struct {
 }
 
 func (s *serverImpl) Start(addr net.Addr) error {
-	avformat.Assert(s.tcp == nil)
+	utils.Assert(s.tcp == nil)
 
 	server := &transport.TCPServer{}
 	server.SetHandler(s)
@@ -37,7 +37,7 @@ func (s *serverImpl) Close() {
 
 func (s *serverImpl) OnConnected(conn net.Conn) {
 	t := conn.(*transport.Conn)
-	t.Data = NewSession()
+	t.Data = NewSession(conn)
 }
 
 func (s *serverImpl) OnPacket(conn net.Conn, data []byte) {

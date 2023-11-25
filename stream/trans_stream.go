@@ -30,14 +30,14 @@ func init() {
 // 请确保ids根据值升序排序传参
 /*func GenerateTransStreamId(protocol Protocol, ids ...utils.AVCodecID) TransStreamId {
 	len_ := len(ids)
-	avformat.Assert(len_ > 0 && len_ < 8)
+	utils.Assert(len_ > 0 && len_ < 8)
 
 	var streamId uint64
 	streamId = uint64(protocol) << 56
 
 	for i, id := range ids {
 		bId, ok := narrowCodecIds[int(id)]
-		avformat.Assert(ok)
+		utils.Assert(ok)
 
 		streamId |= uint64(bId) << (48 - i*8)
 	}
@@ -47,14 +47,14 @@ func init() {
 
 func GenerateTransStreamId(protocol Protocol, ids ...utils.AVStream) TransStreamId {
 	len_ := len(ids)
-	avformat.Assert(len_ > 0 && len_ < 8)
+	utils.Assert(len_ > 0 && len_ < 8)
 
 	var streamId uint64
 	streamId = uint64(protocol) << 56
 
 	for i, id := range ids {
 		bId, ok := narrowCodecIds[int(id.CodecId())]
-		avformat.Assert(ok)
+		utils.Assert(ok)
 
 		streamId |= uint64(bId) << (48 - i*8)
 	}
@@ -65,9 +65,11 @@ func GenerateTransStreamId(protocol Protocol, ids ...utils.AVStream) TransStream
 var TransStreamFactory func(protocol Protocol, streams []utils.AVStream) ITransStream
 
 type ITransStream interface {
+	Input(packet utils.AVPacket)
+
 	AddTrack(stream utils.AVStream)
 
-	WriteHeader()
+	WriteHeader() error
 
 	AddSink(sink ISink)
 
@@ -77,21 +79,27 @@ type ITransStream interface {
 }
 
 type TransStreamImpl struct {
-	sinks  map[SinkId]ISink
-	muxer  avformat.Muxer
-	tracks []utils.AVStream
+	Sinks       map[SinkId]ISink
+	muxer       avformat.Muxer
+	Tracks      []utils.AVStream
+	transBuffer MemoryPool //每个TransStream也缓存封装后的流
+	Completed   bool
+}
+
+func (t *TransStreamImpl) Input(packet utils.AVPacket) {
+
 }
 
 func (t *TransStreamImpl) AddTrack(stream utils.AVStream) {
-	t.tracks = append(t.tracks, stream)
+	t.Tracks = append(t.Tracks, stream)
 }
 
 func (t *TransStreamImpl) AddSink(sink ISink) {
-	t.sinks[sink.Id()] = sink
+	t.Sinks[sink.Id()] = sink
 }
 
 func (t *TransStreamImpl) RemoveSink(id SinkId) {
-	delete(t.sinks, id)
+	delete(t.Sinks, id)
 }
 
 func (t *TransStreamImpl) AllSink() []ISink {

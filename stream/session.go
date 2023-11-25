@@ -1,19 +1,19 @@
 package stream
 
 import (
-	"github.com/yangjiechina/avformat"
+	"github.com/yangjiechina/avformat/utils"
 	"net/http"
 )
 
 // Session 封装推拉流Session 统一管理，统一 hook回调
 type Session interface {
-	OnPublish(source ISource, pra map[string]interface{}, success func(), failure func(state avformat.HookState))
+	OnPublish(source ISource, pra map[string]interface{}, success func(), failure func(state utils.HookState))
 
 	OnPublishDone()
 
-	OnPlay(sink ISink, pra map[string]interface{}, success func(), failure func(state avformat.HookState))
+	OnPlay(sink ISink, pra map[string]interface{}, success func(), failure func(state utils.HookState))
 
-	OnPlayDone(pra map[string]interface{}, success func(), failure func(state avformat.HookState))
+	OnPlayDone(pra map[string]interface{}, success func(), failure func(state utils.HookState))
 }
 
 type SessionImpl struct {
@@ -30,19 +30,19 @@ func (s *SessionImpl) AddInfoParams(data map[string]interface{}) {
 	data["remoteAddr"] = s.remoteAddr
 }
 
-func (s *SessionImpl) OnPublish(source_ ISource, pra map[string]interface{}, success func(), failure func(state avformat.HookState)) {
+func (s *SessionImpl) OnPublish(source_ ISource, pra map[string]interface{}, success func(), failure func(state utils.HookState)) {
 	//streamId 已经被占用
 	source := SourceManager.Find(s.stream)
 	if source != nil {
-		failure(avformat.HookStateOccupy)
+		failure(utils.HookStateOccupy)
 		return
 	}
 
 	if !AppConfig.Hook.EnableOnPublish() {
-		if err := SourceManager.Add(source_); err != nil {
+		if err := SourceManager.Add(source_); err == nil {
 			success()
 		} else {
-			failure(avformat.HookStateOccupy)
+			failure(utils.HookStateOccupy)
 		}
 
 		return
@@ -54,18 +54,18 @@ func (s *SessionImpl) OnPublish(source_ ISource, pra map[string]interface{}, suc
 
 	s.AddInfoParams(pra)
 	err := s.DoPublish(pra, func(response *http.Response) {
-		if err := SourceManager.Add(source_); err != nil {
+		if err := SourceManager.Add(source_); err == nil {
 			success()
 		} else {
-			failure(avformat.HookStateOccupy)
+			failure(utils.HookStateOccupy)
 		}
 	}, func(response *http.Response, err error) {
-		failure(avformat.HookStateFailure)
+		failure(utils.HookStateFailure)
 	})
 
 	//hook地址连接失败
 	if err != nil {
-		failure(avformat.HookStateFailure)
+		failure(utils.HookStateFailure)
 		return
 	}
 }
@@ -74,7 +74,7 @@ func (s *SessionImpl) OnPublishDone() {
 
 }
 
-func (s *SessionImpl) OnPlay(sink ISink, pra map[string]interface{}, success func(), failure func(state avformat.HookState)) {
+func (s *SessionImpl) OnPlay(sink ISink, pra map[string]interface{}, success func(), failure func(state utils.HookState)) {
 	f := func() {
 		source := SourceManager.Find(s.stream)
 		if source == nil {
@@ -99,15 +99,15 @@ func (s *SessionImpl) OnPlay(sink ISink, pra map[string]interface{}, success fun
 		f()
 		success()
 	}, func(response *http.Response, err error) {
-		failure(avformat.HookStateFailure)
+		failure(utils.HookStateFailure)
 	})
 
 	if err != nil {
-		failure(avformat.HookStateFailure)
+		failure(utils.HookStateFailure)
 		return
 	}
 }
 
-func (s *SessionImpl) OnPlayDone(pra map[string]interface{}, success func(), failure func(state avformat.HookState)) {
+func (s *SessionImpl) OnPlayDone(pra map[string]interface{}, success func(), failure func(state utils.HookState)) {
 
 }

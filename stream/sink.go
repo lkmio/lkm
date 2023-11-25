@@ -1,15 +1,16 @@
 package stream
 
-import "github.com/yangjiechina/avformat/utils"
+import (
+	"github.com/yangjiechina/avformat/utils"
+	"net"
+)
 
-type SinkId string
+type SinkId interface{}
 
 type ISink interface {
 	Id() SinkId
 
-	Input(data []byte)
-
-	Send(buffer utils.ByteBuffer)
+	Input(data []byte) error
 
 	SourceId() string
 
@@ -33,6 +34,26 @@ type ISink interface {
 	Close()
 }
 
+// GenerateSinkId 根据Conn生成SinkId IPV4使用一个uint64, IPV6使用String
+func GenerateSinkId(conn net.Conn) SinkId {
+	network := conn.RemoteAddr().Network()
+	if "tcp" == network {
+		id := uint64(utils.BytesToInt(conn.RemoteAddr().(*net.TCPAddr).IP.To4()))
+		id <<= 32
+		id |= uint64(conn.RemoteAddr().(*net.TCPAddr).Port << 16)
+
+		return id
+	} else if "udp" == network {
+		id := uint64(utils.BytesToInt(conn.RemoteAddr().(*net.UDPAddr).IP.To4()))
+		id <<= 32
+		id |= uint64(conn.RemoteAddr().(*net.UDPAddr).Port << 16)
+
+		return id
+	}
+
+	return conn.RemoteAddr().String()
+}
+
 func AddSinkToWaitingQueue(streamId string, sink ISink) {
 
 }
@@ -46,35 +67,37 @@ func PopWaitingSinks(streamId string) []ISink {
 }
 
 type SinkImpl struct {
-	id          string
-	protocol    Protocol
+	Id_         SinkId
+	sourceId    string
+	Protocol_   Protocol
 	enableVideo bool
 
-	desiredAudioCodecId utils.AVCodecID
-	desiredVideoCodecId utils.AVCodecID
+	DesiredAudioCodecId_ utils.AVCodecID
+	DesiredVideoCodecId_ utils.AVCodecID
+
+	Conn net.Conn
 }
 
-func (s *SinkImpl) Id() string {
-	return s.id
+func (s *SinkImpl) Id() SinkId {
+	return s.Id_
 }
 
-func (s *SinkImpl) Input(data []byte) {
-	//TODO implement me
-	panic("implement me")
-}
+func (s *SinkImpl) Input(data []byte) error {
+	if s.Conn != nil {
+		_, err := s.Conn.Write(data)
 
-func (s *SinkImpl) Send(buffer utils.ByteBuffer) {
-	//TODO implement me
-	panic("implement me")
+		return err
+	}
+
+	return nil
 }
 
 func (s *SinkImpl) SourceId() string {
-	//TODO implement me
-	panic("implement me")
+	return s.sourceId
 }
 
 func (s *SinkImpl) Protocol() Protocol {
-	return s.protocol
+	return s.Protocol_
 }
 
 func (s *SinkImpl) State() int {
@@ -95,7 +118,14 @@ func (s *SinkImpl) SetEnableVideo(enable bool) {
 	s.enableVideo = enable
 }
 
+func (s *SinkImpl) DesiredAudioCodecId() utils.AVCodecID {
+	return s.DesiredAudioCodecId_
+}
+
+func (s *SinkImpl) DesiredVideoCodecId() utils.AVCodecID {
+	return s.DesiredVideoCodecId_
+}
+
 func (s *SinkImpl) Close() {
-	//TODO implement me
-	panic("implement me")
+
 }
