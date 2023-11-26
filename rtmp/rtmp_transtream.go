@@ -99,8 +99,8 @@ func (t *TransStream) AddSink(sink stream.ISink) {
 }
 
 func (t *TransStream) onDiscardPacket(pkt interface{}) {
-	bytes := pkt.([]byte)
-	t.memoryPool.FreeHead(len(bytes))
+	//bytes := pkt.([]byte)
+	t.memoryPool.FreeHead()
 }
 
 func (t *TransStream) WriteHeader() error {

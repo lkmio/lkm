@@ -11,15 +11,13 @@ type Publisher struct {
 	deMuxer         libflv.DeMuxer
 	audioMemoryPool stream.MemoryPool
 	videoMemoryPool stream.MemoryPool
-	audioPacket     []byte
-	videoPacket     []byte
 
 	audioUnmark bool
 	videoUnmark bool
 }
 
 func NewPublisher(sourceId string) *Publisher {
-	publisher := &Publisher{SourceImpl: stream.SourceImpl{Id_: sourceId}}
+	publisher := &Publisher{SourceImpl: stream.SourceImpl{Id_: sourceId}, audioUnmark: false, videoUnmark: false}
 	publisher.deMuxer = libflv.DeMuxer{}
 	//设置回调，从flv解析出来的Stream和AVPacket都将统一回调到stream.SourceImpl
 	publisher.deMuxer.SetHandler(publisher)
@@ -36,15 +34,17 @@ func NewPublisher(sourceId string) *Publisher {
 }
 
 func (p *Publisher) OnDeMuxStream(stream_ utils.AVStream) {
+	//AVStream的Data单独拷贝出来
+	//释放掉内存池中最新分配的内存
 	tmp := stream_.Extra()
 	bytes := make([]byte, len(tmp))
 	copy(bytes, tmp)
 	stream_.SetExtraData(bytes)
 
 	if utils.AVMediaTypeAudio == stream_.Type() {
-		p.audioMemoryPool.FreeTail(len(p.audioPacket))
+		p.audioMemoryPool.FreeTail()
 	} else if utils.AVMediaTypeVideo == stream_.Type() {
-		p.videoMemoryPool.FreeTail(len(p.videoPacket))
+		p.videoMemoryPool.FreeTail()
 	}
 
 	p.SourceImpl.OnDeMuxStream(stream_)
@@ -62,9 +62,9 @@ func (p *Publisher) OnDeMuxPacket(index int, packet utils.AVPacket) {
 	}
 
 	if utils.AVMediaTypeAudio == packet.MediaType() {
-		p.audioMemoryPool.FreeHead(len(packet.Data()))
+		p.audioMemoryPool.FreeHead()
 	} else if utils.AVMediaTypeVideo == packet.MediaType() {
-		p.videoMemoryPool.FreeHead(len(packet.Data()))
+		p.videoMemoryPool.FreeHead()
 	}
 }
 
@@ -79,7 +79,6 @@ func (p *Publisher) OnVideo(data []byte, ts uint32) {
 		p.videoUnmark = false
 	}
 
-	p.videoPacket = data
 	_ = p.deMuxer.InputVideo(data, ts)
 }
 
@@ -89,7 +88,6 @@ func (p *Publisher) OnAudio(data []byte, ts uint32) {
 		p.audioUnmark = false
 	}
 
-	p.audioPacket = data
 	_ = p.deMuxer.InputAudio(data, ts)
 }
 
@@ -97,7 +95,7 @@ func (p *Publisher) OnAudio(data []byte, ts uint32) {
 func (p *Publisher) OnPartPacket(index int, data []byte, first bool) {
 	//audio
 	if index == 0 {
-		if p.audioUnmark {
+		if !p.audioUnmark {
 			p.audioMemoryPool.Mark()
 			p.audioUnmark = true
 		}
@@ -105,7 +103,7 @@ func (p *Publisher) OnPartPacket(index int, data []byte, first bool) {
 		p.audioMemoryPool.Write(data)
 		//video
 	} else if index == 1 {
-		if p.videoUnmark {
+		if !p.videoUnmark {
 			p.videoMemoryPool.Mark()
 			p.videoUnmark = true
 		}

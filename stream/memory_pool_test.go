@@ -2,7 +2,9 @@ package stream
 
 import (
 	"encoding/hex"
+	"github.com/yangjiechina/avformat/utils"
 	"testing"
+	"unsafe"
 )
 
 func TestMemoryPool(t *testing.T) {
@@ -12,14 +14,19 @@ func TestMemoryPool(t *testing.T) {
 	}
 
 	pool := NewMemoryPool(5)
+	last := uintptr(0)
 	for i := 0; i < 10; i++ {
 		pool.Mark()
 		pool.Write(bytes)
 		fetch := pool.Fetch()
+		addr := *(*uintptr)(unsafe.Pointer(&fetch))
+		if last != 0 {
+			utils.Assert(last == addr)
+		}
+		last = addr
+
 		println(hex.Dump(fetch))
 
-		if i%2 == 0 {
-			pool.FreeHead(len(fetch))
-		}
+		pool.FreeTail()
 	}
 }

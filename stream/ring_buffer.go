@@ -1,5 +1,7 @@
 package stream
 
+import "github.com/yangjiechina/avformat/utils"
+
 type RingBuffer interface {
 	IsEmpty() bool
 
@@ -19,6 +21,7 @@ type RingBuffer interface {
 }
 
 func NewRingBuffer(capacity int) RingBuffer {
+	utils.Assert(capacity > 0)
 	r := &ringBuffer{
 		data: make([]interface{}, capacity),
 		head: 0,
@@ -71,7 +74,7 @@ func (r *ringBuffer) Head() interface{} {
 }
 
 func (r *ringBuffer) Tail() interface{} {
-	return r.data[r.tail]
+	return r.data[utils.MaxInt(0, r.tail-1)]
 }
 
 func (r *ringBuffer) Size() int {
@@ -80,8 +83,8 @@ func (r *ringBuffer) Size() int {
 
 func (r *ringBuffer) All() ([]interface{}, []interface{}) {
 	if r.head < r.tail {
-		return r.data[r.head:r.tail], nil
-	} else {
 		return r.data[r.head:], r.data[:r.tail]
+	} else {
+		return r.data[r.head:], nil
 	}
 }
