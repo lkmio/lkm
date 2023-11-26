@@ -18,21 +18,21 @@ type Session interface {
 
 type SessionImpl struct {
 	hookImpl
-	stream     string //stream id
-	protocol   string //推拉流协议
-	remoteAddr string //peer地址
+	Stream     string //stream id
+	Protocol   string //推拉流协议
+	RemoteAddr string //peer地址
 }
 
 // AddInfoParams 为每个需要通知的时间添加必要的信息
 func (s *SessionImpl) AddInfoParams(data map[string]interface{}) {
-	data["stream"] = s.stream
-	data["protocol"] = s.protocol
-	data["remoteAddr"] = s.remoteAddr
+	data["stream"] = s.Stream
+	data["protocol"] = s.Protocol
+	data["remoteAddr"] = s.RemoteAddr
 }
 
 func (s *SessionImpl) OnPublish(source_ ISource, pra map[string]interface{}, success func(), failure func(state utils.HookState)) {
 	//streamId 已经被占用
-	source := SourceManager.Find(s.stream)
+	source := SourceManager.Find(s.Stream)
 	if source != nil {
 		failure(utils.HookStateOccupy)
 		return
@@ -76,11 +76,11 @@ func (s *SessionImpl) OnPublishDone() {
 
 func (s *SessionImpl) OnPlay(sink ISink, pra map[string]interface{}, success func(), failure func(state utils.HookState)) {
 	f := func() {
-		source := SourceManager.Find(s.stream)
+		source := SourceManager.Find(s.Stream)
 		if source == nil {
-			AddSinkToWaitingQueue(s.stream, nil)
+			AddSinkToWaitingQueue(s.Stream, sink)
 		} else {
-			source.AddSink(nil)
+			source.AddSink(sink)
 		}
 	}
 

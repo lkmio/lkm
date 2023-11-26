@@ -23,6 +23,8 @@ const (
 	ProtocolRtsp = Protocol(3)
 	ProtocolHls  = Protocol(4)
 	ProtocolRtc  = Protocol(5)
+
+	ProtocolRtmpStr = "rtmp"
 )
 
 // SessionState 推拉流Session状态
@@ -173,10 +175,13 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 		index++
 	}
 
-	transStreamId := GenerateTransStreamId(sink.Protocol(), streams[:]...)
+	transStreamId := GenerateTransStreamId(sink.Protocol(), streams[:index]...)
 	transStream, ok := s.transStreams[transStreamId]
-	if ok {
-		transStream = TransStreamFactory(sink.Protocol(), streams[:])
+	if !ok {
+		transStream = TransStreamFactory(sink.Protocol(), streams[:index])
+		if s.transStreams == nil {
+			s.transStreams = make(map[TransStreamId]ITransStream, 10)
+		}
 		s.transStreams[transStreamId] = transStream
 
 		for i := 0; i < index; i++ {
@@ -206,9 +211,9 @@ func (s *SourceImpl) OnDeMuxStream(stream utils.AVStream) {
 
 	s.originStreams.Add(stream)
 	s.allStreams.Add(stream)
-	if len(s.originStreams.All()) == 1 {
-		s.probeTimer = time.AfterFunc(time.Duration(AppConfig.ProbeTimeout)*time.Millisecond, s.writeHeader)
-	}
+	//if len(s.originStreams.All()) == 1 {
+	//	s.probeTimer = time.AfterFunc(time.Duration(AppConfig.ProbeTimeout)*time.Millisecond, s.writeHeader)
+	//}
 
 	//为每个Stream创建对于的Buffer
 	if AppConfig.GOPCache > 0 {
@@ -220,7 +225,9 @@ func (s *SourceImpl) OnDeMuxStream(stream utils.AVStream) {
 // 从DeMuxer解析完Stream后, 处理等待Sinks
 func (s *SourceImpl) writeHeader() {
 	utils.Assert(!s.completed)
-	s.probeTimer.Stop()
+	if s.probeTimer != nil {
+		s.probeTimer.Stop()
+	}
 	s.completed = true
 
 	sinks := PopWaitingSinks(s.Id_)

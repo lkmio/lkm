@@ -1,9 +1,23 @@
 package rtmp
 
 import (
+	"github.com/yangjiechina/avformat/utils"
+	"github.com/yangjiechina/live-server/stream"
 	"net"
 	"testing"
 )
+
+func CreateTransStream(protocol stream.Protocol, streams []utils.AVStream) stream.ITransStream {
+	if stream.ProtocolRtmp == protocol {
+		return &TransStream{}
+	}
+
+	return nil
+}
+
+func init() {
+	stream.TransStreamFactory = CreateTransStream
+}
 
 func TestServer(t *testing.T) {
 	impl := serverImpl{}

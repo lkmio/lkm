@@ -16,6 +16,9 @@ type Session interface {
 
 func NewSession(conn net.Conn) Session {
 	impl := &sessionImpl{}
+	impl.Protocol = stream.ProtocolRtmpStr
+	impl.RemoteAddr = conn.RemoteAddr().String()
+
 	stack := librtmp.NewStack(impl)
 	impl.stack = stack
 	impl.conn = conn
@@ -29,13 +32,11 @@ type sessionImpl struct {
 	//publisher/sink
 	handle interface{}
 	conn   net.Conn
-
-	streamId string
 }
 
 func (s *sessionImpl) OnPublish(app, stream_ string, response chan utils.HookState) {
-	s.streamId = app + "/" + stream_
-	publisher := NewPublisher(s.streamId)
+	s.SessionImpl.Stream = app + "/" + stream_
+	publisher := NewPublisher(s.SessionImpl.Stream)
 	s.stack.SetOnPublishHandler(publisher)
 	s.stack.SetOnTransDeMuxerHandler(publisher)
 	//stream.SessionImpl统一处理, Source是否已经存在, Hook回调....
@@ -48,7 +49,7 @@ func (s *sessionImpl) OnPublish(app, stream_ string, response chan utils.HookSta
 }
 
 func (s *sessionImpl) OnPlay(app, stream_ string, response chan utils.HookState) {
-	s.streamId = app + "/" + stream_
+	s.SessionImpl.Stream = app + "/" + stream_
 
 	sink := NewSink(stream.GenerateSinkId(s.conn), s.conn)
 	s.SessionImpl.OnPlay(sink, nil, func() {

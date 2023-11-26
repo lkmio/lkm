@@ -54,8 +54,14 @@ func GenerateSinkId(conn net.Conn) SinkId {
 	return conn.RemoteAddr().String()
 }
 
-func AddSinkToWaitingQueue(streamId string, sink ISink) {
+var waitingSinks map[string]map[SinkId]ISink
 
+func init() {
+	waitingSinks = make(map[string]map[SinkId]ISink, 1024)
+}
+
+func AddSinkToWaitingQueue(streamId string, sink ISink) {
+	waitingSinks[streamId][sink.Id()] = sink
 }
 
 func RemoveSinkFromWaitingQueue(streamId, sinkId SinkId) ISink {
@@ -63,14 +69,24 @@ func RemoveSinkFromWaitingQueue(streamId, sinkId SinkId) ISink {
 }
 
 func PopWaitingSinks(streamId string) []ISink {
-	return nil
+	source, ok := waitingSinks[streamId]
+	if !ok {
+		return nil
+	}
+
+	sinks := make([]ISink, len(source))
+	var index = 0
+	for _, sink := range source {
+		sinks[index] = sink
+	}
+	return sinks
 }
 
 type SinkImpl struct {
-	Id_         SinkId
-	sourceId    string
-	Protocol_   Protocol
-	enableVideo bool
+	Id_          SinkId
+	sourceId     string
+	Protocol_    Protocol
+	disableVideo bool
 
 	DesiredAudioCodecId_ utils.AVCodecID
 	DesiredVideoCodecId_ utils.AVCodecID
@@ -111,11 +127,11 @@ func (s *SinkImpl) SetState(state int) {
 }
 
 func (s *SinkImpl) EnableVideo() bool {
-	return s.enableVideo
+	return !s.disableVideo
 }
 
 func (s *SinkImpl) SetEnableVideo(enable bool) {
-	s.enableVideo = enable
+	s.disableVideo = !enable
 }
 
 func (s *SinkImpl) DesiredAudioCodecId() utils.AVCodecID {
