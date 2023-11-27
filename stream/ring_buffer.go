@@ -82,6 +82,10 @@ func (r *ringBuffer) Size() int {
 }
 
 func (r *ringBuffer) All() ([]interface{}, []interface{}) {
+	if r.size == 0 {
+		return nil, nil
+	}
+
 	if r.head < r.tail {
 		return r.data[r.head:], r.data[:r.tail]
 	} else {

@@ -1,6 +1,7 @@
 package rtmp
 
 import (
+	"github.com/yangjiechina/avformat/librtmp"
 	"github.com/yangjiechina/avformat/utils"
 	"github.com/yangjiechina/live-server/stream"
 	"net"
@@ -9,7 +10,7 @@ import (
 
 func CreateTransStream(protocol stream.Protocol, streams []utils.AVStream) stream.ITransStream {
 	if stream.ProtocolRtmp == protocol {
-		return &TransStream{}
+		return NewTransStream(librtmp.ChunkSize)
 	}
 
 	return nil
