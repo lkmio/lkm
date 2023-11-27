@@ -1,5 +1,7 @@
 package stream
 
+import "github.com/yangjiechina/avformat/utils"
+
 // StreamBuffer GOP缓存
 type StreamBuffer interface {
 
@@ -9,9 +11,13 @@ type StreamBuffer interface {
 	// SetDiscardHandler 设置丢弃帧时的回调
 	SetDiscardHandler(handler func(packet interface{}))
 
-	Peek(handler func(packet interface{}))
+	PeekAll(handler func(packet interface{}))
+
+	Peek(index int) interface{}
 
 	Duration() int64
+
+	Size() int
 }
 
 type streamBuffer struct {
@@ -78,7 +84,18 @@ func (s *streamBuffer) SetDiscardHandler(handler func(packet interface{})) {
 	s.discardHandler = handler
 }
 
-func (s *streamBuffer) Peek(handler func(packet interface{})) {
+func (s *streamBuffer) Peek(index int) interface{} {
+	utils.Assert(index < s.buffer.Size())
+	head, tail := s.buffer.All()
+
+	if index < len(head) {
+		return head[index]
+	} else {
+		return tail[index-len(head)]
+	}
+}
+
+func (s *streamBuffer) PeekAll(handler func(packet interface{})) {
 	head, tail := s.buffer.All()
 
 	if head == nil {
@@ -105,4 +122,8 @@ func (s *streamBuffer) Duration() int64 {
 	}
 
 	return tail.(element).ts - head.(element).ts
+}
+
+func (s *streamBuffer) Size() int {
+	return s.buffer.Size()
 }

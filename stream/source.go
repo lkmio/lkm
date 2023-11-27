@@ -166,6 +166,8 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 
 	var streams [5]utils.AVStream
 	var index int
+	bufferCount := -1
+
 	for _, stream := range s.originStreams.All() {
 		if disableVideo && stream.Type() == utils.AVMediaTypeVideo {
 			continue
@@ -173,11 +175,20 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 
 		streams[index] = stream
 		index++
+
+		//从缓存的Stream中，挑选出最小的缓存数量，交叉发送.
+		count := s.buffers[stream.Index()].Size()
+		if bufferCount == -1 {
+			bufferCount = count
+		} else {
+			bufferCount = utils.MinInt(bufferCount, count)
+		}
 	}
 
 	transStreamId := GenerateTransStreamId(sink.Protocol(), streams[:index]...)
 	transStream, ok := s.transStreams[transStreamId]
 	if !ok {
+		//创建一个新的传输流
 		transStream = TransStreamFactory(sink.Protocol(), streams[:index])
 		if s.transStreams == nil {
 			s.transStreams = make(map[TransStreamId]ITransStream, 10)
@@ -192,6 +203,28 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 	}
 
 	transStream.AddSink(sink)
+
+	if AppConfig.GOPCache > 0 && !ok {
+		//先交叉发送
+		for i := 0; i < bufferCount; i++ {
+			for _, stream := range streams {
+				buffer := s.buffers[stream.Index()]
+				packet := buffer.Peek(i).(utils.AVPacket)
+				transStream.Input(packet)
+			}
+		}
+
+		//发送超过最低缓存数的缓存包
+		for _, stream := range streams {
+			buffer := s.buffers[stream.Index()]
+
+			for i := bufferCount; i > buffer.Size(); i++ {
+				packet := buffer.Peek(i).(utils.AVPacket)
+				transStream.Input(packet)
+			}
+		}
+	}
+
 	return false
 }
 
@@ -217,7 +250,7 @@ func (s *SourceImpl) OnDeMuxStream(stream utils.AVStream) {
 
 	//为每个Stream创建对于的Buffer
 	if AppConfig.GOPCache > 0 {
-		buffer := NewStreamBuffer(int64(AppConfig.GOPCache))
+		buffer := NewStreamBuffer(int64(AppConfig.GOPCache * 1000))
 		s.buffers = append(s.buffers, buffer)
 	}
 }

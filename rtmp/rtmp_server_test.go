@@ -21,6 +21,7 @@ func init() {
 }
 
 func TestServer(t *testing.T) {
+	stream.AppConfig.GOPCache = 2
 	impl := serverImpl{}
 	addr := "0.0.0.0:1935"
 	tcpAddr, err := net.ResolveTCPAddr("tcp", addr)

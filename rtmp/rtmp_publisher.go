@@ -18,7 +18,7 @@ type Publisher struct {
 
 func NewPublisher(sourceId string) *Publisher {
 	publisher := &Publisher{SourceImpl: stream.SourceImpl{Id_: sourceId}, audioUnmark: false, videoUnmark: false}
-	publisher.deMuxer = libflv.DeMuxer{}
+	publisher.deMuxer = libflv.NewDeMuxer()
 	//设置回调，从flv解析出来的Stream和AVPacket都将统一回调到stream.SourceImpl
 	publisher.deMuxer.SetHandler(publisher)
 

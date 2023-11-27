@@ -36,9 +36,6 @@ func (t *TransStream) Input(packet utils.AVPacket) {
 		chunk = &t.audioChunk
 		payloadSize += 2 + length
 	} else if utils.AVMediaTypeVideo == packet.MediaType() {
-		if packet.KeyFrame() {
-			println("")
-		}
 		videoPkt = true
 		data = packet.AVCCPacketData()
 		length = len(data)
@@ -93,7 +90,10 @@ func (t *TransStream) Input(packet utils.AVPacket) {
 	}
 
 	rtmpData := t.memoryPool.Fetch()[:n]
-	ret := t.transBuffer.AddPacket(rtmpData, packet.KeyFrame() && videoPkt, packet.Dts())
+	ret := true
+	if stream.AppConfig.GOPCache > 0 {
+		ret = t.transBuffer.AddPacket(rtmpData, packet.KeyFrame() && videoPkt, packet.Dts())
+	}
 
 	if ret {
 		//发送给sink
@@ -103,7 +103,9 @@ func (t *TransStream) Input(packet utils.AVPacket) {
 		}
 	}
 
-	t.memoryPool.FreeTail()
+	if stream.AppConfig.GOPCache < 1 {
+		t.memoryPool.FreeTail()
+	}
 }
 
 func (t *TransStream) AddSink(sink stream.ISink) {
@@ -112,9 +114,11 @@ func (t *TransStream) AddSink(sink stream.ISink) {
 	utils.Assert(t.headerSize > 0)
 	sink.Input(t.header[:t.headerSize])
 
-	t.transBuffer.Peek(func(packet interface{}) {
-		sink.Input(packet.([]byte))
-	})
+	if stream.AppConfig.GOPCache > 0 {
+		t.transBuffer.PeekAll(func(packet interface{}) {
+			sink.Input(packet.([]byte))
+		})
+	}
 }
 
 func (t *TransStream) onDiscardPacket(pkt interface{}) {
@@ -148,9 +152,11 @@ func (t *TransStream) WriteHeader() error {
 	t.TransStreamImpl.Completed = true
 	t.header = make([]byte, 1024)
 	t.muxer = libflv.NewMuxer(audioCodecId, videoCodecId, 0, 0, 0)
-	t.memoryPool = stream.NewMemoryPool(1024 * 1024 * 2)
-	t.transBuffer = stream.NewStreamBuffer(2000)
-	t.transBuffer.SetDiscardHandler(t.onDiscardPacket)
+	t.memoryPool = stream.NewMemoryPool(1024 * 1000 * (stream.AppConfig.GOPCache + 1))
+	if stream.AppConfig.GOPCache > 0 {
+		t.transBuffer = stream.NewStreamBuffer(int64(stream.AppConfig.GOPCache * 200))
+		t.transBuffer.SetDiscardHandler(t.onDiscardPacket)
+	}
 
 	var n int
 	if audioStream != nil {
