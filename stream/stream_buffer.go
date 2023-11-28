@@ -89,9 +89,9 @@ func (s *streamBuffer) Peek(index int) interface{} {
 	head, tail := s.buffer.All()
 
 	if index < len(head) {
-		return head[index]
+		return head[index].(element).pkt
 	} else {
-		return tail[index-len(head)]
+		return tail[index-len(head)].(element).pkt
 	}
 }
 

@@ -1,6 +1,8 @@
 package stream
 
-import "github.com/yangjiechina/avformat/utils"
+import (
+	"github.com/yangjiechina/avformat/utils"
+)
 
 type RingBuffer interface {
 	IsEmpty() bool
@@ -64,6 +66,7 @@ func (r *ringBuffer) Pop() interface{} {
 	}
 
 	element := r.data[r.head]
+	r.data[r.head] = nil
 	r.head = (r.head + 1) % cap(r.data)
 	r.size--
 	return element
@@ -86,7 +89,7 @@ func (r *ringBuffer) All() ([]interface{}, []interface{}) {
 		return nil, nil
 	}
 
-	if r.head < r.tail {
+	if r.head <= r.tail {
 		return r.data[r.head:], r.data[:r.tail]
 	} else {
 		return r.data[r.head:], nil

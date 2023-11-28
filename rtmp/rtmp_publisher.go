@@ -8,6 +8,7 @@ import (
 
 type Publisher struct {
 	stream.SourceImpl
+
 	deMuxer         libflv.DeMuxer
 	audioMemoryPool stream.MemoryPool
 	videoMemoryPool stream.MemoryPool
@@ -33,6 +34,15 @@ func NewPublisher(sourceId string) *Publisher {
 	return publisher
 }
 
+func (p *Publisher) OnDiscardPacket(pkt interface{}) {
+	packet := pkt.(utils.AVPacket)
+	if utils.AVMediaTypeAudio == packet.MediaType() {
+		p.audioMemoryPool.FreeHead()
+	} else if utils.AVMediaTypeVideo == packet.MediaType() {
+		p.videoMemoryPool.FreeHead()
+	}
+}
+
 func (p *Publisher) OnDeMuxStream(stream_ utils.AVStream) {
 	//AVStream的Data单独拷贝出来
 	//释放掉内存池中最新分配的内存
@@ -47,7 +57,10 @@ func (p *Publisher) OnDeMuxStream(stream_ utils.AVStream) {
 		p.videoMemoryPool.FreeTail()
 	}
 
-	p.SourceImpl.OnDeMuxStream(stream_)
+	if ret, buffer := p.SourceImpl.OnDeMuxStream(stream_); ret && buffer != nil {
+		buffer.SetDiscardHandler(p.OnDiscardPacket)
+	}
+
 }
 
 func (p *Publisher) OnDeMuxStreamDone() {

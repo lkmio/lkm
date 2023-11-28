@@ -207,7 +207,7 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 	if AppConfig.GOPCache > 0 && !ok {
 		//先交叉发送
 		for i := 0; i < bufferCount; i++ {
-			for _, stream := range streams {
+			for _, stream := range streams[:index] {
 				buffer := s.buffers[stream.Index()]
 				packet := buffer.Peek(i).(utils.AVPacket)
 				transStream.Input(packet)
@@ -215,7 +215,7 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 		}
 
 		//发送超过最低缓存数的缓存包
-		for _, stream := range streams {
+		for _, stream := range streams[:index] {
 			buffer := s.buffers[stream.Index()]
 
 			for i := bufferCount; i > buffer.Size(); i++ {
@@ -236,10 +236,10 @@ func (s *SourceImpl) Close() {
 
 }
 
-func (s *SourceImpl) OnDeMuxStream(stream utils.AVStream) {
+func (s *SourceImpl) OnDeMuxStream(stream utils.AVStream) (bool, StreamBuffer) {
 	if s.completed {
 		fmt.Printf("添加Stream失败 Source: %s已经WriteHeader", s.Id_)
-		return
+		return false, nil
 	}
 
 	s.originStreams.Add(stream)
@@ -252,7 +252,11 @@ func (s *SourceImpl) OnDeMuxStream(stream utils.AVStream) {
 	if AppConfig.GOPCache > 0 {
 		buffer := NewStreamBuffer(int64(AppConfig.GOPCache * 1000))
 		s.buffers = append(s.buffers, buffer)
+
+		return true, buffer
 	}
+
+	return true, nil
 }
 
 // 从DeMuxer解析完Stream后, 处理等待Sinks
