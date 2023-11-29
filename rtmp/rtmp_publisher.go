@@ -9,7 +9,6 @@ import (
 type Publisher struct {
 	stream.SourceImpl
 
-	deMuxer         libflv.DeMuxer
 	audioMemoryPool stream.MemoryPool
 	videoMemoryPool stream.MemoryPool
 
@@ -18,10 +17,11 @@ type Publisher struct {
 }
 
 func NewPublisher(sourceId string) *Publisher {
-	publisher := &Publisher{SourceImpl: stream.SourceImpl{Id_: sourceId}, audioUnmark: false, videoUnmark: false}
-	publisher.deMuxer = libflv.NewDeMuxer()
+	deMuxer := libflv.NewDeMuxer()
+	publisher := &Publisher{SourceImpl: stream.SourceImpl{Id_: sourceId, TransDeMuxer: nil}, audioUnmark: false, videoUnmark: false}
 	//设置回调，从flv解析出来的Stream和AVPacket都将统一回调到stream.SourceImpl
-	publisher.deMuxer.SetHandler(publisher)
+	deMuxer.SetHandler(publisher)
+	publisher.SourceImpl.SetState(stream.SessionStateTransferring)
 
 	//创建内存池
 	publisher.audioMemoryPool = stream.NewMemoryPool(48000 * (stream.AppConfig.GOPCache + 1))
@@ -92,7 +92,7 @@ func (p *Publisher) OnVideo(data []byte, ts uint32) {
 		p.videoUnmark = false
 	}
 
-	_ = p.deMuxer.InputVideo(data, ts)
+	//_ = p.SourceImpl.TransDeMuxer.(libflv.DeMuxer).InputVideo(data, ts)
 }
 
 func (p *Publisher) OnAudio(data []byte, ts uint32) {
@@ -101,7 +101,7 @@ func (p *Publisher) OnAudio(data []byte, ts uint32) {
 		p.audioUnmark = false
 	}
 
-	_ = p.deMuxer.InputAudio(data, ts)
+	//_ = p.SourceImpl.TransDeMuxer.(libflv.DeMuxer).InputAudio(data, ts)
 }
 
 // OnPartPacket 从rtmp解析过来的部分音视频包
