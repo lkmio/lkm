@@ -3,6 +3,7 @@ package stream
 import (
 	"github.com/yangjiechina/avformat/utils"
 	"net"
+	"sync/atomic"
 )
 
 type SinkId interface{}
@@ -14,11 +15,15 @@ type ISink interface {
 
 	SourceId() string
 
+	TransStreamId() TransStreamId
+
+	SetTransStreamId(id TransStreamId)
+
 	Protocol() Protocol
 
-	State() int
+	State() SessionState
 
-	SetState(state int)
+	SetState(state SessionState) bool
 
 	EnableVideo() bool
 
@@ -54,39 +59,17 @@ func GenerateSinkId(conn net.Conn) SinkId {
 	return conn.RemoteAddr().String()
 }
 
-var waitingSinks map[string]map[SinkId]ISink
-
-func init() {
-	waitingSinks = make(map[string]map[SinkId]ISink, 1024)
-}
-
-func AddSinkToWaitingQueue(streamId string, sink ISink) {
-	waitingSinks[streamId][sink.Id()] = sink
-}
-
-func RemoveSinkFromWaitingQueue(streamId, sinkId SinkId) ISink {
-	return nil
-}
-
-func PopWaitingSinks(streamId string) []ISink {
-	source, ok := waitingSinks[streamId]
-	if !ok {
-		return nil
-	}
-
-	sinks := make([]ISink, len(source))
-	var index = 0
-	for _, sink := range source {
-		sinks[index] = sink
-	}
-	return sinks
-}
-
 type SinkImpl struct {
-	Id_          SinkId
-	sourceId     string
-	Protocol_    Protocol
-	disableVideo bool
+	Id_            SinkId
+	SourceId_      string
+	Protocol_      Protocol
+	State_         SessionState
+	TransStreamId_ TransStreamId
+	disableVideo   bool
+	//Sink在请求拉流->Source推流->Sink断开整个阶段 是无锁线程安全
+	//如果Sink在等待队列-Sink断开，这个过程是非线程安全的
+	//SetState的时候，如果closed为true，返回false, 调用者自行删除sink
+	closed atomic.Bool
 
 	DesiredAudioCodecId_ utils.AVCodecID
 	DesiredVideoCodecId_ utils.AVCodecID
@@ -109,21 +92,42 @@ func (s *SinkImpl) Input(data []byte) error {
 }
 
 func (s *SinkImpl) SourceId() string {
-	return s.sourceId
+	return s.SourceId_
+}
+
+func (s *SinkImpl) TransStreamId() TransStreamId {
+	return s.TransStreamId_
+}
+
+func (s *SinkImpl) SetTransStreamId(id TransStreamId) {
+	s.TransStreamId_ = id
 }
 
 func (s *SinkImpl) Protocol() Protocol {
 	return s.Protocol_
 }
 
-func (s *SinkImpl) State() int {
-	//TODO implement me
-	panic("implement me")
+func (s *SinkImpl) State() SessionState {
+	return s.State_
 }
 
-func (s *SinkImpl) SetState(state int) {
-	//TODO implement me
-	panic("implement me")
+func (s *SinkImpl) SetState(state SessionState) bool {
+	load := s.closed.Load()
+	if load {
+		return false
+	}
+
+	if s.State_ < SessionStateClose {
+		s.State_ = state
+	}
+
+	//更改状态期间，被Close
+	//if s.closed.CompareAndSwap(false, false)
+	//{
+	//
+	//}
+
+	return !s.closed.Load()
 }
 
 func (s *SinkImpl) EnableVideo() bool {
@@ -143,5 +147,16 @@ func (s *SinkImpl) DesiredVideoCodecId() utils.AVCodecID {
 }
 
 func (s *SinkImpl) Close() {
-
+	//Source的TransStream中删除sink
+	if s.State_ == SessionStateTransferring {
+		source := SourceManager.Find(s.SourceId_)
+		source.AddEvent(SourceEventPlayDone, s)
+		s.State_ = SessionStateClose
+	} else if s.State_ == SessionStateWait {
+		//非线程安全
+		//从等待队列中删除sink
+		RemoveSinkFromWaitingQueue(s.SourceId_, s.Id_)
+		s.State_ = SessionStateClose
+		s.closed.Store(true)
+	}
 }

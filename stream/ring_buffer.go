@@ -89,9 +89,9 @@ func (r *ringBuffer) All() ([]interface{}, []interface{}) {
 		return nil, nil
 	}
 
-	if r.head <= r.tail {
+	if r.tail <= r.head {
 		return r.data[r.head:], r.data[:r.tail]
 	} else {
-		return r.data[r.head:], nil
+		return r.data[r.head:r.tail], nil
 	}
 }

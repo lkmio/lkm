@@ -6,6 +6,6 @@ import (
 	"net"
 )
 
-func NewSink(id stream.SinkId, conn net.Conn) stream.ISink {
-	return &stream.SinkImpl{Id_: id, Protocol_: stream.ProtocolRtmp, Conn: conn, DesiredAudioCodecId_: utils.AVCodecIdNONE, DesiredVideoCodecId_: utils.AVCodecIdNONE}
+func NewSink(id stream.SinkId, sourceId string, conn net.Conn) stream.ISink {
+	return &stream.SinkImpl{Id_: id, SourceId_: sourceId, State_: stream.SessionStateCreate, Protocol_: stream.ProtocolRtmp, Conn: conn, DesiredAudioCodecId_: utils.AVCodecIdNONE, DesiredVideoCodecId_: utils.AVCodecIdNONE}
 }

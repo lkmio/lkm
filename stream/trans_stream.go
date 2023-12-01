@@ -1,7 +1,7 @@
 package stream
 
 import (
-	"github.com/yangjiechina/avformat"
+	"github.com/yangjiechina/avformat/stream"
 	"github.com/yangjiechina/avformat/utils"
 )
 
@@ -73,14 +73,16 @@ type ITransStream interface {
 
 	AddSink(sink ISink)
 
-	RemoveSink(id SinkId)
+	RemoveSink(id SinkId) (ISink, bool)
+
+	PopAllSinks(handler func(sink ISink))
 
 	AllSink() []ISink
 }
 
 type TransStreamImpl struct {
 	Sinks       map[SinkId]ISink
-	muxer       avformat.Muxer
+	muxer       stream.Muxer
 	Tracks      []utils.AVStream
 	transBuffer MemoryPool //每个TransStream也缓存封装后的流
 	Completed   bool
@@ -98,8 +100,21 @@ func (t *TransStreamImpl) AddSink(sink ISink) {
 	t.Sinks[sink.Id()] = sink
 }
 
-func (t *TransStreamImpl) RemoveSink(id SinkId) {
-	delete(t.Sinks, id)
+func (t *TransStreamImpl) RemoveSink(id SinkId) (ISink, bool) {
+	sink, ok := t.Sinks[id]
+	if ok {
+		delete(t.Sinks, id)
+	}
+
+	return sink, ok
+}
+
+func (t *TransStreamImpl) PopAllSinks(handler func(sink ISink)) {
+	for _, sink := range t.Sinks {
+		handler(sink)
+	}
+
+	t.Sinks = nil
 }
 
 func (t *TransStreamImpl) AllSink() []ISink {

@@ -2,9 +2,10 @@ package stream
 
 import (
 	"fmt"
-	"github.com/yangjiechina/avformat"
+	"github.com/yangjiechina/avformat/stream"
 	"github.com/yangjiechina/avformat/utils"
 	"github.com/yangjiechina/live-server/transcode"
+	"sync"
 	"time"
 )
 
@@ -30,9 +31,9 @@ const (
 	ProtocolRtmpStr = "rtmp"
 
 	SourceEventPlay     = SourceEvent(1)
-	SourceEventPlayDone = SourceEvent(1)
-	SourceEventInput    = SourceEvent(1)
-	SourceEventClose    = SourceEvent(1)
+	SourceEventPlayDone = SourceEvent(2)
+	SourceEventInput    = SourceEvent(3)
+	SourceEventClose    = SourceEvent(4)
 )
 
 // SessionState 推拉流Session状态
@@ -44,7 +45,9 @@ const (
 	SessionStateHandshaking      = SessionState(2)
 	SessionStateHandshakeFailure = SessionState(3)
 	SessionStateHandshakeDone    = SessionState(4)
-	SessionStateTransferring     = SessionState(5)
+	SessionStateWait             = SessionState(5)
+	SessionStateTransferring     = SessionState(6)
+	SessionStateClose            = SessionState(7)
 )
 
 type ISource interface {
@@ -53,9 +56,6 @@ type ISource interface {
 
 	// Input 输入推流数据
 	Input(data []byte)
-
-	// CreateTranscoder 创建转码器
-	CreateTranscoder(src utils.AVStream, dst utils.AVStream) transcode.ITranscoder
 
 	// OriginStreams 返回推流的原始Streams
 	OriginStreams() []utils.AVStream
@@ -80,14 +80,16 @@ type ISource interface {
 	Close()
 }
 
-type CreateSource func(id string, type_ SourceType, handler avformat.OnDeMuxerHandler)
+type CreateSource func(id string, type_ SourceType, handler stream.OnDeMuxerHandler)
+
+var TranscoderFactory func(src utils.AVStream, dst utils.AVStream) transcode.ITranscoder
 
 type SourceImpl struct {
 	Id_   string
-	type_ SourceType
+	Type_ SourceType
 	state SessionState
 
-	TransDeMuxer     avformat.DeMuxer        //负责从推流协议中解析出AVStream和AVPacket
+	TransDeMuxer     stream.DeMuxer          //负责从推流协议中解析出AVStream和AVPacket
 	recordSink       ISink                   //每个Source唯一的一个录制流
 	audioTranscoders []transcode.ITranscoder //音频解码器
 	videoTranscoders []transcode.ITranscoder //视频解码器
@@ -95,7 +97,10 @@ type SourceImpl struct {
 	allStreams       StreamManager           //推流Streams+转码器获得的Streams
 	buffers          []StreamBuffer
 
+	Input_ func(data []byte) //解决无法多态传递给子类的问题
+
 	completed  bool
+	mutex      sync.Mutex //只用作AddStream期间
 	probeTimer *time.Timer
 
 	//所有的输出协议, 持有Sink
@@ -104,6 +109,7 @@ type SourceImpl struct {
 	//sink的拉流和断开拉流事件，都通过管道交给Source处理. 意味着Source内部解析流、封装流、传输流都可以做到无锁操作
 	//golang的管道是有锁的(https://github.com/golang/go/blob/d38f1d13fa413436d38d86fe86d6a146be44bb84/src/runtime/chan.go#L202), 后面使用cas队列传输事件, 并且可以做到一次读取多个事件
 	inputEvent            chan []byte
+	responseEvent         chan byte //解析完input的数据后，才能继续从网络io中读取流
 	closeEvent            chan byte
 	playingEventQueue     chan ISink
 	playingDoneEventQueue chan ISink
@@ -113,37 +119,35 @@ func (s *SourceImpl) Id() string {
 	return s.Id_
 }
 
-func (s *SourceImpl) Input(data []byte) {
-	if SessionStateTransferring == s.state {
-		s.inputEvent <- data
-	} else {
-		s.TransDeMuxer.Input(data, nil)
-	}
+func (s *SourceImpl) Init() {
+	//初始化事件接收缓冲区
+	s.SetState(SessionStateTransferring)
+	//收流和网络断开的chan都阻塞执行
+	s.inputEvent = make(chan []byte)
+	s.responseEvent = make(chan byte)
+	s.closeEvent = make(chan byte)
+	s.playingEventQueue = make(chan ISink, 128)
+	s.playingDoneEventQueue = make(chan ISink, 128)
 }
 
 func (s *SourceImpl) LoopEvent() {
 	for {
 		select {
 		case data := <-s.inputEvent:
-			s.TransDeMuxer.Input(data, nil)
+			s.Input_(data)
+			s.responseEvent <- 0
 			break
 		case sink := <-s.playingEventQueue:
 			s.AddSink(sink)
 			break
 		case sink := <-s.playingDoneEventQueue:
-			s.AddSink(sink)
+			s.RemoveSink(sink)
 			break
 		case _ = <-s.closeEvent:
 			s.Close()
 			return
 		}
 	}
-
-}
-
-func (s *SourceImpl) CreateTranscoder(src utils.AVStream, dst utils.AVStream) transcode.ITranscoder {
-	//TODO implement me
-	panic("implement me")
 }
 
 func (s *SourceImpl) OriginStreams() []utils.AVStream {
@@ -235,7 +239,14 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 		_ = transStream.WriteHeader()
 	}
 
+	sink.SetTransStreamId(transStreamId)
 	transStream.AddSink(sink)
+
+	state := sink.SetState(SessionStateTransferring)
+	if !state {
+		transStream.RemoveSink(sink.Id())
+		return false
+	}
 
 	if AppConfig.GOPCache > 0 && !ok {
 		//先交叉发送
@@ -262,18 +273,30 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 }
 
 func (s *SourceImpl) RemoveSink(sink ISink) bool {
-	return true
+	id := sink.TransStreamId()
+	if id > 0 {
+		transStream := s.transStreams[id]
+		//如果从传输流没能删除sink, 再从等待队列删除
+		_, b := transStream.RemoveSink(sink.Id())
+		if b {
+			return true
+		}
+	}
+
+	_, b := RemoveSinkFromWaitingQueue(sink.SourceId(), sink.Id())
+	return b
 }
 
 func (s *SourceImpl) AddEvent(event SourceEvent, data interface{}) {
 	if SourceEventInput == event {
-
+		s.inputEvent <- data.([]byte)
+		<-s.responseEvent
 	} else if SourceEventPlay == event {
-
+		s.playingEventQueue <- data.(ISink)
 	} else if SourceEventPlayDone == event {
-
+		s.playingDoneEventQueue <- data.(ISink)
 	} else if SourceEventClose == event {
-
+		s.closeEvent <- 0
 	}
 }
 
@@ -282,10 +305,28 @@ func (s *SourceImpl) SetState(state SessionState) {
 }
 
 func (s *SourceImpl) Close() {
+	//释放解复用器
+	//释放转码器
+	//释放每路转协议流， 将所有sink添加到等待队列
+	_, _ = SourceManager.Remove(s.Id_)
+	for _, transStream := range s.transStreams {
+		transStream.PopAllSinks(func(sink ISink) {
+			sink.SetTransStreamId(0)
+			state := sink.SetState(SessionStateWait)
+			if state {
+				AddSinkToWaitingQueue(s.Id_, sink)
+			}
+		})
+	}
 
+	s.transStreams = nil
 }
 
 func (s *SourceImpl) OnDeMuxStream(stream utils.AVStream) (bool, StreamBuffer) {
+	//整块都受保护 确保Add的Stream 都能WriteHeader
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	if s.completed {
 		fmt.Printf("添加Stream失败 Source: %s已经WriteHeader", s.Id_)
 		return false, nil
@@ -293,15 +334,17 @@ func (s *SourceImpl) OnDeMuxStream(stream utils.AVStream) (bool, StreamBuffer) {
 
 	s.originStreams.Add(stream)
 	s.allStreams.Add(stream)
-	//if len(s.originStreams.All()) == 1 {
-	//	s.probeTimer = time.AfterFunc(time.Duration(AppConfig.ProbeTimeout)*time.Millisecond, s.writeHeader)
-	//}
 
-	//为每个Stream创建对于的Buffer
+	//启动探测超时计时器
+	if len(s.originStreams.All()) == 1 && AppConfig.ProbeTimeout > 100 {
+		s.probeTimer = time.AfterFunc(time.Duration(AppConfig.ProbeTimeout)*time.Millisecond, s.writeHeader)
+	}
+
+	//为每个Stream创建对应的Buffer
 	if AppConfig.GOPCache > 0 {
 		buffer := NewStreamBuffer(int64(AppConfig.GOPCache * 1000))
+		//OnDeMuxStream的调用顺序，就是AVStream和AVPacket的Index的递增顺序
 		s.buffers = append(s.buffers, buffer)
-
 		return true, buffer
 	}
 
@@ -310,11 +353,18 @@ func (s *SourceImpl) OnDeMuxStream(stream utils.AVStream) (bool, StreamBuffer) {
 
 // 从DeMuxer解析完Stream后, 处理等待Sinks
 func (s *SourceImpl) writeHeader() {
-	utils.Assert(!s.completed)
+	{
+		s.mutex.Lock()
+		defer s.mutex.Unlock()
+		if s.completed {
+			return
+		}
+		s.completed = true
+	}
+
 	if s.probeTimer != nil {
 		s.probeTimer.Stop()
 	}
-	s.completed = true
 
 	sinks := PopWaitingSinks(s.Id_)
 	for _, sink := range sinks {
@@ -326,7 +376,7 @@ func (s *SourceImpl) OnDeMuxStreamDone() {
 	s.writeHeader()
 }
 
-func (s *SourceImpl) OnDeMuxPacket(index int, packet utils.AVPacket) {
+func (s *SourceImpl) OnDeMuxPacket(packet utils.AVPacket) {
 	if AppConfig.GOPCache > 0 {
 		buffer := s.buffers[packet.Index()]
 		buffer.AddPacket(packet, packet.KeyFrame(), packet.Dts())
@@ -338,4 +388,5 @@ func (s *SourceImpl) OnDeMuxPacket(index int, packet utils.AVPacket) {
 }
 
 func (s *SourceImpl) OnDeMuxDone() {
+
 }

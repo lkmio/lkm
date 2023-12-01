@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"fmt"
 	"github.com/yangjiechina/avformat/utils"
 	"net/http"
 )
@@ -34,6 +35,7 @@ func (s *SessionImpl) OnPublish(source_ ISource, pra map[string]interface{}, suc
 	//streamId 已经被占用
 	source := SourceManager.Find(s.Stream)
 	if source != nil {
+		fmt.Printf("推流已经占用 Source:%s", source_.Id())
 		failure(utils.HookStateOccupy)
 		return
 	}
@@ -42,6 +44,7 @@ func (s *SessionImpl) OnPublish(source_ ISource, pra map[string]interface{}, suc
 		if err := SourceManager.Add(source_); err == nil {
 			success()
 		} else {
+			fmt.Printf("添加失败 Source:%s", source_.Id())
 			failure(utils.HookStateOccupy)
 		}
 
@@ -78,9 +81,11 @@ func (s *SessionImpl) OnPlay(sink ISink, pra map[string]interface{}, success fun
 	f := func() {
 		source := SourceManager.Find(s.Stream)
 		if source == nil {
+			fmt.Printf("添加到等待队列 sink:%s", sink.Id())
+			sink.SetState(SessionStateWait)
 			AddSinkToWaitingQueue(s.Stream, sink)
 		} else {
-			source.AddSink(sink)
+			source.AddEvent(SourceEventPlay, sink)
 		}
 	}
 

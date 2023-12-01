@@ -53,4 +53,5 @@ func (s *serverImpl) OnPacket(conn net.Conn, data []byte) {
 func (s *serverImpl) OnDisConnected(conn net.Conn, err error) {
 	t := conn.(*transport.Conn)
 	t.Data.(*sessionImpl).Close()
+	t.Data = nil
 }
