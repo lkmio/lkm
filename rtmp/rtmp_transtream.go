@@ -17,8 +17,10 @@ type TransStream struct {
 	audioChunk librtmp.Chunk
 	videoChunk librtmp.Chunk
 
-	memoryPool  stream.MemoryPool
-	transBuffer stream.StreamBuffer
+	memoryPool     stream.MemoryPool
+	transBuffer    stream.StreamBuffer
+	lastTs         int64
+	chunkSizeQueue *stream.Queue
 }
 
 func (t *TransStream) Input(packet utils.AVPacket) {
@@ -92,19 +94,77 @@ func (t *TransStream) Input(packet utils.AVPacket) {
 	rtmpData := t.memoryPool.Fetch()[:n]
 	ret := true
 	if stream.AppConfig.GOPCache > 0 {
-		ret = t.transBuffer.AddPacket(rtmpData, packet.KeyFrame() && videoPkt, packet.Dts())
+		//ret = t.transBuffer.AddPacket(rtmpData, packet.KeyFrame() && videoPkt, packet.Dts())
+		ret = t.transBuffer.AddPacket(packet, packet.KeyFrame() && videoPkt, packet.Dts())
+	}
+
+	if !ret || stream.AppConfig.GOPCache < 1 {
+		t.memoryPool.FreeTail()
 	}
 
 	if ret {
 		//发送给sink
+		mergeWriteLatency := int64(350)
+
+		if mergeWriteLatency == 0 {
+			for _, sink := range t.Sinks {
+				sink.Input(rtmpData)
+			}
+
+			return
+		}
+
+		t.chunkSizeQueue.Push(len(rtmpData))
+		if t.lastTs == 0 {
+			t.transBuffer.Peek(0).(utils.AVPacket).Dts()
+		}
+
+		if mergeWriteLatency > t.transBuffer.Peek(t.transBuffer.Size()-1).(utils.AVPacket).Dts()-t.lastTs {
+			return
+		}
+
+		head, tail := t.memoryPool.Data()
+		queueHead, queueTail := t.chunkSizeQueue.All()
+		var offset int
+		var size int
+		endTs := t.lastTs + mergeWriteLatency
+		for i := 0; i < t.transBuffer.Size(); i++ {
+			pkt := t.transBuffer.Peek(i).(utils.AVPacket)
+			if pkt.Dts() < t.lastTs {
+				if i < len(queueHead) {
+					offset += queueHead[i].(int)
+				} else {
+					offset += queueTail[i+1%len(queueTail)].(int)
+				}
+				continue
+			}
+			if pkt.Dts() > endTs {
+				break
+			}
+
+			size += len(pkt.Data())
+			t.lastTs = pkt.Dts()
+		}
+
+		var data1 []byte
+		var data2 []byte
+		if offset+size > len(head) {
+			data1 = head[offset:]
+			size -= len(head[offset:])
+			data2 = tail[:size]
+		} else {
+			data1 = head[offset : offset+size]
+		}
 
 		for _, sink := range t.Sinks {
-			sink.Input(rtmpData)
-		}
-	}
+			if data1 != nil {
+				sink.Input(data1)
+			}
 
-	if stream.AppConfig.GOPCache < 1 {
-		t.memoryPool.FreeTail()
+			if data2 != nil {
+				sink.Input(data2)
+			}
+		}
 	}
 }
 
@@ -114,15 +174,16 @@ func (t *TransStream) AddSink(sink stream.ISink) {
 	utils.Assert(t.headerSize > 0)
 	sink.Input(t.header[:t.headerSize])
 
-	if stream.AppConfig.GOPCache > 0 {
-		t.transBuffer.PeekAll(func(packet interface{}) {
-			sink.Input(packet.([]byte))
-		})
-	}
+	// if stream.AppConfig.GOPCache > 0 {
+	// 	t.transBuffer.PeekAll(func(packet interface{}) {
+	// 		sink.Input(packet.([]byte))
+	// 	})
+	// }
 }
 
 func (t *TransStream) onDiscardPacket(pkt interface{}) {
 	t.memoryPool.FreeHead()
+	t.chunkSizeQueue.Pop()
 }
 
 func (t *TransStream) WriteHeader() error {
@@ -188,5 +249,6 @@ func (t *TransStream) WriteHeader() error {
 
 func NewTransStream(chunkSize int) stream.ITransStream {
 	transStream := &TransStream{chunkSize: chunkSize, TransStreamImpl: stream.TransStreamImpl{Sinks: make(map[stream.SinkId]stream.ISink, 64)}}
+	transStream.chunkSizeQueue = stream.NewQueue(512)
 	return transStream
 }

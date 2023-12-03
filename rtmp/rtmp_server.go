@@ -1,15 +1,20 @@
 package rtmp
 
 import (
+	"net"
+
 	"github.com/yangjiechina/avformat/transport"
 	"github.com/yangjiechina/avformat/utils"
-	"net"
 )
 
 type IServer interface {
 	Start(addr net.Addr) error
 
 	Close()
+}
+
+func NewServer() IServer {
+	return &serverImpl{}
 }
 
 type serverImpl struct {

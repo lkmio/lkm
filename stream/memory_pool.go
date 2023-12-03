@@ -25,6 +25,8 @@ type MemoryPool interface {
 
 	// FreeTail 从尾部释放指定大小内存
 	FreeTail()
+
+	Data() ([]byte, []byte)
 }
 
 func NewMemoryPool(capacity int) MemoryPool {
@@ -134,4 +136,13 @@ func (m *memoryPool) FreeTail() {
 	if m.tail == 0 && !m.blockQueue.IsEmpty() {
 		m.tail = m.capacity
 	}
+}
+
+func (m *memoryPool) Data() ([]byte, []byte) {
+	if m.tail <= m.head {
+		return m.data[m.head:], m.data[:m.tail]
+	} else {
+		return m.data[m.head:m.tail], nil
+	}
+
 }
