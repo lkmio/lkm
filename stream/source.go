@@ -2,11 +2,12 @@ package stream
 
 import (
 	"fmt"
+	"sync"
+	"time"
+
 	"github.com/yangjiechina/avformat/stream"
 	"github.com/yangjiechina/avformat/utils"
 	"github.com/yangjiechina/live-server/transcode"
-	"sync"
-	"time"
 )
 
 // SourceType Source 推流类型
@@ -202,37 +203,28 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 	}
 
 	var streams [5]utils.AVStream
-	var index int
-	bufferCount := -1
+	var size int
 
 	for _, stream := range s.originStreams.All() {
 		if disableVideo && stream.Type() == utils.AVMediaTypeVideo {
 			continue
 		}
 
-		streams[index] = stream
-		index++
-
-		//从缓存的Stream中，挑选出最小的缓存数量，交叉发送.
-		count := s.buffers[stream.Index()].Size()
-		if bufferCount == -1 {
-			bufferCount = count
-		} else {
-			bufferCount = utils.MinInt(bufferCount, count)
-		}
+		streams[size] = stream
+		size++
 	}
 
-	transStreamId := GenerateTransStreamId(sink.Protocol(), streams[:index]...)
+	transStreamId := GenerateTransStreamId(sink.Protocol(), streams[:size]...)
 	transStream, ok := s.transStreams[transStreamId]
 	if !ok {
 		//创建一个新的传输流
-		transStream = TransStreamFactory(sink.Protocol(), streams[:index])
+		transStream = TransStreamFactory(sink.Protocol(), streams[:size])
 		if s.transStreams == nil {
 			s.transStreams = make(map[TransStreamId]ITransStream, 10)
 		}
 		s.transStreams[transStreamId] = transStream
 
-		for i := 0; i < index; i++ {
+		for i := 0; i < size; i++ {
 			transStream.AddTrack(streams[i])
 		}
 
@@ -249,22 +241,42 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 	}
 
 	if AppConfig.GOPCache > 0 && !ok {
-		//先交叉发送
-		for i := 0; i < bufferCount; i++ {
-			for _, stream := range streams[:index] {
-				buffer := s.buffers[stream.Index()]
-				packet := buffer.Peek(i).(utils.AVPacket)
-				transStream.Input(packet)
+		indexs := make([]int, size)
+
+		for {
+			min := int64(0xFFFFFFFF)
+
+			for index, stream := range streams[:size] {
+				size := s.buffers[stream.Index()].Size()
+				if size == indexs[index] {
+					continue
+				}
+
+				pkt := s.buffers[stream.Index()].Peek(indexs[index]).(utils.AVPacket)
+				v := pkt.Dts()
+				if min == 0xFFFFFFFF {
+					min = v
+				} else if v < min {
+					v = min
+				}
 			}
-		}
 
-		//发送超过最低缓存数的缓存包
-		for _, stream := range streams[:index] {
-			buffer := s.buffers[stream.Index()]
+			if min == 0xFFFFFFFF {
+				break
+			}
 
-			for i := bufferCount; i > buffer.Size(); i++ {
-				packet := buffer.Peek(i).(utils.AVPacket)
-				transStream.Input(packet)
+			for index, stream := range streams[:size] {
+				buffer := s.buffers[stream.Index()]
+				size := buffer.Size()
+				if size == indexs[index] {
+					continue
+				}
+
+				for i := indexs[index]; i < buffer.Size(); i++ {
+					packet := buffer.Peek(i).(utils.AVPacket)
+					transStream.Input(packet)
+					indexs[index]++
+				}
 			}
 		}
 	}
