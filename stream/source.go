@@ -257,7 +257,7 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 				if min == 0xFFFFFFFF {
 					min = v
 				} else if v < min {
-					v = min
+					min = v
 				}
 			}
 
@@ -274,6 +274,10 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 
 				for i := indexs[index]; i < buffer.Size(); i++ {
 					packet := buffer.Peek(i).(utils.AVPacket)
+					if packet.Dts() > min {
+						break
+					}
+
 					transStream.Input(packet)
 					indexs[index]++
 				}

@@ -86,7 +86,7 @@ func (s *streamBuffer) SetDiscardHandler(handler func(packet interface{})) {
 
 func (s *streamBuffer) Peek(index int) interface{} {
 	utils.Assert(index < s.buffer.Size())
-	head, tail := s.buffer.All()
+	head, tail := s.buffer.Data()
 
 	if index < len(head) {
 		return head[index].(element).pkt
@@ -96,7 +96,7 @@ func (s *streamBuffer) Peek(index int) interface{} {
 }
 
 func (s *streamBuffer) PeekAll(handler func(packet interface{})) {
-	head, tail := s.buffer.All()
+	head, tail := s.buffer.Data()
 
 	if head == nil {
 		return

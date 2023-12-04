@@ -20,7 +20,7 @@ func NewQueue(capacity int) *Queue {
 func (q *Queue) Push(value interface{}) {
 	if q.ringBuffer.IsFull() {
 		newArray := make([]interface{}, q.ringBuffer.Size()*2)
-		head, tail := q.ringBuffer.All()
+		head, tail := q.ringBuffer.Data()
 		copy(newArray, head)
 		if tail != nil {
 			copy(newArray[len(head):], tail)

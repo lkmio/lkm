@@ -39,6 +39,17 @@ func NewMemoryPool(capacity int) MemoryPool {
 	return pool
 }
 
+func NewMemoryPoolWithRecopy(capacity int) MemoryPool {
+	pool := &memoryPool{
+		data:       make([]byte, capacity),
+		capacity:   capacity,
+		blockQueue: NewQueue(128),
+		recopy:     true,
+	}
+
+	return pool
+}
+
 type memoryPool struct {
 	data []byte
 	//实际的可用容量，当尾部剩余内存不足以此次Write, 并且头部有足够的空闲内存, 则尾部剩余的内存将不可用.
@@ -50,6 +61,8 @@ type memoryPool struct {
 	markIndex  int
 	mark       bool
 	blockQueue *Queue
+
+	recopy bool
 }
 
 // 根据head和tail计算出可用的内存地址
@@ -62,18 +75,28 @@ func (m *memoryPool) allocate(size int) []byte {
 			m.tail = m.tail - m.markIndex
 			m.markIndex = 0
 		} else {
-
 			//扩容
-			capacity := (cap(m.data) + m.tail - m.markIndex + size) * 3 / 2
+			writeSize := m.tail - m.markIndex
+			capacity := (cap(m.data) + writeSize + size) * 2
 			bytes := make([]byte, capacity)
-			//不对之前的内存进行复制, 已经被AVPacket引用, 自行GC
-			copy(bytes, m.data[m.markIndex:m.tail])
+
+			if m.recopy {
+				//将扩容前的老数据复制到新的内存空间
+				head, tail := m.Data()
+				copy(bytes, head)
+				copy(bytes[len(head):], tail)
+				m.tail = len(head) + len(tail)
+				m.markIndex = m.tail - writeSize
+			} else {
+				//不对之前的内存进行复制, 已经被AVPacket引用, 自行GC
+				copy(bytes, m.data[m.markIndex:m.tail])
+				m.tail = writeSize
+				m.markIndex = 0
+			}
+
 			m.data = bytes
 			m.capacity = capacity
-			m.tail = m.tail - m.markIndex
-			m.markIndex = 0
 			m.head = 0
-
 		}
 	}
 
@@ -132,7 +155,6 @@ func (m *memoryPool) FreeTail() {
 
 	size := m.blockQueue.PopBack().(int)
 	m.tail -= size
-
 	if m.tail == 0 && !m.blockQueue.IsEmpty() {
 		m.tail = m.capacity
 	}
@@ -140,7 +162,7 @@ func (m *memoryPool) FreeTail() {
 
 func (m *memoryPool) Data() ([]byte, []byte) {
 	if m.tail <= m.head {
-		return m.data[m.head:], m.data[:m.tail]
+		return m.data[m.head:m.capacity], m.data[:m.tail]
 	} else {
 		return m.data[m.head:m.tail], nil
 	}

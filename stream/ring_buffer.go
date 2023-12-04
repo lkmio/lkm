@@ -19,7 +19,7 @@ type RingBuffer interface {
 
 	Size() int
 
-	All() ([]interface{}, []interface{})
+	Data() ([]interface{}, []interface{})
 }
 
 func NewRingBuffer(capacity int) RingBuffer {
@@ -73,18 +73,24 @@ func (r *ringBuffer) Pop() interface{} {
 }
 
 func (r *ringBuffer) Head() interface{} {
+	utils.Assert(!r.IsEmpty())
 	return r.data[r.head]
 }
 
 func (r *ringBuffer) Tail() interface{} {
-	return r.data[utils.MaxInt(0, r.tail-1)]
+	utils.Assert(!r.IsEmpty())
+	if r.tail > 0 {
+		return r.data[r.tail-1]
+	} else {
+		return r.data[cap(r.data)-1]
+	}
 }
 
 func (r *ringBuffer) Size() int {
 	return r.size
 }
 
-func (r *ringBuffer) All() ([]interface{}, []interface{}) {
+func (r *ringBuffer) Data() ([]interface{}, []interface{}) {
 	if r.size == 0 {
 		return nil, nil
 	}

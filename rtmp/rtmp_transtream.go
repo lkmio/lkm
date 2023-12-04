@@ -23,6 +23,8 @@ type TransStream struct {
 	chunkSizeQueue *stream.Queue
 }
 
+var nextOffset int
+
 func (t *TransStream) Input(packet utils.AVPacket) {
 	utils.Assert(t.TransStreamImpl.Completed)
 	var data []byte
@@ -115,39 +117,61 @@ func (t *TransStream) Input(packet utils.AVPacket) {
 		}
 
 		t.chunkSizeQueue.Push(len(rtmpData))
-		if t.lastTs == 0 {
-			t.transBuffer.Peek(0).(utils.AVPacket).Dts()
-		}
+		//if t.lastTs == 0 {
+		//	t.transBuffer.Peek(0).(utils.AVPacket).Dts()
+		//}
 
-		if mergeWriteLatency > t.transBuffer.Peek(t.transBuffer.Size()-1).(utils.AVPacket).Dts()-t.lastTs {
+		endTs := t.lastTs + mergeWriteLatency
+		if t.transBuffer.Peek(t.transBuffer.Size()-1).(utils.AVPacket).Dts() < endTs {
 			return
 		}
 
 		head, tail := t.memoryPool.Data()
-		queueHead, queueTail := t.chunkSizeQueue.All()
+		sizeHead, sizeTail := t.chunkSizeQueue.Data()
 		var offset int
 		var size int
-		endTs := t.lastTs + mergeWriteLatency
+		var chunkSize int
+		var lastTs int64
+		var tailIndex int
 		for i := 0; i < t.transBuffer.Size(); i++ {
 			pkt := t.transBuffer.Peek(i).(utils.AVPacket)
-			if pkt.Dts() < t.lastTs {
-				if i < len(queueHead) {
-					offset += queueHead[i].(int)
-				} else {
-					offset += queueTail[i+1%len(queueTail)].(int)
-				}
+
+			if i < len(sizeHead) {
+				chunkSize = sizeHead[i].(int)
+			} else {
+				chunkSize = sizeTail[tailIndex].(int)
+				tailIndex++
+			}
+
+			if pkt.Dts() <= t.lastTs && t.lastTs != 0 {
+				offset += chunkSize
 				continue
 			}
+
 			if pkt.Dts() > endTs {
 				break
 			}
 
-			size += len(pkt.Data())
-			t.lastTs = pkt.Dts()
+			size += chunkSize
+			lastTs = pkt.Dts()
+		}
+		t.lastTs = lastTs
+
+		if nextOffset == 0 {
+			nextOffset = size
+		} else {
+			utils.Assert(offset == nextOffset)
+			nextOffset += size
 		}
 
+		//后面再优化只发送一次
 		var data1 []byte
 		var data2 []byte
+		if offset > len(head) {
+			offset -= len(head)
+			head = tail
+			tail = nil
+		}
 		if offset+size > len(head) {
 			data1 = head[offset:]
 			size -= len(head[offset:])
@@ -183,7 +207,8 @@ func (t *TransStream) AddSink(sink stream.ISink) {
 
 func (t *TransStream) onDiscardPacket(pkt interface{}) {
 	t.memoryPool.FreeHead()
-	t.chunkSizeQueue.Pop()
+	size := t.chunkSizeQueue.Pop().(int)
+	nextOffset -= size
 }
 
 func (t *TransStream) WriteHeader() error {
@@ -213,7 +238,7 @@ func (t *TransStream) WriteHeader() error {
 	t.TransStreamImpl.Completed = true
 	t.header = make([]byte, 1024)
 	t.muxer = libflv.NewMuxer(audioCodecId, videoCodecId, 0, 0, 0)
-	t.memoryPool = stream.NewMemoryPool(1024 * 1000 * (stream.AppConfig.GOPCache + 1))
+	t.memoryPool = stream.NewMemoryPoolWithRecopy(1024 * 1000 * (stream.AppConfig.GOPCache + 1))
 	if stream.AppConfig.GOPCache > 0 {
 		t.transBuffer = stream.NewStreamBuffer(int64(stream.AppConfig.GOPCache * 200))
 		t.transBuffer.SetDiscardHandler(t.onDiscardPacket)
