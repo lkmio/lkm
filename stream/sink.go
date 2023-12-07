@@ -66,10 +66,15 @@ type SinkImpl struct {
 	State_         SessionState
 	TransStreamId_ TransStreamId
 	disableVideo   bool
+
 	//Sink在请求拉流->Source推流->Sink断开整个阶段 是无锁线程安全
 	//如果Sink在等待队列-Sink断开，这个过程是非线程安全的
 	//SetState的时候，如果closed为true，返回false, 调用者自行删除sink
 	closed atomic.Bool
+
+	//HasSentKeyVideo 是否已经发送视频关键帧
+	//未开启GOP缓存的情况下，为避免播放花屏，发送的首个视频帧必须为关键帧
+	HasSentKeyVideo bool
 
 	DesiredAudioCodecId_ utils.AVCodecID
 	DesiredVideoCodecId_ utils.AVCodecID

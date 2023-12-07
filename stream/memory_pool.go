@@ -13,6 +13,10 @@ type MemoryPool interface {
 
 	Write(data []byte)
 
+	// Reserve 保留指定大小的内存空间
+	//主要是为了和实现和Write相似功能，但是不拷贝, 所以使用流程和Write一样.
+	Reserve(size int)
+
 	Allocate(size int) []byte
 
 	Fetch() []byte
@@ -115,6 +119,11 @@ func (m *memoryPool) Write(data []byte) {
 
 	allocate := m.allocate(len(data))
 	copy(allocate, data)
+}
+
+func (m *memoryPool) Reserve(size int) {
+	utils.Assert(m.mark)
+	_ = m.allocate(size)
 }
 
 func (m *memoryPool) Allocate(size int) []byte {

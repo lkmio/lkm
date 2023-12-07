@@ -30,10 +30,10 @@ func NewPublisher(sourceId string, stack *librtmp.Stack) *Publisher {
 
 func (p *Publisher) Init() {
 	//创建内存池
-	p.audioMemoryPool = stream.NewMemoryPool(48000 * (stream.AppConfig.GOPCache + 1))
-	if stream.AppConfig.GOPCache > 0 {
+	p.audioMemoryPool = stream.NewMemoryPool(48000 * 1)
+	if stream.AppConfig.GOPCache {
 		//以每秒钟4M码率大小创建内存池
-		p.videoMemoryPool = stream.NewMemoryPool(4096 * 1000 / 8 * stream.AppConfig.GOPCache)
+		p.videoMemoryPool = stream.NewMemoryPool(4096 * 1000)
 	} else {
 		p.videoMemoryPool = stream.NewMemoryPool(4096 * 1000 / 8)
 	}
@@ -77,7 +77,7 @@ func (p *Publisher) OnDeMuxStream(stream_ utils.AVStream) {
 func (p *Publisher) OnDeMuxPacket(packet utils.AVPacket) {
 	p.SourceImpl.OnDeMuxPacket(packet)
 
-	if stream.AppConfig.GOPCache > 0 {
+	if stream.AppConfig.GOPCache {
 		return
 	}
 

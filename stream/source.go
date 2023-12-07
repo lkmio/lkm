@@ -10,13 +10,17 @@ import (
 	"github.com/yangjiechina/live-server/transcode"
 )
 
-// SourceType Source 推流类型
+// SourceType 推流类型
 type SourceType byte
 
-// Protocol 输出协议
+// Protocol 输出的流协议
 type Protocol uint32
 
 type SourceEvent byte
+
+// SessionState 推拉流Session的状态
+// 包含握手和Hook授权阶段
+type SessionState uint32
 
 const (
 	SourceTypeRtmp  = SourceType(1)
@@ -35,11 +39,12 @@ const (
 	SourceEventPlayDone = SourceEvent(2)
 	SourceEventInput    = SourceEvent(3)
 	SourceEventClose    = SourceEvent(4)
-)
 
-// SessionState 推拉流Session状态
-// 包含, 握手阶段、Hook授权.
-type SessionState uint32
+	// TransMuxerHeaderMaxSize 传输流协议头的最大长度
+	// 在解析流分配AVPacket的Data时, 如果没有开启合并写, 提前预留指定长度的字节数量.
+	// 在封装传输流时, 直接在预留头中添加对应传输流的协议头，减少或免内存拷贝. 在传输flv以及转换AVCC和AnnexB格式时有显著提升.
+	TransMuxerHeaderMaxSize = 30
+)
 
 const (
 	SessionStateCreate           = SessionState(1)
@@ -167,6 +172,53 @@ func IsSupportMux(protocol Protocol, audioCodecId, videoCodecId utils.AVCodecID)
 	return true
 }
 
+// 分发每路Stream的Buffer给传输流
+// 按照时间戳升序发送
+func (s *SourceImpl) dispatchStreamBuffer(transStream ITransStream, streams []utils.AVStream) {
+	size := len(streams)
+	indexs := make([]int, size)
+
+	for {
+		min := int64(0xFFFFFFFF)
+
+		//找出最小的时间戳
+		for index, stream := range streams[:size] {
+			if s.buffers[stream.Index()].Size() == indexs[index] {
+				continue
+			}
+
+			pkt := s.buffers[stream.Index()].Peek(indexs[index]).(utils.AVPacket)
+			v := pkt.Dts()
+			if min == 0xFFFFFFFF {
+				min = v
+			} else if v < min {
+				min = v
+			}
+		}
+
+		if min == 0xFFFFFFFF {
+			break
+		}
+
+		for index, stream := range streams[:size] {
+			buffer := s.buffers[stream.Index()]
+			if buffer.Size() == indexs[index] {
+				continue
+			}
+
+			for i := indexs[index]; i < buffer.Size(); i++ {
+				packet := buffer.Peek(i).(utils.AVPacket)
+				if packet.Dts() > min {
+					break
+				}
+
+				transStream.Input(packet)
+				indexs[index]++
+			}
+		}
+	}
+}
+
 func (s *SourceImpl) AddSink(sink ISink) bool {
 	// 暂时不考虑多路视频流，意味着只能1路视频流和多路音频流，同理originStreams和allStreams里面的Stream互斥. 同时多路音频流的Codec必须一致
 	audioCodecId, videoCodecId := sink.DesiredAudioCodecId(), sink.DesiredVideoCodecId()
@@ -240,49 +292,8 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 		return false
 	}
 
-	if AppConfig.GOPCache > 0 && !ok {
-		indexs := make([]int, size)
-
-		for {
-			min := int64(0xFFFFFFFF)
-
-			for index, stream := range streams[:size] {
-				size := s.buffers[stream.Index()].Size()
-				if size == indexs[index] {
-					continue
-				}
-
-				pkt := s.buffers[stream.Index()].Peek(indexs[index]).(utils.AVPacket)
-				v := pkt.Dts()
-				if min == 0xFFFFFFFF {
-					min = v
-				} else if v < min {
-					min = v
-				}
-			}
-
-			if min == 0xFFFFFFFF {
-				break
-			}
-
-			for index, stream := range streams[:size] {
-				buffer := s.buffers[stream.Index()]
-				size := buffer.Size()
-				if size == indexs[index] {
-					continue
-				}
-
-				for i := indexs[index]; i < buffer.Size(); i++ {
-					packet := buffer.Peek(i).(utils.AVPacket)
-					if packet.Dts() > min {
-						break
-					}
-
-					transStream.Input(packet)
-					indexs[index]++
-				}
-			}
-		}
+	if AppConfig.GOPCache && !ok {
+		s.dispatchStreamBuffer(transStream, streams[:size])
 	}
 
 	return false
@@ -357,8 +368,8 @@ func (s *SourceImpl) OnDeMuxStream(stream utils.AVStream) (bool, StreamBuffer) {
 	}
 
 	//为每个Stream创建对应的Buffer
-	if AppConfig.GOPCache > 0 {
-		buffer := NewStreamBuffer(int64(AppConfig.GOPCache * 1000))
+	if AppConfig.GOPCache {
+		buffer := NewStreamBuffer(200)
 		//OnDeMuxStream的调用顺序，就是AVStream和AVPacket的Index的递增顺序
 		s.buffers = append(s.buffers, buffer)
 		return true, buffer
@@ -393,7 +404,7 @@ func (s *SourceImpl) OnDeMuxStreamDone() {
 }
 
 func (s *SourceImpl) OnDeMuxPacket(packet utils.AVPacket) {
-	if AppConfig.GOPCache > 0 {
+	if AppConfig.GOPCache {
 		buffer := s.buffers[packet.Index()]
 		buffer.AddPacket(packet, packet.KeyFrame(), packet.Dts())
 	}

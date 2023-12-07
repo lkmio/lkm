@@ -27,6 +27,7 @@ var nextOffset int
 
 func (t *TransStream) Input(packet utils.AVPacket) {
 	utils.Assert(t.TransStreamImpl.Completed)
+
 	var data []byte
 	var chunk *librtmp.Chunk
 	var videoPkt bool
@@ -45,6 +46,13 @@ func (t *TransStream) Input(packet utils.AVPacket) {
 		length = len(data)
 		chunk = &t.videoChunk
 		payloadSize += 5 + length
+	}
+
+	//即不开启GOP缓存又不合并发送. 直接使用AVPacket的预留头封装发送
+	if !stream.AppConfig.GOPCache && stream.AppConfig.MergeWriteLatency < 1 {
+		//首帧视频帧必须要
+	} else {
+
 	}
 
 	//payloadSize += payloadSize / t.chunkSize
@@ -95,12 +103,12 @@ func (t *TransStream) Input(packet utils.AVPacket) {
 
 	rtmpData := t.memoryPool.Fetch()[:n]
 	ret := true
-	if stream.AppConfig.GOPCache > 0 {
+	if stream.AppConfig.GOPCache {
 		//ret = t.transBuffer.AddPacket(rtmpData, packet.KeyFrame() && videoPkt, packet.Dts())
 		ret = t.transBuffer.AddPacket(packet, packet.KeyFrame() && videoPkt, packet.Dts())
 	}
 
-	if !ret || stream.AppConfig.GOPCache < 1 {
+	if !ret || stream.AppConfig.GOPCache {
 		t.memoryPool.FreeTail()
 	}
 
@@ -197,7 +205,13 @@ func (t *TransStream) AddSink(sink stream.ISink) {
 
 	utils.Assert(t.headerSize > 0)
 	sink.Input(t.header[:t.headerSize])
+	if !stream.AppConfig.GOPCache {
+		return
+	}
 
+	//开启GOP缓存的情况下
+	//开启合并写的情况下:
+	// 如果合并写大小每满一次
 	// if stream.AppConfig.GOPCache > 0 {
 	// 	t.transBuffer.PeekAll(func(packet interface{}) {
 	// 		sink.Input(packet.([]byte))
@@ -238,9 +252,9 @@ func (t *TransStream) WriteHeader() error {
 	t.TransStreamImpl.Completed = true
 	t.header = make([]byte, 1024)
 	t.muxer = libflv.NewMuxer(audioCodecId, videoCodecId, 0, 0, 0)
-	t.memoryPool = stream.NewMemoryPoolWithRecopy(1024 * 1000 * (stream.AppConfig.GOPCache + 1))
-	if stream.AppConfig.GOPCache > 0 {
-		t.transBuffer = stream.NewStreamBuffer(int64(stream.AppConfig.GOPCache * 200))
+	t.memoryPool = stream.NewMemoryPoolWithRecopy(1024 * 4000)
+	if stream.AppConfig.GOPCache {
+		t.transBuffer = stream.NewStreamBuffer(200)
 		t.transBuffer.SetDiscardHandler(t.onDiscardPacket)
 	}
 

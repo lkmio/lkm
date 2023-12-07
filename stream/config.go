@@ -1,5 +1,9 @@
 package stream
 
+const (
+	DefaultMergeWriteLatency = 350
+)
+
 type RtmpConfig struct {
 	Enable bool   `json:"enable"`
 	Addr   string `json:"addr"`
@@ -50,9 +54,11 @@ func init() {
 	AppConfig = AppConfig_{}
 }
 
+// AppConfig_ GOP缓存和合并写必须保持一致，同时开启或关闭. 关闭GOP缓存，是为了降低延迟，很难理解又另外开启合并写.
 type AppConfig_ struct {
-	GOPCache     int `json:"gop_cache"` //缓存GOP个数，不是时长
-	ProbeTimeout int `json:"probe_timeout"`
-	Rtmp         RtmpConfig
-	Hook         HookConfig
+	GOPCache          bool `json:"gop_cache"` //是否开启GOP缓存，只缓存一组音视频
+	ProbeTimeout      int  `json:"probe_timeout"`
+	MergeWriteLatency int  `json:"mw_latency"` //缓存指定时长的包，满了之后才发送给Sink. 可以降低用户态和内核态的交互，大幅提升性能.
+	Rtmp              RtmpConfig
+	Hook              HookConfig
 }
