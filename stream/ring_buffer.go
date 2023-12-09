@@ -20,6 +20,8 @@ type RingBuffer interface {
 	Size() int
 
 	Data() ([]interface{}, []interface{})
+
+	Clear()
 }
 
 func NewRingBuffer(capacity int) RingBuffer {
@@ -100,4 +102,10 @@ func (r *ringBuffer) Data() ([]interface{}, []interface{}) {
 	} else {
 		return r.data[r.head:r.tail], nil
 	}
+}
+
+func (r *ringBuffer) Clear() {
+	r.size = 0
+	r.head = 0
+	r.tail = 0
 }

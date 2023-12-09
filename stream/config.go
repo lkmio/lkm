@@ -56,9 +56,12 @@ func init() {
 
 // AppConfig_ GOP缓存和合并写必须保持一致，同时开启或关闭. 关闭GOP缓存，是为了降低延迟，很难理解又另外开启合并写.
 type AppConfig_ struct {
-	GOPCache          bool `json:"gop_cache"` //是否开启GOP缓存，只缓存一组音视频
-	ProbeTimeout      int  `json:"probe_timeout"`
-	MergeWriteLatency int  `json:"mw_latency"` //缓存指定时长的包，满了之后才发送给Sink. 可以降低用户态和内核态的交互，大幅提升性能.
+	GOPCache     bool `json:"gop_cache"` //是否开启GOP缓存，只缓存一组音视频
+	ProbeTimeout int  `json:"probe_timeout"`
+
+	//缓存指定时长的包，满了之后才发送给Sink. 可以降低用户态和内核态的交互频率，大幅提升性能.
+	//合并写的大小范围，应当大于一帧的时长，不超过一组GOP的时长，在实际发送流的时候也会遵循此条例.
+	MergeWriteLatency int `json:"mw_latency"`
 	Rtmp              RtmpConfig
 	Hook              HookConfig
 }

@@ -31,6 +31,8 @@ type MemoryPool interface {
 	FreeTail()
 
 	Data() ([]byte, []byte)
+
+	Clear()
 }
 
 func NewMemoryPool(capacity int) MemoryPool {
@@ -176,4 +178,15 @@ func (m *memoryPool) Data() ([]byte, []byte) {
 		return m.data[m.head:m.tail], nil
 	}
 
+}
+
+func (m *memoryPool) Clear() {
+	m.capacity = cap(m.data)
+	m.head = 0
+	m.tail = 0
+
+	m.markIndex = 0
+	m.mark = false
+
+	m.blockQueue.Clear()
 }
