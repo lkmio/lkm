@@ -281,9 +281,14 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 		}
 
 		_ = transStream.WriteHeader()
+
+		if AppConfig.GOPCache {
+			s.dispatchStreamBuffer(transStream, streams[:size])
+		}
 	}
 
 	sink.SetTransStreamId(transStreamId)
+	//add sink 放在dispatchStreamBuffer后面，不然GOPCache没用
 	transStream.AddSink(sink)
 
 	state := sink.SetState(SessionStateTransferring)
@@ -292,11 +297,7 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 		return false
 	}
 
-	if AppConfig.GOPCache && !ok {
-		s.dispatchStreamBuffer(transStream, streams[:size])
-	}
-
-	return false
+	return true
 }
 
 func (s *SourceImpl) RemoveSink(sink ISink) bool {

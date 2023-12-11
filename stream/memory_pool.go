@@ -33,6 +33,8 @@ type MemoryPool interface {
 	Data() ([]byte, []byte)
 
 	Clear()
+
+	Empty() bool
 }
 
 func NewMemoryPool(capacity int) MemoryPool {
@@ -56,6 +58,18 @@ func NewMemoryPoolWithRecopy(capacity int) MemoryPool {
 	return pool
 }
 
+func NewMemoryPoolWithDirect(capacity int, recopy bool) MemoryPool {
+	pool := &memoryPool{
+		data:       make([]byte, capacity),
+		capacity:   capacity,
+		blockQueue: NewQueue(128),
+		recopy:     recopy,
+		direct:     true,
+	}
+
+	return pool
+}
+
 type memoryPool struct {
 	data []byte
 	//实际的可用容量，当尾部剩余内存不足以此次Write, 并且头部有足够的空闲内存, 则尾部剩余的内存将不可用.
@@ -69,13 +83,14 @@ type memoryPool struct {
 	blockQueue *Queue
 
 	recopy bool
+	direct bool
 }
 
 // 根据head和tail计算出可用的内存地址
 func (m *memoryPool) allocate(size int) []byte {
 	if m.capacity-m.tail < size {
 		//使用从头释放的内存
-		if m.tail-m.markIndex+size <= m.head {
+		if !m.direct && m.tail-m.markIndex+size <= m.head {
 			copy(m.data, m.data[m.markIndex:m.tail])
 			m.capacity = m.markIndex
 			m.tail = m.tail - m.markIndex
@@ -189,4 +204,9 @@ func (m *memoryPool) Clear() {
 	m.mark = false
 
 	m.blockQueue.Clear()
+}
+
+func (m *memoryPool) Empty() bool {
+	utils.Assert(!m.mark)
+	return m.blockQueue.Size() < 1
 }

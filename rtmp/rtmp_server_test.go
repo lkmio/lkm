@@ -21,7 +21,8 @@ func init() {
 }
 
 func TestServer(t *testing.T) {
-	stream.AppConfig.GOPCache = 2
+	stream.AppConfig.GOPCache = true
+	stream.AppConfig.MergeWriteLatency = 350
 	impl := serverImpl{}
 	addr := "0.0.0.0:1935"
 	tcpAddr, err := net.ResolveTCPAddr("tcp", addr)

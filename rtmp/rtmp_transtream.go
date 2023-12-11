@@ -21,16 +21,19 @@ type TransStream struct {
 	videoChunk librtmp.Chunk
 
 	//只需要缓存一组GOP+第2组GOP的第一个合并写切片
-	//当开始缓存第2组GOP的第二个合并写切片时，将上一个GOP缓存释放掉
-	//使用2块内存池，保证内存连续，一次发送
+	//当缓存到第2组GOP的第二个合并写切片时，将上一个GOP缓存释放掉
+	//使用2块内存池，分别缓存2个GOP，保证内存连续，一次发送
 	//不开启GOP缓存和只有音频包的情况下，创建使用一个MemoryPool
-	//memoryPool  stream.MemoryPool
-	memoryPool  [2]stream.MemoryPool
-	transBuffer stream.StreamBuffer
+	memoryPool [2]stream.MemoryPool
 
-	mwSegmentTs    int64
-	lastTs         int64
-	chunkSizeQueue *stream.Queue
+	//当前合并写切片的缓存时长
+	segmentDuration int
+	//当前合并写切片位于memoryPool的开始偏移量
+	segmentOffset int
+	//前一个包的时间戳
+	prePacketTS int64
+
+	firstVideoPacket bool
 
 	//发送未完整切片的Sinks
 	//当AddSink时，还未缓存到一组切片，有多少先发多少. 后续切片未满之前的生成的rtmp包都将直接发送给sink.
@@ -44,6 +47,7 @@ func (t *TransStream) Input(packet utils.AVPacket) {
 	var data []byte
 	var chunk *librtmp.Chunk
 	var videoPkt bool
+	var videoKey bool
 	var length int
 	//rtmp chunk消息体的数据大小
 	var payloadSize int
@@ -54,7 +58,17 @@ func (t *TransStream) Input(packet utils.AVPacket) {
 		chunk = &t.audioChunk
 		payloadSize += 2 + length
 	} else if utils.AVMediaTypeVideo == packet.MediaType() {
+		//首帧必须要视频关键帧
+		if !t.firstVideoPacket {
+			if !packet.KeyFrame() {
+				return
+			}
+
+			t.firstVideoPacket = true
+		}
+
 		videoPkt = true
+		videoKey = packet.KeyFrame()
 		data = packet.AVCCPacketData()
 		length = len(data)
 		chunk = &t.videoChunk
@@ -67,11 +81,22 @@ func (t *TransStream) Input(packet utils.AVPacket) {
 		return
 	}
 
-	if videoPkt && packet.KeyFrame() {
-		//交替使用缓存
+	if videoKey {
 		tmp := t.memoryPool[0]
+		head, _ := tmp.Data()
+		if len(head) > t.segmentOffset {
+			for _, sink := range t.Sinks {
+				sink.Input(head[t.segmentOffset:])
+			}
+		}
+
+		t.memoryPool[0].Clear()
+		//交替使用缓存
 		t.memoryPool[0] = t.memoryPool[1]
 		t.memoryPool[1] = tmp
+
+		t.segmentDuration = 0
+		t.segmentOffset = 0
 	}
 
 	//分配内存
@@ -80,7 +105,7 @@ func (t *TransStream) Input(packet utils.AVPacket) {
 
 	//写chunk头
 	chunk.Length = payloadSize
-	chunk.Timestamp = uint32(packet.Dts())
+	chunk.Timestamp = uint32(packet.Pts())
 	n := chunk.ToBytes(allocate)
 	utils.Assert(n == 12)
 
@@ -119,95 +144,44 @@ func (t *TransStream) Input(packet utils.AVPacket) {
 		}
 	}
 
-	var ret bool
 	rtmpData := t.memoryPool[0].Fetch()[:n]
-	if stream.AppConfig.GOPCache {
-		//ret = t.transBuffer.AddPacket(rtmpData, packet.KeyFrame() && videoPkt, packet.Dts())
-		ret = t.transBuffer.AddPacket(packet, packet.KeyFrame() && videoPkt, packet.Dts())
+	t.segmentDuration += int(packet.Pts() - t.prePacketTS)
+	t.prePacketTS = packet.Pts()
+
+	//给不完整切片的Sink补齐包
+	if len(t.incompleteSinks) > 0 {
+		for _, sink := range t.incompleteSinks {
+			sink.Input(rtmpData)
+		}
+
+		if t.segmentDuration >= stream.AppConfig.MergeWriteLatency {
+			head, tail := t.memoryPool[0].Data()
+			utils.Assert(len(tail) == 0)
+
+			t.segmentOffset = len(head)
+			t.segmentDuration = 0
+			t.incompleteSinks = nil
+		}
+
+		return
 	}
 
-	if !ret || stream.AppConfig.GOPCache {
-		t.memoryPool[0].FreeTail()
+	if t.segmentDuration < stream.AppConfig.MergeWriteLatency {
+		return
 	}
 
-	if ret {
-		//发送给sink
-		mergeWriteLatency := int64(350)
+	head, tail := t.memoryPool[0].Data()
+	utils.Assert(len(tail) == 0)
+	for _, sink := range t.Sinks {
+		sink.Input(head[t.segmentOffset:])
+	}
 
-		if mergeWriteLatency == 0 {
-			for _, sink := range t.Sinks {
-				sink.Input(rtmpData)
-			}
+	t.segmentOffset = len(head)
+	t.segmentDuration = 0
 
-			return
-		}
-
-		t.chunkSizeQueue.Push(len(rtmpData))
-		//if t.lastTs == 0 {
-		//	t.transBuffer.Peek(0).(utils.AVPacket).Dts()
-		//}
-
-		endTs := t.lastTs + mergeWriteLatency
-		if t.transBuffer.Peek(t.transBuffer.Size()-1).(utils.AVPacket).Dts() < endTs {
-			return
-		}
-
-		head, tail := t.memoryPool[0].Data()
-		sizeHead, sizeTail := t.chunkSizeQueue.Data()
-		var offset int
-		var size int
-		var chunkSize int
-		var lastTs int64
-		var tailIndex int
-		for i := 0; i < t.transBuffer.Size(); i++ {
-			pkt := t.transBuffer.Peek(i).(utils.AVPacket)
-
-			if i < len(sizeHead) {
-				chunkSize = sizeHead[i].(int)
-			} else {
-				chunkSize = sizeTail[tailIndex].(int)
-				tailIndex++
-			}
-
-			if pkt.Dts() <= t.lastTs && t.lastTs != 0 {
-				offset += chunkSize
-				continue
-			}
-
-			if pkt.Dts() > endTs {
-				break
-			}
-
-			size += chunkSize
-			lastTs = pkt.Dts()
-		}
-		t.lastTs = lastTs
-
-		//后面再优化只发送一次
-		var data1 []byte
-		var data2 []byte
-		if offset > len(head) {
-			offset -= len(head)
-			head = tail
-			tail = nil
-		}
-		if offset+size > len(head) {
-			data1 = head[offset:]
-			size -= len(head[offset:])
-			data2 = tail[:size]
-		} else {
-			data1 = head[offset : offset+size]
-		}
-
-		for _, sink := range t.Sinks {
-			if data1 != nil {
-				sink.Input(data1)
-			}
-
-			if data2 != nil {
-				sink.Input(data2)
-			}
-		}
+	//当缓存到第2组GOP的第二个合并写切片时，将上一个GOP缓存释放掉
+	if t.segmentOffset > len(head) && t.memoryPool[1] != nil && !t.memoryPool[1].Empty() {
+		t.memoryPool[1].Clear()
 	}
 }
 
@@ -215,24 +189,38 @@ func (t *TransStream) AddSink(sink stream.ISink) {
 	utils.Assert(t.headerSize > 0)
 
 	t.TransStreamImpl.AddSink(sink)
+	//发送sequence header
 	sink.Input(t.header[:t.headerSize])
 
-	if !stream.AppConfig.GOPCache {
+	if !stream.AppConfig.GOPCache || t.onlyAudio {
 		return
 	}
 
-	//发送到最近一个合并写切片之前
+	//发送当前内存池已有的合并写切片
+	if t.segmentOffset > 0 {
+		data, tail := t.memoryPool[0].Data()
+		utils.Assert(len(data) > 0)
+		utils.Assert(len(tail) == 0)
+		sink.Input(data[:t.segmentOffset])
+		return
+	}
 
-	// if stream.AppConfig.GOPCache > 0 {
-	// 	t.transBuffer.PeekAll(func(packet interface{}) {
-	// 		sink.Input(packet.([]byte))
-	// 	})
-	// }
-}
+	//发送上一组GOP
+	if t.memoryPool[1] != nil && !t.memoryPool[1].Empty() {
+		data, tail := t.memoryPool[0].Data()
+		utils.Assert(len(data) > 0)
+		utils.Assert(len(tail) == 0)
+		sink.Input(data)
+		return
+	}
 
-func (t *TransStream) onDiscardPacket(pkt interface{}) {
-	t.memoryPool[0].FreeHead()
-	t.chunkSizeQueue.Pop()
+	//不足一个合并写切片, 有多少发多少
+	data, tail := t.memoryPool[0].Data()
+	utils.Assert(len(tail) == 0)
+	if len(data) > 0 {
+		sink.Input(data)
+		t.incompleteSinks = append(t.incompleteSinks, sink)
+	}
 }
 
 func (t *TransStream) WriteHeader() error {
@@ -264,12 +252,9 @@ func (t *TransStream) WriteHeader() error {
 	t.muxer = libflv.NewMuxer(audioCodecId, videoCodecId, 0, 0, 0)
 
 	if stream.AppConfig.GOPCache {
-		t.transBuffer = stream.NewStreamBuffer(200)
-		t.transBuffer.SetDiscardHandler(t.onDiscardPacket)
-
 		//创建2块内存
-		t.memoryPool[0] = stream.NewMemoryPoolWithRecopy(1024 * 4000)
-		t.memoryPool[1] = stream.NewMemoryPoolWithRecopy(1024 * 4000)
+		t.memoryPool[0] = stream.NewMemoryPoolWithDirect(1024*4000, true)
+		t.memoryPool[1] = stream.NewMemoryPoolWithDirect(1024*4000, true)
 	} else {
 
 	}
@@ -304,6 +289,5 @@ func (t *TransStream) WriteHeader() error {
 
 func NewTransStream(chunkSize int) stream.ITransStream {
 	transStream := &TransStream{chunkSize: chunkSize, TransStreamImpl: stream.TransStreamImpl{Sinks: make(map[stream.SinkId]stream.ISink, 64)}}
-	transStream.chunkSizeQueue = stream.NewQueue(512)
 	return transStream
 }
