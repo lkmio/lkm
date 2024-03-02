@@ -2,6 +2,8 @@ package stream
 
 import (
 	"fmt"
+	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -56,6 +58,34 @@ const (
 	SessionStateClose            = SessionState(7)
 )
 
+func sourceTypeToStr(sourceType SourceType) string {
+	if SourceTypeRtmp == sourceType {
+		return "rtmp"
+	} else if SourceType28181 == sourceType {
+		return "28181"
+	} else if SourceType1078 == sourceType {
+		return "1078"
+	}
+
+	return ""
+}
+
+func streamTypeToStr(protocol Protocol) string {
+	if ProtocolRtmp == protocol {
+		return "rtmp"
+	} else if ProtocolFlv == protocol {
+		return "flv"
+	} else if ProtocolRtsp == protocol {
+		return "rtsp"
+	} else if ProtocolHls == protocol {
+		return "hls"
+	} else if ProtocolRtc == protocol {
+		return "rtc"
+	}
+
+	return ""
+}
+
 type ISource interface {
 	// Id Source的唯一ID/**
 	Id() string
@@ -84,6 +114,8 @@ type ISource interface {
 	// 停止一切封装和转发流以及转码工作
 	// 将Sink添加到等待队列
 	Close()
+
+	Type() SourceType
 }
 
 type CreateSource func(id string, type_ SourceType, handler stream.OnDeMuxerHandler)
@@ -91,9 +123,12 @@ type CreateSource func(id string, type_ SourceType, handler stream.OnDeMuxerHand
 var TranscoderFactory func(src utils.AVStream, dst utils.AVStream) transcode.ITranscoder
 
 type SourceImpl struct {
+	hookSessionImpl
+
 	Id_   string
 	Type_ SourceType
 	state SessionState
+	Conn  net.Conn
 
 	TransDeMuxer     stream.DeMuxer          //负责从推流协议中解析出AVStream和AVPacket
 	recordSink       ISink                   //每个Source唯一的一个录制流
@@ -338,7 +373,7 @@ func (s *SourceImpl) Close() {
 	//释放每路转协议流， 将所有sink添加到等待队列
 	_, _ = SourceManager.Remove(s.Id_)
 	for _, transStream := range s.transStreams {
-		transStream.PopAllSinks(func(sink ISink) {
+		transStream.PopAllSink(func(sink ISink) {
 			sink.SetTransStreamId(0)
 			state := sink.SetState(SessionStateWait)
 			if state {
@@ -417,4 +452,48 @@ func (s *SourceImpl) OnDeMuxPacket(packet utils.AVPacket) {
 
 func (s *SourceImpl) OnDeMuxDone() {
 
+}
+
+func (s *SourceImpl) Publish(source ISource, success func(), failure func(state utils.HookState)) {
+	//streamId 已经被占用
+	if source_ := SourceManager.Find(source.Id()); source_ != nil {
+		fmt.Printf("推流已经占用 Source:%s", source.Id())
+		failure(utils.HookStateOccupy)
+	}
+
+	if !AppConfig.Hook.EnableOnPublish() {
+		if err := SourceManager.Add(source); err == nil {
+			success()
+		} else {
+			fmt.Printf("添加失败 Source:%s", source.Id())
+			failure(utils.HookStateOccupy)
+		}
+
+		return
+	}
+
+	err := s.Hook(HookEventPublish, NewHookEventInfo(source.Id(), sourceTypeToStr(source.Type()), ""),
+		func(response *http.Response) {
+			if err := SourceManager.Add(source); err == nil {
+				success()
+			} else {
+				failure(utils.HookStateOccupy)
+			}
+		}, func(response *http.Response, err error) {
+			failure(utils.HookStateFailure)
+		})
+
+	//hook地址连接失败
+	if err != nil {
+		failure(utils.HookStateFailure)
+		return
+	}
+}
+
+func (s *SourceImpl) PublishDone(source ISource, success func(), failure func(state utils.HookState)) {
+
+}
+
+func (s *SourceImpl) Type() SourceType {
+	return s.Type_
 }

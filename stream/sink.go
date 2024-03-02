@@ -1,8 +1,10 @@
 package stream
 
 import (
+	"fmt"
 	"github.com/yangjiechina/avformat/utils"
 	"net"
+	"net/http"
 	"sync/atomic"
 )
 
@@ -60,6 +62,8 @@ func GenerateSinkId(conn net.Conn) SinkId {
 }
 
 type SinkImpl struct {
+	hookSessionImpl
+
 	Id_            SinkId
 	SourceId_      string
 	Protocol_      Protocol
@@ -164,4 +168,39 @@ func (s *SinkImpl) Close() {
 		s.State_ = SessionStateClose
 		s.closed.Store(true)
 	}
+}
+
+func (s *SinkImpl) Play(sink ISink, success func(), failure func(state utils.HookState)) {
+	f := func() {
+		source := SourceManager.Find(sink.SourceId())
+		if source == nil {
+			fmt.Printf("添加到等待队列 sink:%s", sink.Id())
+			sink.SetState(SessionStateWait)
+			AddSinkToWaitingQueue(sink.SourceId(), sink)
+		} else {
+			source.AddEvent(SourceEventPlay, sink)
+		}
+	}
+
+	if !AppConfig.Hook.EnableOnPlay() {
+		f()
+		success()
+		return
+	}
+
+	err := s.Hook(HookEventPlay, NewHookEventInfo(sink.SourceId(), streamTypeToStr(sink.Protocol()), ""), func(response *http.Response) {
+		f()
+		success()
+	}, func(response *http.Response, err error) {
+		failure(utils.HookStateFailure)
+	})
+
+	if err != nil {
+		failure(utils.HookStateFailure)
+		return
+	}
+}
+
+func (s *SinkImpl) PlayDone(source ISink, success func(), failure func(state utils.HookState)) {
+
 }

@@ -3,9 +3,20 @@
   "probe_timeout": 2000,
   "mw_latency": 350,
 
+  "http": {
+    "addr": "0.0.0.0:8080"
+  },
+
   "rtmp": {
     "enable": true,
     "addr": "0.0.0.0:1935"
+  },
+
+  "hls": {
+    "enable": false,
+    "segment_duration": 2,
+    "playlist_length": 10,
+    "path": "../tmp"
   },
 
   "rtsp": {
@@ -30,6 +41,7 @@
   },
 
   "hook": {
+    "timeout": 10,
     "on_publish": "http://localhost:8080/api/v1/live/publish/auth",
     "on_publish_done": "http://localhost:8080/api/v1/live/publishdone",
     "on_play" : "http://localhost:8080/api/v1/live/play/auth",

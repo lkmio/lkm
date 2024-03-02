@@ -1,118 +1,17 @@
 package stream
 
 import (
-	"fmt"
 	"github.com/yangjiechina/avformat/utils"
-	"net/http"
 )
 
-// Session 封装推拉流Session 统一管理，统一 hook回调
-type Session interface {
-	OnPublish(source ISource, pra map[string]interface{}, success func(), failure func(state utils.HookState))
+type SourceHook interface {
+	Publish(source ISource, success func(), failure func(state utils.HookState))
 
-	OnPublishDone()
-
-	OnPlay(sink ISink, pra map[string]interface{}, success func(), failure func(state utils.HookState))
-
-	OnPlayDone(pra map[string]interface{}, success func(), failure func(state utils.HookState))
+	PublishDone(source ISource, success func(), failure func(state utils.HookState))
 }
 
-type SessionImpl struct {
-	hookImpl
-	Stream     string //stream id
-	Protocol   string //推拉流协议
-	RemoteAddr string //peer地址
-}
+type SinkHook interface {
+	Play(sink ISink, success func(), failure func(state utils.HookState))
 
-// AddInfoParams 为每个需要通知的时间添加必要的信息
-func (s *SessionImpl) AddInfoParams(data map[string]interface{}) {
-	data["stream"] = s.Stream
-	data["protocol"] = s.Protocol
-	data["remoteAddr"] = s.RemoteAddr
-}
-
-func (s *SessionImpl) OnPublish(source_ ISource, pra map[string]interface{}, success func(), failure func(state utils.HookState)) {
-	//streamId 已经被占用
-	source := SourceManager.Find(s.Stream)
-	if source != nil {
-		fmt.Printf("推流已经占用 Source:%s", source_.Id())
-		failure(utils.HookStateOccupy)
-		return
-	}
-
-	if !AppConfig.Hook.EnableOnPublish() {
-		if err := SourceManager.Add(source_); err == nil {
-			success()
-		} else {
-			fmt.Printf("添加失败 Source:%s", source_.Id())
-			failure(utils.HookStateOccupy)
-		}
-
-		return
-	}
-
-	if pra == nil {
-		pra = make(map[string]interface{}, 5)
-	}
-
-	s.AddInfoParams(pra)
-	err := s.DoPublish(pra, func(response *http.Response) {
-		if err := SourceManager.Add(source_); err == nil {
-			success()
-		} else {
-			failure(utils.HookStateOccupy)
-		}
-	}, func(response *http.Response, err error) {
-		failure(utils.HookStateFailure)
-	})
-
-	//hook地址连接失败
-	if err != nil {
-		failure(utils.HookStateFailure)
-		return
-	}
-}
-
-func (s *SessionImpl) OnPublishDone() {
-
-}
-
-func (s *SessionImpl) OnPlay(sink ISink, pra map[string]interface{}, success func(), failure func(state utils.HookState)) {
-	f := func() {
-		source := SourceManager.Find(s.Stream)
-		if source == nil {
-			fmt.Printf("添加到等待队列 sink:%s", sink.Id())
-			sink.SetState(SessionStateWait)
-			AddSinkToWaitingQueue(s.Stream, sink)
-		} else {
-			source.AddEvent(SourceEventPlay, sink)
-		}
-	}
-
-	if !AppConfig.Hook.EnableOnPlay() {
-		f()
-		success()
-		return
-	}
-
-	if pra == nil {
-		pra = make(map[string]interface{}, 5)
-	}
-
-	s.AddInfoParams(pra)
-	err := s.DoPlay(pra, func(response *http.Response) {
-		f()
-		success()
-	}, func(response *http.Response, err error) {
-		failure(utils.HookStateFailure)
-	})
-
-	if err != nil {
-		failure(utils.HookStateFailure)
-		return
-	}
-}
-
-func (s *SessionImpl) OnPlayDone(pra map[string]interface{}, success func(), failure func(state utils.HookState)) {
-
+	PlayDone(source ISink, success func(), failure func(state utils.HookState))
 }

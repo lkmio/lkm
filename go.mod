@@ -2,7 +2,7 @@ module github.com/yangjiechina/live-server
 
 require github.com/yangjiechina/avformat v0.0.0
 
-require golang.org/x/sys v0.15.0 // indirect
+require github.com/gorilla/mux v1.8.1
 
 replace github.com/yangjiechina/avformat => ../avformat
 

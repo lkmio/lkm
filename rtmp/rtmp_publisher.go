@@ -5,9 +5,28 @@ import (
 	"github.com/yangjiechina/avformat/librtmp"
 	"github.com/yangjiechina/avformat/utils"
 	"github.com/yangjiechina/live-server/stream"
+	"net"
 )
 
-type Publisher struct {
+type Publisher interface {
+
+	// Init 初始化内存池
+	Init()
+
+	// OnDiscardPacket GOP缓存溢出的包
+	OnDiscardPacket(pkt interface{})
+
+	// OnVideo 从rtmp chunk中解析出来的整个视频包, 还需要进步封装成AVPacket
+	OnVideo(data []byte, ts uint32)
+
+	// OnAudio 从rtmp chunk中解析出来的整个音频包
+	OnAudio(data []byte, ts uint32)
+
+	// OnPartPacket 从rtmp chunk中解析出来的一部分音视频包
+	OnPartPacket(index int, data []byte, first bool)
+}
+
+type publisher struct {
 	stream.SourceImpl
 
 	stack           *librtmp.Stack
@@ -18,17 +37,17 @@ type Publisher struct {
 	videoMark bool
 }
 
-func NewPublisher(sourceId string, stack *librtmp.Stack) *Publisher {
+func NewPublisher(sourceId string, stack *librtmp.Stack, conn net.Conn) Publisher {
 	deMuxer := libflv.NewDeMuxer()
-	publisher := &Publisher{SourceImpl: stream.SourceImpl{Id_: sourceId, Type_: stream.SourceTypeRtmp, TransDeMuxer: deMuxer}, stack: stack, audioMark: false, videoMark: false}
+	publisher_ := &publisher{SourceImpl: stream.SourceImpl{Id_: sourceId, Type_: stream.SourceTypeRtmp, TransDeMuxer: deMuxer, Conn: conn}, stack: stack, audioMark: false, videoMark: false}
 	//设置回调，从flv解析出来的Stream和AVPacket都将统一回调到stream.SourceImpl
-	deMuxer.SetHandler(publisher)
-	publisher.Input_ = publisher.Input
+	deMuxer.SetHandler(publisher_)
+	publisher_.Input_ = publisher_.Input
 
-	return publisher
+	return publisher_
 }
 
-func (p *Publisher) Init() {
+func (p *publisher) Init() {
 	//创建内存池
 	p.audioMemoryPool = stream.NewMemoryPool(48000 * 1)
 	if stream.AppConfig.GOPCache {
@@ -42,11 +61,11 @@ func (p *Publisher) Init() {
 	go p.SourceImpl.LoopEvent()
 }
 
-func (p *Publisher) Input(data []byte) {
+func (p *publisher) Input(data []byte) {
 	p.stack.Input(nil, data)
 }
 
-func (p *Publisher) OnDiscardPacket(pkt interface{}) {
+func (p *publisher) OnDiscardPacket(pkt interface{}) {
 	packet := pkt.(utils.AVPacket)
 	if utils.AVMediaTypeAudio == packet.MediaType() {
 		p.audioMemoryPool.FreeHead()
@@ -55,7 +74,7 @@ func (p *Publisher) OnDiscardPacket(pkt interface{}) {
 	}
 }
 
-func (p *Publisher) OnDeMuxStream(stream_ utils.AVStream) {
+func (p *publisher) OnDeMuxStream(stream_ utils.AVStream) {
 	//AVStream的Data单独拷贝出来
 	//释放掉内存池中最新分配的内存
 	tmp := stream_.Extra()
@@ -74,7 +93,7 @@ func (p *Publisher) OnDeMuxStream(stream_ utils.AVStream) {
 	}
 }
 
-func (p *Publisher) OnDeMuxPacket(packet utils.AVPacket) {
+func (p *publisher) OnDeMuxPacket(packet utils.AVPacket) {
 	p.SourceImpl.OnDeMuxPacket(packet)
 
 	if stream.AppConfig.GOPCache {
@@ -88,8 +107,7 @@ func (p *Publisher) OnDeMuxPacket(packet utils.AVPacket) {
 	}
 }
 
-// OnVideo 从rtm chunk解析过来的视频包
-func (p *Publisher) OnVideo(data []byte, ts uint32) {
+func (p *publisher) OnVideo(data []byte, ts uint32) {
 	if data == nil {
 		data = p.videoMemoryPool.Fetch()
 		p.videoMark = false
@@ -98,7 +116,7 @@ func (p *Publisher) OnVideo(data []byte, ts uint32) {
 	p.SourceImpl.TransDeMuxer.(*libflv.DeMuxer).InputVideo(data, ts)
 }
 
-func (p *Publisher) OnAudio(data []byte, ts uint32) {
+func (p *publisher) OnAudio(data []byte, ts uint32) {
 	if data == nil {
 		data = p.audioMemoryPool.Fetch()
 		p.audioMark = false
@@ -107,8 +125,7 @@ func (p *Publisher) OnAudio(data []byte, ts uint32) {
 	_ = p.SourceImpl.TransDeMuxer.(*libflv.DeMuxer).InputAudio(data, ts)
 }
 
-// OnPartPacket 从rtmp解析过来的部分音视频包
-func (p *Publisher) OnPartPacket(index int, data []byte, first bool) {
+func (p *publisher) OnPartPacket(index int, data []byte, first bool) {
 	//audio
 	if index == 0 {
 		if !p.audioMark {

@@ -20,6 +20,10 @@ func CreateTransStream(protocol stream.Protocol, streams []utils.AVStream) strea
 	return nil
 }
 
+func requestStream(sourceId string) {
+
+}
+
 func init() {
 	stream.TransStreamFactory = CreateTransStream
 }
@@ -40,6 +44,9 @@ func main() {
 	}
 
 	println("启动rtmp服务成功:" + addr)
+
+	apiAddr := "0.0.0.0:8080"
+	go startApiServer(apiAddr)
 
 	loadConfigError := http.ListenAndServe(":19999", nil)
 	if loadConfigError != nil {

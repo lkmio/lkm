@@ -64,6 +64,7 @@ func GenerateTransStreamId(protocol Protocol, ids ...utils.AVStream) TransStream
 
 var TransStreamFactory func(protocol Protocol, streams []utils.AVStream) ITransStream
 
+// ITransStream 讲AVPacket封装成传输流，转发给各个Sink
 type ITransStream interface {
 	Input(packet utils.AVPacket)
 
@@ -75,7 +76,7 @@ type ITransStream interface {
 
 	RemoveSink(id SinkId) (ISink, bool)
 
-	PopAllSinks(handler func(sink ISink))
+	PopAllSink(handler func(sink ISink))
 
 	AllSink() []ISink
 }
@@ -109,7 +110,7 @@ func (t *TransStreamImpl) RemoveSink(id SinkId) (ISink, bool) {
 	return sink, ok
 }
 
-func (t *TransStreamImpl) PopAllSinks(handler func(sink ISink)) {
+func (t *TransStreamImpl) PopAllSink(handler func(sink ISink)) {
 	for _, sink := range t.Sinks {
 		handler(sink)
 	}

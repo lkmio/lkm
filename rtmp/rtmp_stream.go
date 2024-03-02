@@ -41,6 +41,11 @@ type TransStream struct {
 	incompleteSinks []stream.ISink
 }
 
+func NewTransStream(chunkSize int) stream.ITransStream {
+	transStream := &TransStream{chunkSize: chunkSize, TransStreamImpl: stream.TransStreamImpl{Sinks: make(map[stream.SinkId]stream.ISink, 64)}}
+	return transStream
+}
+
 func (t *TransStream) Input(packet utils.AVPacket) {
 	utils.Assert(t.TransStreamImpl.Completed)
 
@@ -285,9 +290,4 @@ func (t *TransStream) WriteHeader() error {
 
 	t.headerSize = n
 	return nil
-}
-
-func NewTransStream(chunkSize int) stream.ITransStream {
-	transStream := &TransStream{chunkSize: chunkSize, TransStreamImpl: stream.TransStreamImpl{Sinks: make(map[stream.SinkId]stream.ISink, 64)}}
-	return transStream
 }

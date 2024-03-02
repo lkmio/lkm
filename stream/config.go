@@ -10,6 +10,7 @@ type RtmpConfig struct {
 }
 
 type HookConfig struct {
+	Time          int
 	Enable        bool   `json:"enable"`
 	OnPublish     string `json:"on_publish"`      //推流回调
 	OnPublishDone string `json:"on_publish_done"` //推流结束回调
