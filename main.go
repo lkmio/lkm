@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/yangjiechina/live-server/hls"
 	"net"
 	"net/http"
 
@@ -12,16 +13,23 @@ import (
 	"github.com/yangjiechina/live-server/stream"
 )
 
-func CreateTransStream(protocol stream.Protocol, streams []utils.AVStream) stream.ITransStream {
+func CreateTransStream(source stream.ISource, protocol stream.Protocol, streams []utils.AVStream) stream.ITransStream {
 	if stream.ProtocolRtmp == protocol {
 		return rtmp.NewTransStream(librtmp.ChunkSize)
+	} else if stream.ProtocolHls == protocol {
+		id := source.Id()
+		m3u8Name := id + ".m3u8"
+		tsFormat := id + "_%d.ts"
+
+		transStream, err := hls.NewTransStream("/live/hls/", m3u8Name, tsFormat, "../tmp/", 2, 10)
+		if err != nil {
+			panic(err)
+		}
+
+		return transStream
 	}
 
 	return nil
-}
-
-func requestStream(sourceId string) {
-
 }
 
 func init() {

@@ -62,23 +62,25 @@ func GenerateTransStreamId(protocol Protocol, ids ...utils.AVStream) TransStream
 	return TransStreamId(streamId)
 }
 
-var TransStreamFactory func(protocol Protocol, streams []utils.AVStream) ITransStream
+var TransStreamFactory func(source ISource, protocol Protocol, streams []utils.AVStream) ITransStream
 
 // ITransStream 讲AVPacket封装成传输流，转发给各个Sink
 type ITransStream interface {
-	Input(packet utils.AVPacket)
+	Input(packet utils.AVPacket) error
 
-	AddTrack(stream utils.AVStream)
+	AddTrack(stream utils.AVStream) error
 
 	WriteHeader() error
 
-	AddSink(sink ISink)
+	AddSink(sink ISink) error
 
 	RemoveSink(id SinkId) (ISink, bool)
 
 	PopAllSink(handler func(sink ISink))
 
 	AllSink() []ISink
+
+	Close() error
 }
 
 type TransStreamImpl struct {
@@ -87,18 +89,24 @@ type TransStreamImpl struct {
 	Tracks      []utils.AVStream
 	transBuffer MemoryPool //每个TransStream也缓存封装后的流
 	Completed   bool
+	existVideo  bool
 }
 
-func (t *TransStreamImpl) Input(packet utils.AVPacket) {
-
+func (t *TransStreamImpl) Input(packet utils.AVPacket) error {
+	return nil
 }
 
-func (t *TransStreamImpl) AddTrack(stream utils.AVStream) {
+func (t *TransStreamImpl) AddTrack(stream utils.AVStream) error {
 	t.Tracks = append(t.Tracks, stream)
+	if utils.AVMediaTypeVideo == stream.Type() {
+		t.existVideo = true
+	}
+	return nil
 }
 
-func (t *TransStreamImpl) AddSink(sink ISink) {
+func (t *TransStreamImpl) AddSink(sink ISink) error {
 	t.Sinks[sink.Id()] = sink
+	return nil
 }
 
 func (t *TransStreamImpl) RemoveSink(id SinkId) (ISink, bool) {
@@ -121,4 +129,8 @@ func (t *TransStreamImpl) PopAllSink(handler func(sink ISink)) {
 func (t *TransStreamImpl) AllSink() []ISink {
 	//TODO implement me
 	panic("implement me")
+}
+
+func (t *TransStreamImpl) Close() error {
+	return nil
 }

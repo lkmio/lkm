@@ -1,6 +1,7 @@
 package rtmp
 
 import (
+	"fmt"
 	"github.com/yangjiechina/avformat/libflv"
 	"github.com/yangjiechina/avformat/librtmp"
 	"github.com/yangjiechina/avformat/utils"
@@ -46,7 +47,7 @@ func NewTransStream(chunkSize int) stream.ITransStream {
 	return transStream
 }
 
-func (t *TransStream) Input(packet utils.AVPacket) {
+func (t *TransStream) Input(packet utils.AVPacket) error {
 	utils.Assert(t.TransStreamImpl.Completed)
 
 	var data []byte
@@ -66,7 +67,7 @@ func (t *TransStream) Input(packet utils.AVPacket) {
 		//首帧必须要视频关键帧
 		if !t.firstVideoPacket {
 			if !packet.KeyFrame() {
-				return
+				return fmt.Errorf("the first video frame must be a keyframe")
 			}
 
 			t.firstVideoPacket = true
@@ -83,7 +84,7 @@ func (t *TransStream) Input(packet utils.AVPacket) {
 	//即不开启GOP缓存又不合并发送. 直接使用AVPacket的预留头封装发送
 	if !stream.AppConfig.GOPCache || t.onlyAudio {
 		//首帧视频帧必须要关键帧
-		return
+		return nil
 	}
 
 	if videoKey {
@@ -168,11 +169,11 @@ func (t *TransStream) Input(packet utils.AVPacket) {
 			t.incompleteSinks = nil
 		}
 
-		return
+		return nil
 	}
 
 	if t.segmentDuration < stream.AppConfig.MergeWriteLatency {
-		return
+		return nil
 	}
 
 	head, tail := t.memoryPool[0].Data()
@@ -188,9 +189,11 @@ func (t *TransStream) Input(packet utils.AVPacket) {
 	if t.segmentOffset > len(head) && t.memoryPool[1] != nil && !t.memoryPool[1].Empty() {
 		t.memoryPool[1].Clear()
 	}
+
+	return nil
 }
 
-func (t *TransStream) AddSink(sink stream.ISink) {
+func (t *TransStream) AddSink(sink stream.ISink) error {
 	utils.Assert(t.headerSize > 0)
 
 	t.TransStreamImpl.AddSink(sink)
@@ -198,7 +201,7 @@ func (t *TransStream) AddSink(sink stream.ISink) {
 	sink.Input(t.header[:t.headerSize])
 
 	if !stream.AppConfig.GOPCache || t.onlyAudio {
-		return
+		return nil
 	}
 
 	//发送当前内存池已有的合并写切片
@@ -207,7 +210,7 @@ func (t *TransStream) AddSink(sink stream.ISink) {
 		utils.Assert(len(data) > 0)
 		utils.Assert(len(tail) == 0)
 		sink.Input(data[:t.segmentOffset])
-		return
+		return nil
 	}
 
 	//发送上一组GOP
@@ -216,7 +219,7 @@ func (t *TransStream) AddSink(sink stream.ISink) {
 		utils.Assert(len(data) > 0)
 		utils.Assert(len(tail) == 0)
 		sink.Input(data)
-		return
+		return nil
 	}
 
 	//不足一个合并写切片, 有多少发多少
@@ -226,6 +229,8 @@ func (t *TransStream) AddSink(sink stream.ISink) {
 		sink.Input(data)
 		t.incompleteSinks = append(t.incompleteSinks, sink)
 	}
+
+	return nil
 }
 
 func (t *TransStream) WriteHeader() error {

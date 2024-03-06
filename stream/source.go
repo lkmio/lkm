@@ -154,6 +154,8 @@ type SourceImpl struct {
 	closeEvent            chan byte
 	playingEventQueue     chan ISink
 	playingDoneEventQueue chan ISink
+
+	testTransStream ITransStream
 }
 
 func (s *SourceImpl) Id() string {
@@ -169,6 +171,13 @@ func (s *SourceImpl) Init() {
 	s.closeEvent = make(chan byte)
 	s.playingEventQueue = make(chan ISink, 128)
 	s.playingDoneEventQueue = make(chan ISink, 128)
+
+	if s.transStreams == nil {
+		s.transStreams = make(map[TransStreamId]ITransStream, 10)
+	}
+	//测试传输流
+	s.testTransStream = TransStreamFactory(s, ProtocolHls, nil)
+	s.transStreams[0x100] = s.testTransStream
 }
 
 func (s *SourceImpl) LoopEvent() {
@@ -189,6 +198,10 @@ func (s *SourceImpl) LoopEvent() {
 			return
 		}
 	}
+}
+
+func (s *SourceImpl) Input(data []byte) {
+
 }
 
 func (s *SourceImpl) OriginStreams() []utils.AVStream {
@@ -304,11 +317,11 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 	transStreamId := GenerateTransStreamId(sink.Protocol(), streams[:size]...)
 	transStream, ok := s.transStreams[transStreamId]
 	if !ok {
-		//创建一个新的传输流
-		transStream = TransStreamFactory(sink.Protocol(), streams[:size])
 		if s.transStreams == nil {
 			s.transStreams = make(map[TransStreamId]ITransStream, 10)
 		}
+		//创建一个新的传输流
+		transStream = TransStreamFactory(s, sink.Protocol(), streams[:size])
 		s.transStreams[transStreamId] = transStream
 
 		for i := 0; i < size; i++ {
@@ -433,6 +446,14 @@ func (s *SourceImpl) writeHeader() {
 	for _, sink := range sinks {
 		s.AddSink(sink)
 	}
+
+	if s.testTransStream != nil {
+		for _, stream_ := range s.originStreams.All() {
+			s.testTransStream.AddTrack(stream_)
+		}
+
+		s.testTransStream.WriteHeader()
+	}
 }
 
 func (s *SourceImpl) OnDeMuxStreamDone() {
@@ -445,6 +466,7 @@ func (s *SourceImpl) OnDeMuxPacket(packet utils.AVPacket) {
 		buffer.AddPacket(packet, packet.KeyFrame(), packet.Dts())
 	}
 
+	//分发给各个传输流
 	for _, stream := range s.transStreams {
 		stream.Input(packet)
 	}

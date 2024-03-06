@@ -79,7 +79,7 @@ func (s *sessionImpl) Close() {
 		return
 	}
 
-	_, ok := s.handle.(*Publisher)
+	_, ok := s.handle.(*publisher)
 	if ok {
 		if s.isPublisher {
 			s.handle.(*publisher).AddEvent(stream.SourceEventClose, nil)

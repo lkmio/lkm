@@ -34,7 +34,7 @@ const (
 	HookEventPlayDone    = HookEvent(0x4)
 	HookEventRecord      = HookEvent(0x5)
 	HookEventIdleTimeout = HookEvent(0x6)
-	HookEventRecvTimeout = HookEvent(0x6)
+	HookEventRecvTimeout = HookEvent(0x7)
 )
 
 // 每个通知的时间都需要携带的字段

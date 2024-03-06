@@ -47,7 +47,7 @@ type M3U8Writer interface {
 
 func NewM3U8Writer(len int) M3U8Writer {
 	return &m3u8Writer{
-		stringBuffer: bytes.NewBuffer(make([]byte, 1024*10)),
+		stringBuffer: bytes.NewBuffer(make([]byte, 0, 1024*10)),
 		playlist:     stream.NewQueue(len),
 	}
 }
@@ -85,6 +85,7 @@ func (m *m3u8Writer) ToString() string {
 		return ""
 	}
 
+	m.stringBuffer.Reset()
 	m.stringBuffer.WriteString("#EXTM3U\r\n")
 	//暂时只实现第三个版本
 	m.stringBuffer.WriteString("#EXT-X-VERSION:3\r\n")
