@@ -21,7 +21,7 @@ func CreateTransStream(source stream.ISource, protocol stream.Protocol, streams 
 		m3u8Name := id + ".m3u8"
 		tsFormat := id + "_%d.ts"
 
-		transStream, err := hls.NewTransStream("/live/hls/", m3u8Name, tsFormat, "../tmp/", 2, 10)
+		transStream, err := hls.NewTransStream("", m3u8Name, tsFormat, "../tmp/", 2, 10)
 		if err != nil {
 			panic(err)
 		}

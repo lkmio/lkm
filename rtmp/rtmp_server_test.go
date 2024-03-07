@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func CreateTransStream(protocol stream.Protocol, streams []utils.AVStream) stream.ITransStream {
+func CreateTransStream(source stream.ISource, protocol stream.Protocol, streams []utils.AVStream) stream.ITransStream {
 	if stream.ProtocolRtmp == protocol {
 		return NewTransStream(librtmp.ChunkSize)
 	}

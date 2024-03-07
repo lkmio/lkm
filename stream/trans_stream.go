@@ -89,7 +89,7 @@ type TransStreamImpl struct {
 	Tracks      []utils.AVStream
 	transBuffer MemoryPool //每个TransStream也缓存封装后的流
 	Completed   bool
-	existVideo  bool
+	ExistVideo  bool
 }
 
 func (t *TransStreamImpl) Input(packet utils.AVPacket) error {
@@ -99,7 +99,7 @@ func (t *TransStreamImpl) Input(packet utils.AVPacket) error {
 func (t *TransStreamImpl) AddTrack(stream utils.AVStream) error {
 	t.Tracks = append(t.Tracks, stream)
 	if utils.AVMediaTypeVideo == stream.Type() {
-		t.existVideo = true
+		t.ExistVideo = true
 	}
 	return nil
 }

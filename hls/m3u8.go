@@ -59,23 +59,41 @@ type Segment struct {
 }
 
 type m3u8Writer struct {
-	stringBuffer   *bytes.Buffer
-	targetDuration int
-	playlist       *stream.Queue
+	stringBuffer *bytes.Buffer
+	playlist     *stream.Queue
 }
 
 func (m *m3u8Writer) AddSegment(duration float32 /*title string,*/, url string, sequence int) {
-	//影响播放器缓存.
-	round := int(math.Ceil(float64(duration)))
-	if round > m.targetDuration {
-		m.targetDuration = round
-	}
-
 	if m.playlist.IsFull() {
 		m.playlist.Pop()
 	}
 
 	m.playlist.Push(Segment{duration: duration, url: url, sequence: sequence})
+}
+
+func (m *m3u8Writer) targetDuration() int {
+	var targetDuration int
+	head, tail := m.playlist.Data()
+
+	compute := func(playlist []interface{}) {
+		for _, segment := range playlist {
+			//影响播放器缓存.
+			round := int(math.Ceil(float64(segment.(Segment).duration)))
+			if round > targetDuration {
+				targetDuration = round
+			}
+		}
+	}
+
+	if head != nil {
+		compute(head)
+	}
+
+	if tail != nil {
+		compute(tail)
+	}
+
+	return targetDuration
 }
 
 func (m *m3u8Writer) ToString() string {
@@ -90,7 +108,7 @@ func (m *m3u8Writer) ToString() string {
 	//暂时只实现第三个版本
 	m.stringBuffer.WriteString("#EXT-X-VERSION:3\r\n")
 	m.stringBuffer.WriteString("#EXT-X-TARGETDURATION:")
-	m.stringBuffer.WriteString(strconv.Itoa(m.targetDuration))
+	m.stringBuffer.WriteString(strconv.Itoa(m.targetDuration()))
 	m.stringBuffer.WriteString("\r\n")
 	m.stringBuffer.WriteString("#ExtXMediaSequence:")
 	m.stringBuffer.WriteString(strconv.Itoa(head[0].(Segment).sequence))

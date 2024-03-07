@@ -13,10 +13,8 @@ type tsContext struct {
 	writeBuffer     []byte
 	writeBufferSize int
 
-	duration       int
-	playlistLength int
-	url            string
-	path           string
+	url  string
+	path string
 
 	file *os.File
 }
@@ -31,6 +29,7 @@ type Stream struct {
 	m3u8Name string
 	tsFormat string
 	dir      string
+	duration int
 	m3u8File *os.File
 }
 
@@ -58,6 +57,7 @@ func NewTransStream(url, m3u8Name, tsFormat, dir string, segmentDuration, playli
 		m3u8Name: m3u8Name,
 		tsFormat: tsFormat,
 		dir:      dir,
+		duration: segmentDuration,
 	}
 
 	muxer := libmpeg.NewTSMuxer()
@@ -68,8 +68,6 @@ func NewTransStream(url, m3u8Name, tsFormat, dir string, segmentDuration, playli
 		segmentSeq:      0,
 		writeBuffer:     make([]byte, 1024*1024),
 		writeBufferSize: 0,
-		duration:        segmentDuration,
-		playlistLength:  playlistLength,
 	}
 
 	stream_.muxer = muxer
@@ -83,7 +81,8 @@ func (t *Stream) Input(packet utils.AVPacket) error {
 		return fmt.Errorf("track not available")
 	}
 
-	if utils.AVMediaTypeVideo == packet.MediaType() && packet.KeyFrame() || t.context.file == nil {
+	//创建一下个切片
+	if (!t.ExistVideo || utils.AVMediaTypeVideo == packet.MediaType() && packet.KeyFrame()) && float32(t.muxer.Duration())/90000 >= float32(t.duration) {
 		if err := t.createSegment(); err != nil {
 			return err
 		}
@@ -116,7 +115,7 @@ func (t *Stream) AddTrack(stream utils.AVStream) error {
 }
 
 func (t *Stream) WriteHeader() error {
-	return nil
+	return t.createSegment()
 }
 
 func (t *Stream) onTSWrite(data []byte) {
