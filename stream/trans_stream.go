@@ -66,6 +66,8 @@ var TransStreamFactory func(source ISource, protocol Protocol, streams []utils.A
 
 // ITransStream 讲AVPacket封装成传输流，转发给各个Sink
 type ITransStream interface {
+	Init()
+
 	Input(packet utils.AVPacket) error
 
 	AddTrack(stream utils.AVStream) error
@@ -81,6 +83,8 @@ type ITransStream interface {
 	AllSink() []ISink
 
 	Close() error
+
+	SendPacket(data []byte) error
 }
 
 type TransStreamImpl struct {
@@ -90,6 +94,10 @@ type TransStreamImpl struct {
 	transBuffer MemoryPool //每个TransStream也缓存封装后的流
 	Completed   bool
 	ExistVideo  bool
+}
+
+func (t *TransStreamImpl) Init() {
+	t.Sinks = make(map[SinkId]ISink, 64)
 }
 
 func (t *TransStreamImpl) Input(packet utils.AVPacket) error {
@@ -132,5 +140,70 @@ func (t *TransStreamImpl) AllSink() []ISink {
 }
 
 func (t *TransStreamImpl) Close() error {
+	return nil
+}
+func (t *TransStreamImpl) SendPacket(data []byte) error {
+	for _, sink := range t.Sinks {
+		sink.Input(data)
+	}
+
+	return nil
+}
+
+// CacheTransStream 针对RTMP/FLV/HLS等基于TCP传输的带缓存传输流.
+type CacheTransStream struct {
+	TransStreamImpl
+
+	//作为封装流的内存缓存区, 即使没有开启GOP缓存也创建一个, 开启GOP缓存的情况下, 创建2个, 反复交替使用.
+	StreamBuffers []MemoryPool
+
+	//当前合并写切片位于memoryPool的开始偏移量
+	SegmentOffset int
+	//前一个包的时间戳
+	PrePacketTS int64
+}
+
+func (c *CacheTransStream) Init() {
+	c.TransStreamImpl.Init()
+
+	c.StreamBuffers = make([]MemoryPool, 2)
+	c.StreamBuffers[0] = NewMemoryPoolWithDirect(1024*4000, true)
+
+	if c.ExistVideo && AppConfig.MergeWriteLatency > 0 {
+		c.StreamBuffers[1] = NewMemoryPoolWithDirect(1024*4000, true)
+	}
+
+	c.SegmentOffset = 0
+	c.PrePacketTS = -1
+}
+
+func (c *CacheTransStream) Full(ts int64) bool {
+	if c.PrePacketTS == -1 {
+		c.PrePacketTS = ts
+	}
+
+	if ts < c.PrePacketTS {
+		c.PrePacketTS = ts
+	}
+
+	return int(ts-c.PrePacketTS) >= AppConfig.MergeWriteLatency
+}
+
+func (c *CacheTransStream) SwapStreamBuffer() {
+	utils.Assert(c.ExistVideo)
+
+	tmp := c.StreamBuffers[0]
+	c.StreamBuffers[0] = c.StreamBuffers[1]
+	c.StreamBuffers[1] = tmp
+	c.StreamBuffers[0].Clear()
+
+	c.PrePacketTS = -1
+	c.SegmentOffset = 0
+}
+
+func (c *CacheTransStream) SendPacketWithOffset(data []byte, offset int) error {
+	c.TransStreamImpl.SendPacket(data[offset:])
+	c.SegmentOffset = len(data)
+	c.PrePacketTS = -1
 	return nil
 }

@@ -187,12 +187,11 @@ func (m *memoryPool) FreeTail() {
 }
 
 func (m *memoryPool) Data() ([]byte, []byte) {
-	if m.tail <= m.head {
+	if m.tail <= m.head && !m.blockQueue.IsEmpty() {
 		return m.data[m.head:m.capacity], m.data[:m.tail]
 	} else {
 		return m.data[m.head:m.tail], nil
 	}
-
 }
 
 func (m *memoryPool) Clear() {

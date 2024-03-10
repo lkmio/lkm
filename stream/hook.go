@@ -8,23 +8,6 @@ import (
 )
 
 type HookFunc func(m map[string]interface{}, success func(response *http.Response), failure func(response *http.Response, err error)) error
-
-type Hook interface {
-	DoPublish(m map[string]interface{}, success func(response *http.Response), failure func(response *http.Response, err error)) error
-
-	DoPublishDone(m map[string]interface{}, success func(response *http.Response), failure func(response *http.Response, err error)) error
-
-	DoPlay(m map[string]interface{}, success func(response *http.Response), failure func(response *http.Response, err error)) error
-
-	DoPlayDone(m map[string]interface{}, success func(response *http.Response), failure func(response *http.Response, err error)) error
-
-	DoRecord(m map[string]interface{}, success func(response *http.Response), failure func(response *http.Response, err error)) error
-
-	DoIdleTimeout(m map[string]interface{}, success func(response *http.Response), failure func(response *http.Response, err error)) error
-
-	DoRecvTimeout(m map[string]interface{}, success func(response *http.Response), failure func(response *http.Response, err error)) error
-}
-
 type HookEvent int
 
 const (
@@ -44,8 +27,12 @@ type eventInfo struct {
 	remoteAddr string //peer地址
 }
 
-func NewHookEventInfo(stream, protocol, remoteAddr string) eventInfo {
-	return eventInfo{stream: stream, protocol: protocol, remoteAddr: remoteAddr}
+func NewPlayHookEventInfo(stream, remoteAddr string, protocol Protocol) eventInfo {
+	return eventInfo{stream: stream, protocol: streamTypeToStr(protocol), remoteAddr: remoteAddr}
+}
+
+func NewPublishHookEventInfo(stream, remoteAddr string, protocol SourceType) eventInfo {
+	return eventInfo{stream: stream, protocol: sourceTypeToStr(protocol), remoteAddr: remoteAddr}
 }
 
 type HookSession interface {

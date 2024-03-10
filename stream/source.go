@@ -494,7 +494,7 @@ func (s *SourceImpl) Publish(source ISource, success func(), failure func(state 
 		return
 	}
 
-	err := s.Hook(HookEventPublish, NewHookEventInfo(source.Id(), sourceTypeToStr(source.Type()), ""),
+	err := s.Hook(HookEventPublish, NewPublishHookEventInfo(source.Id(), "", source.Type()),
 		func(response *http.Response) {
 			if err := SourceManager.Add(source); err == nil {
 				success()

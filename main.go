@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/yangjiechina/live-server/flv"
 	"github.com/yangjiechina/live-server/hls"
 	"net"
 	"net/http"
@@ -27,6 +28,8 @@ func CreateTransStream(source stream.ISource, protocol stream.Protocol, streams 
 		}
 
 		return transStream
+	} else if stream.ProtocolFlv == protocol {
+		return flv.NewHttpTransStream()
 	}
 
 	return nil

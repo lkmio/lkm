@@ -4,9 +4,22 @@ import (
 	"github.com/yangjiechina/avformat/utils"
 )
 
+type IStreamManager interface {
+	Add(stream utils.AVStream)
+
+	FindStream(id utils.AVCodecID) utils.AVStream
+
+	FindStreamWithType(mediaType utils.AVMediaType) utils.AVStream
+
+	FindStreams(id utils.AVCodecID) []utils.AVStream
+
+	FindStreamsWithType(mediaType utils.AVMediaType) []utils.AVStream
+
+	All() []utils.AVStream
+}
+
 type StreamManager struct {
-	streams   []utils.AVStream
-	completed bool
+	streams []utils.AVStream
 }
 
 func (s *StreamManager) Add(stream utils.AVStream) {

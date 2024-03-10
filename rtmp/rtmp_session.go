@@ -55,7 +55,7 @@ func (s *sessionImpl) OnPlay(app, stream_ string, response chan utils.HookState)
 	sourceId := app + "_" + stream_
 
 	//拉流事件Sink统一处理
-	sink := NewSink(stream.GenerateSinkId(s.conn), sourceId, s.conn)
+	sink := NewSink(stream.GenerateSinkId(s.conn.RemoteAddr()), sourceId, s.conn)
 	sink.(*stream.SinkImpl).Play(sink, func() {
 		s.handle = sink
 		response <- utils.HookStateOK
