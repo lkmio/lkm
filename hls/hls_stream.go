@@ -19,18 +19,19 @@ type tsContext struct {
 	file *os.File
 }
 
-type Stream struct {
+type transStream struct {
 	stream.TransStreamImpl
 	muxer   libmpeg.TSMuxer
 	context *tsContext
 
-	m3u8     M3U8Writer
-	url      string
-	m3u8Name string
-	tsFormat string
-	dir      string
-	duration int
-	m3u8File *os.File
+	m3u8           M3U8Writer
+	url            string
+	m3u8Name       string
+	tsFormat       string
+	dir            string
+	duration       int
+	m3u8File       *os.File
+	playlistLength int
 }
 
 // NewTransStream 创建HLS传输流
@@ -52,12 +53,13 @@ func NewTransStream(url, m3u8Name, tsFormat, dir string, segmentDuration, playli
 		return nil, err
 	}
 
-	stream_ := &Stream{
-		url:      url,
-		m3u8Name: m3u8Name,
-		tsFormat: tsFormat,
-		dir:      dir,
-		duration: segmentDuration,
+	stream_ := &transStream{
+		url:            url,
+		m3u8Name:       m3u8Name,
+		tsFormat:       tsFormat,
+		dir:            dir,
+		duration:       segmentDuration,
+		playlistLength: playlistLength,
 	}
 
 	muxer := libmpeg.NewTSMuxer()
@@ -76,7 +78,7 @@ func NewTransStream(url, m3u8Name, tsFormat, dir string, segmentDuration, playli
 	return stream_, nil
 }
 
-func (t *Stream) Input(packet utils.AVPacket) error {
+func (t *transStream) Input(packet utils.AVPacket) error {
 	if packet.Index() >= t.muxer.TrackCount() {
 		return fmt.Errorf("track not available")
 	}
@@ -95,7 +97,7 @@ func (t *Stream) Input(packet utils.AVPacket) error {
 	}
 }
 
-func (t *Stream) AddTrack(stream utils.AVStream) error {
+func (t *transStream) AddTrack(stream utils.AVStream) error {
 	err := t.TransStreamImpl.AddTrack(stream)
 	if err != nil {
 		return err
@@ -114,15 +116,15 @@ func (t *Stream) AddTrack(stream utils.AVStream) error {
 	return err
 }
 
-func (t *Stream) WriteHeader() error {
+func (t *transStream) WriteHeader() error {
 	return t.createSegment()
 }
 
-func (t *Stream) onTSWrite(data []byte) {
+func (t *transStream) onTSWrite(data []byte) {
 	t.context.writeBufferSize += len(data)
 }
 
-func (t *Stream) onTSAlloc(size int) []byte {
+func (t *transStream) onTSAlloc(size int) []byte {
 	n := len(t.context.writeBuffer) - t.context.writeBufferSize
 	if n < size {
 		_, _ = t.context.file.Write(t.context.writeBuffer[:t.context.writeBufferSize])
@@ -132,7 +134,7 @@ func (t *Stream) onTSAlloc(size int) []byte {
 	return t.context.writeBuffer[t.context.writeBufferSize : t.context.writeBufferSize+size]
 }
 
-func (t *Stream) flushSegment() error {
+func (t *transStream) flushSegment() error {
 	//将剩余数据写入缓冲区
 	if t.context.writeBufferSize > 0 {
 		_, _ = t.context.file.Write(t.context.writeBuffer[:t.context.writeBufferSize])
@@ -143,10 +145,15 @@ func (t *Stream) flushSegment() error {
 		return err
 	}
 
-	duration := float32(t.muxer.Duration()) / 90000
-	t.m3u8.AddSegment(duration, t.context.url, t.context.segmentSeq)
+	//删除多余的ts切片文件
+	if t.m3u8.Size() >= t.playlistLength {
+		_ = os.Remove(t.m3u8.Head().path)
+	}
 
 	//更新m3u8
+	duration := float32(t.muxer.Duration()) / 90000
+	t.m3u8.AddSegment(duration, t.context.url, t.context.segmentSeq, t.context.path)
+
 	if _, err := t.m3u8File.Seek(0, 0); err != nil {
 		return err
 	}
@@ -162,13 +169,14 @@ func (t *Stream) flushSegment() error {
 	return nil
 }
 
-func (t *Stream) createSegment() error {
+func (t *transStream) createSegment() error {
 	if t.context.file != nil {
 		err := t.flushSegment()
 		t.context.segmentSeq++
 		if err != nil {
 			return err
 		}
+
 	}
 
 	tsName := fmt.Sprintf(t.tsFormat, t.context.segmentSeq)
@@ -185,7 +193,7 @@ func (t *Stream) createSegment() error {
 	return err
 }
 
-func (t *Stream) Close() error {
+func (t *transStream) Close() error {
 	var err error
 
 	if t.context.file != nil {

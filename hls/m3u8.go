@@ -40,9 +40,13 @@ const (
 //无BOM
 
 type M3U8Writer interface {
-	AddSegment(duration float32, url string, sequence int)
+	AddSegment(duration float32, url string, sequence int, path string)
 
 	ToString() string
+
+	Size() int
+
+	Head() Segment
 }
 
 func NewM3U8Writer(len int) M3U8Writer {
@@ -56,6 +60,7 @@ type Segment struct {
 	duration float32
 	url      string
 	sequence int
+	path     string
 }
 
 type m3u8Writer struct {
@@ -63,12 +68,12 @@ type m3u8Writer struct {
 	playlist     *stream.Queue
 }
 
-func (m *m3u8Writer) AddSegment(duration float32 /*title string,*/, url string, sequence int) {
+func (m *m3u8Writer) AddSegment(duration float32 /*title string,*/, url string, sequence int, path string) {
 	if m.playlist.IsFull() {
 		m.playlist.Pop()
 	}
 
-	m.playlist.Push(Segment{duration: duration, url: url, sequence: sequence})
+	m.playlist.Push(Segment{duration: duration, url: url, sequence: sequence, path: path})
 }
 
 func (m *m3u8Writer) targetDuration() int {
@@ -133,4 +138,28 @@ func (m *m3u8Writer) ToString() string {
 	}
 
 	return m.stringBuffer.String()
+}
+
+func (m *m3u8Writer) Size() int {
+	var size int
+	head, tail := m.playlist.Data()
+
+	if head != nil {
+		size += len(head)
+	}
+
+	if tail != nil {
+		size += len(tail)
+	}
+
+	return size
+}
+
+func (m *m3u8Writer) Head() Segment {
+	head, _ := m.playlist.Data()
+	if head != nil {
+		return head[0].(Segment)
+	}
+
+	return Segment{}
 }
