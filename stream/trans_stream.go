@@ -76,6 +76,8 @@ type ITransStream interface {
 
 	AddSink(sink ISink) error
 
+	ExistSink(id SinkId) bool
+
 	RemoveSink(id SinkId) (ISink, bool)
 
 	PopAllSink(handler func(sink ISink))
@@ -117,6 +119,11 @@ func (t *TransStreamImpl) AddSink(sink ISink) error {
 	return nil
 }
 
+func (t *TransStreamImpl) ExistSink(id SinkId) bool {
+	_, ok := t.Sinks[id]
+	return ok
+}
+
 func (t *TransStreamImpl) RemoveSink(id SinkId) (ISink, bool) {
 	sink, ok := t.Sinks[id]
 	if ok {
@@ -142,6 +149,7 @@ func (t *TransStreamImpl) AllSink() []ISink {
 func (t *TransStreamImpl) Close() error {
 	return nil
 }
+
 func (t *TransStreamImpl) SendPacket(data []byte) error {
 	for _, sink := range t.Sinks {
 		sink.Input(data)

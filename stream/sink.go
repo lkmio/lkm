@@ -14,6 +14,8 @@ type ISink interface {
 
 	Input(data []byte) error
 
+	SendHeader(data []byte) error
+
 	SourceId() string
 
 	TransStreamId() TransStreamId
@@ -97,6 +99,10 @@ func (s *SinkImpl) Input(data []byte) error {
 	}
 
 	return nil
+}
+
+func (s *SinkImpl) SendHeader(data []byte) error {
+	return s.Input(data)
 }
 
 func (s *SinkImpl) SourceId() string {

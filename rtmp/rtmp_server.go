@@ -26,7 +26,7 @@ func (s *serverImpl) Start(addr net.Addr) error {
 
 	server := &transport.TCPServer{}
 	server.SetHandler(s)
-	err := server.Bind(addr.String())
+	err := server.Bind(addr)
 
 	if err != nil {
 		return err

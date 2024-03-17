@@ -22,7 +22,9 @@
   "rtsp": {
     "enable": true,
     "addr": "0.0.0.0:554",
-    "password": "123456"
+    "port": [20000,30000],
+    "password": "123456",
+    "transport": "UDP|TCP"
   },
 
   "webrtc": {
