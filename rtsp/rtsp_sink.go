@@ -15,7 +15,10 @@ type sink struct {
 
 	//一个rtsp源，可能存在多个流, 每个流都需要拉取拉取
 	tracks []*rtspTrack
-	sdpCB  func(sdp string)
+	sdpCb  func(sdp string)
+
+	tcp     bool
+	playing bool
 }
 
 func NewSink(id stream.SinkId, sourceId string, conn net.Conn, cb func(sdp string)) stream.ISink {
@@ -23,6 +26,8 @@ func NewSink(id stream.SinkId, sourceId string, conn net.Conn, cb func(sdp strin
 		stream.SinkImpl{Id_: id, SourceId_: sourceId, Protocol_: stream.ProtocolRtsp, Conn: conn},
 		nil,
 		cb,
+		false,
+		false,
 	}
 }
 
@@ -40,18 +45,7 @@ func (s *sink) addTrack(index int, tcp bool) (int, int, error) {
 
 	track := rtspTrack{}
 	if tcp {
-		err = rtspTransportManger.AllocTransport(true, func(port int) {
-			var addr *net.TCPAddr
-			addr, err = net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", "0.0.0.0", port))
-			if err == nil {
-				track.rtp = &transport.TCPServer{}
-				track.rtp.SetHandler2(track.onTCPConnected, nil, track.onTCPDisconnected)
-				err = track.rtp.Bind(addr)
-			}
-
-			rtpPort = port
-		})
-
+		s.tcp = true
 	} else {
 		err = rtspTransportManger.AllocPairTransport(func(port int) {
 			//rtp port
@@ -91,16 +85,18 @@ func (s *sink) addTrack(index int, tcp bool) (int, int, error) {
 
 func (s *sink) input(index int, data []byte) error {
 	utils.Assert(index < cap(s.tracks))
-
 	//拉流方还没有连上来
-
 	s.tracks[index].pktCount++
-	s.tracks[index].rtpConn.Write(data)
+	if s.tcp {
+		s.Conn.Write(data)
+	} else {
+		s.tracks[index].rtpConn.Write(data)
+	}
 	return nil
 }
 
 func (s *sink) isConnected(index int) bool {
-	return s.tracks[index] != nil && s.tracks[index].rtpConn != nil
+	return s.playing && (s.tcp || (s.tracks[index] != nil && s.tracks[index].rtpConn != nil))
 }
 
 func (s *sink) pktCount(index int) int {
@@ -109,7 +105,7 @@ func (s *sink) pktCount(index int) int {
 
 // SendHeader 回调rtsp流的sdp信息
 func (s *sink) SendHeader(data []byte) error {
-	s.sdpCB(string(data))
+	s.sdpCb(string(data))
 	return nil
 }
 

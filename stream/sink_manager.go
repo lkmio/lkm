@@ -59,6 +59,7 @@ func PopWaitingSinks(sourceId string) []ISink {
 	var index = 0
 	for _, sink := range source {
 		sinks[index] = sink
+		index++
 	}
 
 	delete(waitingSinks, sourceId)

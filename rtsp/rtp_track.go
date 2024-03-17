@@ -19,12 +19,13 @@ type rtpTrack struct {
 	tmp    [][]byte
 }
 
-func NewRTPTrack(muxer librtp.Muxer, pt byte, rate int) *rtpTrack {
+func NewRTPTrack(muxer librtp.Muxer, pt byte, rate int, mediaType utils.AVMediaType) *rtpTrack {
 	stream := &rtpTrack{
-		pt:     pt,
-		rate:   rate,
-		muxer:  muxer,
-		buffer: make([]byte, 1500),
+		pt:        pt,
+		rate:      rate,
+		muxer:     muxer,
+		buffer:    make([]byte, 1500),
+		mediaType: mediaType,
 	}
 
 	return stream

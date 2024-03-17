@@ -10,6 +10,11 @@ import (
 	"net"
 )
 
+const (
+	OverTcpHeaderSize = 4
+	OverTcpMagic      = 0x24
+)
+
 // 低延迟是rtsp特性, 不考虑实现GOP缓存
 type tranStream struct {
 	stream.TransStreamImpl
@@ -38,37 +43,57 @@ func NewTransStream(addr net.IPAddr, urlFormat string) stream.ITransStream {
 }
 
 func (t *tranStream) onAllocBuffer(params interface{}) []byte {
-	return t.rtpTracks[params.(int)].buffer
+	return t.rtpTracks[params.(int)].buffer[OverTcpHeaderSize:]
 }
 
 func (t *tranStream) onRtpPacket(data []byte, timestamp uint32, params interface{}) {
 	index := params.(int)
+	track := t.rtpTracks[index]
 
-	if t.rtpTracks[index].cache && t.rtpTracks[index].header == nil {
-		bytes := make([]byte, len(data))
-		copy(bytes, data)
+	if track.cache && track.header == nil {
+		bytes := make([]byte, OverTcpHeaderSize+len(data))
+		copy(bytes[OverTcpHeaderSize:], data)
 
-		t.rtpTracks[index].tmp = append(t.rtpTracks[index].tmp, bytes)
+		track.tmp = append(track.tmp, bytes)
+		t.overTCP(bytes, index)
 		return
 	}
 
-	for _, iSink := range t.Sinks {
-		if !iSink.(*sink).isConnected(index) {
+	for _, value := range t.Sinks {
+		sink_ := value.(*sink)
+		if !sink_.isConnected(index) {
 			continue
 		}
 
-		if iSink.(*sink).pktCount(index) < 1 && utils.AVMediaTypeVideo == t.rtpTracks[index].mediaType {
+		if sink_.pktCount(index) < 1 && utils.AVMediaTypeVideo == track.mediaType {
 			seq := binary.BigEndian.Uint16(data[2:])
-			count := len(t.rtpTracks[index].header)
+			count := len(track.header)
 
-			for i, rtp := range t.rtpTracks[index].header {
-				librtp.RollbackSeq(rtp, int(seq)-(count-i-1))
-				iSink.(*sink).input(index, rtp)
+			for i, rtp := range track.header {
+				librtp.RollbackSeq(rtp[OverTcpHeaderSize:], int(seq)-(count-i-1))
+				if sink_.tcp {
+					sink_.input(index, rtp)
+				} else {
+					sink_.input(index, rtp[OverTcpHeaderSize:])
+				}
 			}
 		}
 
-		iSink.(*sink).input(index, data)
+		end := OverTcpHeaderSize + len(data)
+		t.overTCP(track.buffer[:end], index)
+
+		if sink_.tcp {
+			sink_.input(index, track.buffer[:end])
+		} else {
+			sink_.input(index, data)
+		}
 	}
+}
+
+func (t *tranStream) overTCP(data []byte, channel int) {
+	data[0] = OverTcpMagic
+	data[1] = byte(channel)
+	binary.BigEndian.PutUint16(data[2:], uint16(len(data)-4))
 }
 
 func (t *tranStream) Input(packet utils.AVPacket) error {
@@ -135,7 +160,7 @@ func (t *tranStream) AddTrack(stream utils.AVStream) error {
 	muxer.SetAllocHandler(t.onAllocBuffer)
 	muxer.SetWriteHandler(t.onRtpPacket)
 
-	t.rtpTracks = append(t.rtpTracks, NewRTPTrack(muxer, byte(payloadType.Pt), payloadType.ClockRate))
+	t.rtpTracks = append(t.rtpTracks, NewRTPTrack(muxer, byte(payloadType.Pt), payloadType.ClockRate, stream.Type()))
 	muxer.SetParams(len(t.rtpTracks) - 1)
 	return nil
 }

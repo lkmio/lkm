@@ -15,6 +15,8 @@ import (
 	"time"
 )
 
+type SessionState int
+
 const (
 	MethodOptions      = "OPTIONS"
 	MethodDescribe     = "DESCRIBE"
@@ -29,6 +31,13 @@ const (
 	MethodRecord   = "RECORD"
 
 	Version = "RTSP/1.0"
+
+	SessionSateOptions  = SessionState(0x1)
+	SessionSateDescribe = SessionState(0x2)
+	SessionSateSetup    = SessionState(0x3)
+	SessionSatePlay     = SessionState(0x4)
+	SessionSateTeardown = SessionState(0x5)
+	SessionSatePause    = SessionState(0x6)
 )
 
 type requestHandler interface {
@@ -181,27 +190,29 @@ func (s *session) onSetup(sourceId string, index int, headers textproto.MIMEHead
 	var clientRtpPort int
 	var clientRtcpPort int
 	tcp := "RTP/AVP" != split[0] && "RTP/AVP/UDP" != split[0]
-	for _, value := range split {
-		if !strings.HasPrefix(value, "client_port=") {
-			continue
-		}
+	if !tcp {
+		for _, value := range split {
+			if !strings.HasPrefix(value, "client_port=") {
+				continue
+			}
 
-		pairPort := strings.Split(value[len("client_port="):], "-")
-		if len(pairPort) != 2 {
-			return fmt.Errorf("failed to parsing client_port:%s", value)
-		}
+			pairPort := strings.Split(value[len("client_port="):], "-")
+			if len(pairPort) != 2 {
+				return fmt.Errorf("failed to parsing client_port:%s", value)
+			}
 
-		port, err := strconv.Atoi(pairPort[0])
-		if err != nil {
-			return err
-		}
-		clientRtpPort = port
+			port, err := strconv.Atoi(pairPort[0])
+			if err != nil {
+				return err
+			}
+			clientRtpPort = port
 
-		port, err = strconv.Atoi(pairPort[1])
-		if err != nil {
-			return err
+			port, err = strconv.Atoi(pairPort[1])
+			if err != nil {
+				return err
+			}
+			clientRtcpPort = port
 		}
-		clientRtcpPort = port
 	}
 
 	rtpPort, rtcpPort, err := s.sink_.addTrack(index, tcp)
@@ -211,7 +222,15 @@ func (s *session) onSetup(sourceId string, index int, headers textproto.MIMEHead
 
 	println(clientRtpPort)
 	println(clientRtcpPort)
-	responseHeader := transportHeader + ";server_port=" + fmt.Sprintf("%d-%d", rtpPort, rtcpPort) + ";ssrc=FFFFFFFF"
+	responseHeader := transportHeader
+	if tcp {
+		//修改interleaved为实际的stream index
+		responseHeader += ";interleaved=" + fmt.Sprintf("%d-%d", index, index)
+	} else {
+		responseHeader += ";server_port=" + fmt.Sprintf("%d-%d", rtpPort, rtcpPort)
+	}
+	responseHeader += ";ssrc=FFFFFFFF"
+
 	response := NewOKResponse(headers.Get("Cseq"))
 	response.Header.Set("Transport", responseHeader)
 	response.Header.Set("Session", s.sessionId)
@@ -226,7 +245,11 @@ func (s *session) onPlay(sourceId string, headers textproto.MIMEHeader) error {
 		response.Header.Set("Session", sessionHeader)
 	}
 
-	return s.response(response, nil)
+	err := s.response(response, nil)
+	if err == nil {
+		s.sink_.playing = true
+	}
+	return err
 }
 
 func (s *session) onTeardown() {
