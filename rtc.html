@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>RTC Player</title>
+</head>
+
+<style>
+    #dialog {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background-color: #fff;
+        padding: 10px;
+        border-radius: 4px;
+        z-index: 9999;
+    }
+
+    .modal-footer {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 10px;
+    }
+
+    .modal-footer button {
+        cursor: pointer;
+        margin-right: 10px;
+    }
+
+</style>
+<body>
+
+<div style="margin-top: 10px; margin-left: 10px;">
+    <input style="width: 100px;" id="url" type="text" value="live/rtc/_mystream"/>
+    <button onclick="play()"> 播放</button>
+</div>
+
+<div id="dialog" style="display:none;">
+    <p id="call_title">确实要执行操作吗?</p>
+    <div class="modal-footer">
+        <button id="confirmBtn">接听</button>
+        <button id="cancelBtn">拒绝</button>
+    </div>
+</div>
+
+<div style="margin-top: 10px;">
+    <div style="float: left">
+        <video id="videoview" width="310" autoplay muted controls ></video>
+    </div>
+</div>
+</body>
+
+</html>
+
+<script>
+    async function play() {
+        let remote_view = document.getElementById("videoview");
+        let url = document.getElementById("url").value;
+        let pc = new RTCPeerConnection(null);
+       // pc.addTransceiver("audio", {direction: "recvonly"});
+        pc.addTransceiver("video", {direction: "recvonly"});
+        let offer = await pc.createOffer();
+
+        await pc.setLocalDescription(offer)
+
+        var data = {
+            type: "offer",
+            sdp: offer.sdp,
+        }
+        var stream = new MediaStream();
+        remote_view.srcObject = stream
+        pc.ontrack = function (event) {
+            if (event.streams.length === 0) {
+                return
+            }
+            stream.addTrack(event.track)
+            // remote_view.srcObject = event.streams[0]
+            // remote_view.play()
+        }
+
+        pc.onicegatheringstatechange = function (event) {
+            console.log("ice state:" + pc.iceConnectionState)
+        }
+
+        pc.onicecandidate = function (event) {
+            console.log("ice candidate:" + event.candidate)
+        }
+        fetch(url, {
+            method: 'POST',
+            body: JSON.stringify(data),
+            headers: new Headers({
+                'Content-Type': 'application/json',
+            }),
+        }).then((res) => res.json())
+            .then((data) => {
+                console.log("拉流响应:" + data["sdp"])
+                pc.setRemoteDescription({type: 'answer', sdp: data["sdp"]})
+            })
+    }
+</script>

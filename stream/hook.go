@@ -3,6 +3,7 @@ package stream
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/yangjiechina/avformat/utils"
 	"net/http"
 	"time"
 )
@@ -33,6 +34,12 @@ func NewPlayHookEventInfo(stream, remoteAddr string, protocol Protocol) eventInf
 
 func NewPublishHookEventInfo(stream, remoteAddr string, protocol SourceType) eventInfo {
 	return eventInfo{stream: stream, protocol: sourceTypeToStr(protocol), remoteAddr: remoteAddr}
+}
+
+type HookHandler interface {
+	Play(sink ISink, success func(), failure func(state utils.HookState))
+
+	PlayDone(sink ISink, success func(), failure func(state utils.HookState))
 }
 
 type HookSession interface {

@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/yangjiechina/live-server/flv"
 	"github.com/yangjiechina/live-server/hls"
+	"github.com/yangjiechina/live-server/rtc"
 	"github.com/yangjiechina/live-server/rtsp"
 	"net"
 	"net/http"
@@ -35,11 +36,12 @@ func CreateTransStream(source stream.ISource, protocol stream.Protocol, streams 
 		return flv.NewHttpTransStream()
 	} else if stream.ProtocolRtsp == protocol {
 		trackFormat := source.Id() + "?track=%d"
-
 		return rtsp.NewTransStream(net.IPAddr{
 			IP:   rtspAddr.IP,
 			Zone: rtspAddr.Zone,
 		}, trackFormat)
+	} else if stream.ProtocolRtc == protocol {
+		return rtc.NewTransStream()
 	}
 
 	return nil

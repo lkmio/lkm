@@ -10,6 +10,8 @@ import (
 type SinkId interface{}
 
 type ISink interface {
+	HookHandler
+
 	Id() SinkId
 
 	Input(data []byte) error

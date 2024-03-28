@@ -2,13 +2,17 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/gorilla/mux"
 	"github.com/yangjiechina/avformat/utils"
 	"github.com/yangjiechina/live-server/flv"
+	"github.com/yangjiechina/live-server/rtc"
 	"github.com/yangjiechina/live-server/stream"
+	"io"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -16,7 +20,10 @@ func startApiServer(addr string) {
 	r := mux.NewRouter()
 	r.HandleFunc("/live/flv/{source}", onFLV)
 	r.HandleFunc("/live/hls/{source}", onHLS)
-
+	r.HandleFunc("/live/rtc/{source}", onRtc)
+	r.HandleFunc("/rtc.html", func(writer http.ResponseWriter, request *http.Request) {
+		http.ServeFile(writer, request, "./rtc.html")
+	})
 	http.Handle("/", r)
 
 	srv := &http.Server{
@@ -95,4 +102,52 @@ func onHLS(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "../tmp/"+source)
 	}
 
+}
+
+func onRtc(w http.ResponseWriter, r *http.Request) {
+	v := struct {
+		Type string `json:"type"`
+		SDP  string `json:"sdp"`
+	}{}
+
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		panic(err)
+	}
+
+	if err := json.Unmarshal(data, &v); err != nil {
+		panic(err)
+	}
+
+	sinkId := stream.SinkId(123)
+	split := strings.Split(r.URL.Path, "/")
+
+	group := sync.WaitGroup{}
+	group.Add(1)
+	sink := rtc.NewSink(sinkId, split[len(split)-1], v.SDP, func(sdp string) {
+		response := struct {
+			Type string `json:"type"`
+			SDP  string `json:"sdp"`
+		}{
+			Type: "answer",
+			SDP:  sdp,
+		}
+
+		marshal, err := json.Marshal(response)
+		if err != nil {
+			panic(err)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(marshal)
+
+		group.Done()
+	})
+
+	sink.Play(sink, func() {
+
+	}, func(state utils.HookState) {
+		group.Done()
+	})
+	group.Wait()
 }

@@ -29,6 +29,7 @@
 
   "webrtc": {
     "port": 8000,
+    "public_ip": "192.168.31.123",
     "transport": "UDP"
   },
 
