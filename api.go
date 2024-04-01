@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/gorilla/mux"
+	"github.com/gorilla/websocket"
 	"github.com/yangjiechina/avformat/utils"
 	"github.com/yangjiechina/live-server/flv"
 	"github.com/yangjiechina/live-server/rtc"
@@ -16,11 +17,23 @@ import (
 	"time"
 )
 
+var upgrader *websocket.Upgrader
+
+func init() {
+	upgrader = &websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			return true
+		},
+	}
+}
+
 func startApiServer(addr string) {
 	r := mux.NewRouter()
 	r.HandleFunc("/live/flv/{source}", onFLV)
 	r.HandleFunc("/live/hls/{source}", onHLS)
 	r.HandleFunc("/live/rtc/{source}", onRtc)
+	r.HandleFunc("/live/flv/ws/{source}", onWSFlv)
+
 	r.HandleFunc("/rtc.html", func(writer http.ResponseWriter, request *http.Request) {
 		http.ServeFile(writer, request, "./rtc.html")
 	})
@@ -41,10 +54,40 @@ func startApiServer(addr string) {
 	}
 }
 
-func onFLV(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	source := vars["source"]
+func onWSFlv(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "video/x-flv")
+	w.Header().Set("Connection", "Keep-Alive")
+	w.Header().Set("Transfer-Encoding", "chunked")
 
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		panic(err)
+	}
+
+	vars := mux.Vars(r)
+	sourceId := vars["source"]
+	if index := strings.LastIndex(sourceId, "."); index > -1 {
+		sourceId = sourceId[:index]
+	}
+
+	tcpAddr, _ := net.ResolveTCPAddr("tcp", r.RemoteAddr)
+	sinkId := stream.GenerateSinkId(tcpAddr)
+	sink := flv.NewFLVSink(sinkId, sourceId, flv.NewWSConn(conn))
+
+	go func() {
+		sink.(*stream.SinkImpl).Play(sink, func() {
+			//sink.(*stream.SinkImpl).PlayDone(sink, nil, nil)
+		}, func(state utils.HookState) {
+			conn.Close()
+		})
+	}()
+
+	for {
+		select {}
+	}
+}
+
+func onFLV(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "video/x-flv")
 	w.Header().Set("Connection", "Keep-Alive")
 	w.Header().Set("Transfer-Encoding", "chunked")
@@ -63,9 +106,10 @@ func onFLV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var sourceId string
-	if index := strings.LastIndex(source, "."); index > -1 {
-		sourceId = source[:index]
+	vars := mux.Vars(r)
+	sourceId := vars["source"]
+	if index := strings.LastIndex(sourceId, "."); index > -1 {
+		sourceId = sourceId[:index]
 	}
 
 	tcpAddr, _ := net.ResolveTCPAddr("tcp", r.RemoteAddr)

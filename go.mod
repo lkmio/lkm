@@ -4,6 +4,7 @@ require github.com/yangjiechina/avformat v0.0.0
 
 require (
 	github.com/gorilla/mux v1.8.1
+	github.com/gorilla/websocket v1.5.1
 	github.com/pion/webrtc/v3 v3.2.29
 )
 
@@ -33,6 +34,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/yangjiechina/avformat => ../../avformat
+replace github.com/yangjiechina/avformat => ../avformat
 
 go 1.19

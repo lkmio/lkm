@@ -9,9 +9,15 @@ import (
 )
 
 const (
-	// HttpFlvBlockLengthSize 响应flv数据时，需要添加flv块长度, 缓存时预留该大小字节
+	// HttpFlvBlockLengthSize 在每块HttpFlv数据前面，增加指定长度的头数据, 用户描述flv数据的长度信息
+	// http-flv-block  |block size[4]|skip count[2]|length\r\n|flv data\r\n
 	HttpFlvBlockLengthSize = 20
 )
+
+type HttpFlvBlock struct {
+	pktSize   uint32
+	skipCount uint16
+}
 
 var separator []byte
 
@@ -32,7 +38,7 @@ func NewHttpTransStream() stream.ITransStream {
 	return &httpTransStream{
 		muxer:      libflv.NewMuxer(),
 		header:     make([]byte, 1024),
-		headerSize: HttpFlvBlockLengthSize + 9,
+		headerSize: HttpFlvBlockLengthSize,
 	}
 }
 
@@ -105,18 +111,13 @@ func (t *httpTransStream) AddTrack(stream utils.AVStream) error {
 		return err
 	}
 
-	var data []byte
 	if utils.AVMediaTypeAudio == stream.Type() {
 		t.muxer.AddAudioTrack(stream.CodecId(), 0, 0, 0)
-		data = stream.Extra()
 	} else if utils.AVMediaTypeVideo == stream.Type() {
 		t.muxer.AddVideoTrack(stream.CodecId())
-		data, _ = stream.M4VCExtraData()
+		t.muxer.AddProperty("width", stream.(utils.VideoStream).Width())
+		t.muxer.AddProperty("height", stream.(utils.VideoStream).Height())
 	}
-
-	t.headerSize += t.muxer.Input(t.header[t.headerSize:], stream.Type(), len(data), 0, 0, false, true)
-	copy(t.header[t.headerSize:], data)
-	t.headerSize += len(data)
 	return nil
 }
 
@@ -163,28 +164,53 @@ func (t *httpTransStream) AddSink(sink stream.ISink) error {
 	return nil
 }
 
+// 为flv数据添加长度和换行符
+// @dst flv数据, 开头需要空出HttpFlvBlockLengthSize字节长度, 末尾空出2字节换行符
 func (t *httpTransStream) writeSeparator(dst []byte) {
+	//写block size
+	binary.BigEndian.PutUint32(dst, uint32(len(dst)-4))
 
+	//写长度字符串
+	//flv长度转16进制字符串
+	flvSize := len(dst) - HttpFlvBlockLengthSize - 2
+	hexStr := fmt.Sprintf("%X", flvSize)
+	//+2是将换行符计算在内
+	n := len(hexStr) + 2
+	copy(dst[HttpFlvBlockLengthSize-n:], hexStr)
+
+	//写间隔长度
+	//-6 是block size和skip count合计长度
+	skipCount := HttpFlvBlockLengthSize - n - 6
+	binary.BigEndian.PutUint16(dst[4:], uint16(skipCount))
+
+	//flv长度和flv数据之间的换行符
 	dst[HttpFlvBlockLengthSize-2] = 0x0D
 	dst[HttpFlvBlockLengthSize-1] = 0x0A
 
-	flvSize := len(dst) - HttpFlvBlockLengthSize - 2
-	hexStr := fmt.Sprintf("%X", flvSize)
-	//长度+换行符
-	n := len(hexStr) + 2
-	binary.BigEndian.PutUint16(dst[4:], uint16(HttpFlvBlockLengthSize-n-6))
-	copy(dst[HttpFlvBlockLengthSize-n:], hexStr)
-
-	dst[HttpFlvBlockLengthSize+flvSize] = 0x0D
-	dst[HttpFlvBlockLengthSize+flvSize+1] = 0x0A
-
-	binary.BigEndian.PutUint32(dst, uint32(len(dst)-4))
+	//末尾换行符
+	dst[len(dst)-2] = 0x0D
+	dst[len(dst)-1] = 0x0A
 }
 
 func (t *httpTransStream) WriteHeader() error {
 	t.Init()
 
-	_ = t.muxer.WriteHeader(t.header[HttpFlvBlockLengthSize:])
+	t.headerSize += t.muxer.WriteHeader(t.header[HttpFlvBlockLengthSize:])
+
+	for _, track := range t.TransStreamImpl.Tracks {
+		var data []byte
+		if utils.AVMediaTypeAudio == track.Type() {
+			data = track.Extra()
+		} else if utils.AVMediaTypeVideo == track.Type() {
+			data, _ = track.M4VCExtraData()
+		}
+
+		t.headerSize += t.muxer.Input(t.header[t.headerSize:], track.Type(), len(data), 0, 0, false, true)
+		copy(t.header[t.headerSize:], data)
+		t.headerSize += len(data)
+	}
+
+	//将结尾换行符计算在内
 	t.headerSize += 2
 	t.writeSeparator(t.header[:t.headerSize])
 	return nil
