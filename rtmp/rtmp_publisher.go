@@ -38,7 +38,7 @@ type publisher struct {
 }
 
 func NewPublisher(sourceId string, stack *librtmp.Stack, conn net.Conn) Publisher {
-	deMuxer := libflv.NewDeMuxer()
+	deMuxer := libflv.NewDeMuxer(libflv.TSModeRelative)
 	publisher_ := &publisher{SourceImpl: stream.SourceImpl{Id_: sourceId, Type_: stream.SourceTypeRtmp, TransDeMuxer: deMuxer, Conn: conn}, stack: stack, audioMark: false, videoMark: false}
 	//设置回调，从flv解析出来的Stream和AVPacket都将统一回调到stream.SourceImpl
 	deMuxer.SetHandler(publisher_)
@@ -107,13 +107,15 @@ func (p *publisher) OnDeMuxPacket(packet utils.AVPacket) {
 	}
 }
 
+// OnVideo 解析出来的完整视频包
+// @ts 	   rtmp chunk的相对时间戳
 func (p *publisher) OnVideo(data []byte, ts uint32) {
 	if data == nil {
 		data = p.videoMemoryPool.Fetch()
 		p.videoMark = false
 	}
 
-	p.SourceImpl.TransDeMuxer.(*libflv.DeMuxer).InputVideo(data, ts)
+	p.SourceImpl.TransDeMuxer.(libflv.DeMuxer).InputVideo(data, ts)
 }
 
 func (p *publisher) OnAudio(data []byte, ts uint32) {
@@ -122,7 +124,7 @@ func (p *publisher) OnAudio(data []byte, ts uint32) {
 		p.audioMark = false
 	}
 
-	_ = p.SourceImpl.TransDeMuxer.(*libflv.DeMuxer).InputAudio(data, ts)
+	_ = p.SourceImpl.TransDeMuxer.(libflv.DeMuxer).InputAudio(data, ts)
 }
 
 func (p *publisher) OnPartPacket(index int, data []byte, first bool) {

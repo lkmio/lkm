@@ -236,7 +236,7 @@ func (s *SourceImpl) dispatchStreamBuffer(transStream ITransStream, streams []ut
 			}
 
 			pkt := s.buffers[stream.Index()].Peek(indexs[index]).(utils.AVPacket)
-			v := pkt.Dts()
+			v := pkt.Pts()
 			if min == 0xFFFFFFFF {
 				min = v
 			} else if v < min {
@@ -256,7 +256,7 @@ func (s *SourceImpl) dispatchStreamBuffer(transStream ITransStream, streams []ut
 
 			for i := indexs[index]; i < buffer.Size(); i++ {
 				packet := buffer.Peek(i).(utils.AVPacket)
-				if packet.Dts() > min {
+				if packet.Pts() > min {
 					break
 				}
 
@@ -463,7 +463,7 @@ func (s *SourceImpl) OnDeMuxStreamDone() {
 func (s *SourceImpl) OnDeMuxPacket(packet utils.AVPacket) {
 	if AppConfig.GOPCache {
 		buffer := s.buffers[packet.Index()]
-		buffer.AddPacket(packet, packet.KeyFrame(), packet.Dts())
+		buffer.AddPacket(packet, packet.KeyFrame(), packet.Pts())
 	}
 
 	//分发给各个传输流

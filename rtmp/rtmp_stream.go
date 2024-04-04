@@ -40,6 +40,7 @@ func (t *TransStream) Input(packet utils.AVPacket) error {
 		length = len(data)
 		chunk = &t.audioChunk
 		payloadSize += 2 + length
+
 	} else if utils.AVMediaTypeVideo == packet.MediaType() {
 		videoPkt = true
 		videoKey = packet.KeyFrame()
@@ -61,8 +62,15 @@ func (t *TransStream) Input(packet utils.AVPacket) error {
 	allocate := t.StreamBuffers[0].Allocate(12 + payloadSize + (payloadSize / t.chunkSize))
 
 	//写chunk头
+	var ts uint32
+	if packet.CodecId() == utils.AVCodecIdAAC {
+		ts = uint32(packet.ConvertPts(libflv.AACFrameSize))
+	} else {
+		ts = uint32(packet.ConvertPts(1000))
+	}
+
 	chunk.Length = payloadSize
-	chunk.Timestamp = uint32(packet.Pts())
+	chunk.Timestamp = ts
 	n := chunk.ToBytes(allocate)
 	utils.Assert(n == 12)
 
