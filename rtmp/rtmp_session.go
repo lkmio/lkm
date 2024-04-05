@@ -3,6 +3,7 @@ package rtmp
 import (
 	"github.com/yangjiechina/avformat/librtmp"
 	"github.com/yangjiechina/avformat/utils"
+	"github.com/yangjiechina/live-server/log"
 	"github.com/yangjiechina/live-server/stream"
 	"net"
 )
@@ -26,14 +27,16 @@ func NewSession(conn net.Conn) Session {
 type sessionImpl struct {
 	//解析rtmp协议栈
 	stack *librtmp.Stack
-	//publisher/sink
-	handle interface{}
-
+	//publisher/sink, 在publish或play成功后赋值
+	handle      interface{}
 	isPublisher bool
-	conn        net.Conn
+
+	conn net.Conn
 }
 
 func (s *sessionImpl) OnPublish(app, stream_ string, response chan utils.HookState) {
+	log.Sugar.Infof("rtmp onpublish app:%s stream:%s conn:%s", app, stream_, s.conn.RemoteAddr().String())
+
 	sourceId := app + "_" + stream_
 	source := NewPublisher(sourceId, s.stack, s.conn)
 	s.stack.SetOnPublishHandler(source)
@@ -53,9 +56,11 @@ func (s *sessionImpl) OnPublish(app, stream_ string, response chan utils.HookSta
 
 func (s *sessionImpl) OnPlay(app, stream_ string, response chan utils.HookState) {
 	sourceId := app + "_" + stream_
-
 	//拉流事件Sink统一处理
 	sink := NewSink(stream.GenerateSinkId(s.conn.RemoteAddr()), sourceId, s.conn)
+
+	log.Sugar.Infof("rtmp onplay app:%s stream:%s sink:%v conn:%s", app, stream_, sink.Id(), s.conn.RemoteAddr().String())
+
 	sink.(*stream.SinkImpl).Play(sink, func() {
 		s.handle = sink
 		response <- utils.HookStateOK
@@ -75,6 +80,14 @@ func (s *sessionImpl) Input(conn net.Conn, data []byte) error {
 }
 
 func (s *sessionImpl) Close() {
+	log.Sugar.Debugf("释放rtmp session conn:%s", s.conn.RemoteAddr().String())
+
+	//释放协议栈
+	if s.stack != nil {
+		s.stack.Close()
+	}
+
+	//还没到publish/play
 	if s.handle == nil {
 		return
 	}

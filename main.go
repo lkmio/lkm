@@ -3,8 +3,10 @@ package main
 import (
 	"github.com/yangjiechina/live-server/flv"
 	"github.com/yangjiechina/live-server/hls"
+	"github.com/yangjiechina/live-server/log"
 	"github.com/yangjiechina/live-server/rtc"
 	"github.com/yangjiechina/live-server/rtsp"
+	"go.uber.org/zap/zapcore"
 	"net"
 	"net/http"
 
@@ -52,6 +54,9 @@ func init() {
 }
 
 func main() {
+	//初始化日志
+	log.InitLogger(zapcore.DebugLevel, "./logs/lkm.log", 10, 100, 7, false)
+
 	stream.AppConfig.GOPCache = true
 	stream.AppConfig.MergeWriteLatency = 350
 

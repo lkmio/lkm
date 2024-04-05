@@ -3,6 +3,7 @@ package stream
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"github.com/yangjiechina/avformat/utils"
 	"net/http"
 	"time"
@@ -81,8 +82,10 @@ func (h *hookSessionImpl) send(url string, body interface{}, success func(respon
 
 	request.Header.Set("Content-Type", "application/json")
 	response, err := client.Do(request)
-	if err != nil || response.StatusCode != http.StatusOK {
+	if err != nil {
 		failure(response, err)
+	} else if response.StatusCode != http.StatusOK {
+		failure(response, fmt.Errorf("code:%d reason:%s", response.StatusCode, response.Status))
 	} else {
 		success(response)
 	}
