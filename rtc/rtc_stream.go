@@ -63,11 +63,11 @@ func (t *transStream) AddSink(sink_ stream.ISink) error {
 		}
 
 		if _, err := connection.AddTransceiverFromTrack(videoTrack, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendonly}); err != nil {
-			panic(err)
+			return err
 		}
 
 		if _, err = connection.AddTrack(videoTrack); err != nil {
-			panic(err)
+			return err
 		}
 
 		rtcSink.addTrack(index, videoTrack)
@@ -80,14 +80,17 @@ func (t *transStream) AddSink(sink_ stream.ISink) error {
 	complete := webrtc.GatheringCompletePromise(connection)
 	answer, err := connection.CreateAnswer(nil)
 	if err != nil {
-		panic(err)
+		return err
 	} else if err = connection.SetLocalDescription(answer); err != nil {
-		panic(err)
+		return err
 	}
 	<-complete
 
 	connection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		rtcSink.state = state
+		if webrtc.ICEConnectionStateDisconnected > state {
+			rtcSink.Close()
+		}
 	})
 
 	rtcSink.peer = connection

@@ -25,10 +25,8 @@ func CreateTransStream(source stream.ISource, protocol stream.Protocol, streams 
 		return rtmp.NewTransStream(librtmp.ChunkSize)
 	} else if stream.ProtocolHls == protocol {
 		id := source.Id()
-		m3u8Name := id + ".m3u8"
-		tsFormat := id + "_%d.ts"
 
-		transStream, err := hls.NewTransStream("", m3u8Name, tsFormat, "../tmp/", 2, 10)
+		transStream, err := hls.NewTransStream("", stream.AppConfig.Hls.M3U8Format(id), stream.AppConfig.Hls.TSFormat(id, "%d"), stream.AppConfig.Hls.Dir, stream.AppConfig.Hls.Duration, stream.AppConfig.Hls.PlaylistLength)
 		if err != nil {
 			panic(err)
 		}
@@ -59,6 +57,11 @@ func main() {
 
 	stream.AppConfig.GOPCache = true
 	stream.AppConfig.MergeWriteLatency = 350
+
+	stream.AppConfig.Hls.Enable = true
+	stream.AppConfig.Hls.Dir = "../tmp"
+	stream.AppConfig.Hls.Duration = 2
+	stream.AppConfig.Hls.PlaylistLength = 10
 
 	rtmpAddr, err := net.ResolveTCPAddr("tcp", "0.0.0.0:1935")
 	if err != nil {

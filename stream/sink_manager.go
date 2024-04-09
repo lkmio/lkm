@@ -91,7 +91,7 @@ func ExistSink(sourceId string, sinkId SinkId) bool {
 
 // ISinkManager 添加到TransStream的所有Sink
 type ISinkManager interface {
-	Add(source ISink) error
+	Add(sink ISink) error
 
 	Find(id SinkId) ISink
 
@@ -110,10 +110,10 @@ type sinkManagerImpl struct {
 	m sync.Map
 }
 
-func (s *sinkManagerImpl) Add(source ISink) error {
-	_, ok := s.m.LoadOrStore(source.Id(), source)
+func (s *sinkManagerImpl) Add(sink ISink) error {
+	_, ok := s.m.LoadOrStore(sink.Id(), sink)
 	if ok {
-		return fmt.Errorf("the source %s has been exist", source.Id())
+		return fmt.Errorf("the sink %s has been exist", sink.Id())
 	}
 
 	return nil

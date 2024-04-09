@@ -132,13 +132,14 @@ type SourceImpl struct {
 
 	TransDeMuxer     stream.DeMuxer          //负责从推流协议中解析出AVStream和AVPacket
 	recordSink       ISink                   //每个Source唯一的一个录制流
+	hlsStream        ITransStream            //hls不等拉流，创建时直接生成
 	audioTranscoders []transcode.ITranscoder //音频解码器
 	videoTranscoders []transcode.ITranscoder //视频解码器
 	originStreams    StreamManager           //推流的音视频Streams
 	allStreams       StreamManager           //推流Streams+转码器获得的Streams
 	buffers          []StreamBuffer
 
-	Input_ func(data []byte) //解决无法多态传递给子类的问题
+	Input_ func(data []byte) //解决多态无法传递给子类的问题
 
 	completed  bool
 	mutex      sync.Mutex //只用作AddStream期间
@@ -154,8 +155,6 @@ type SourceImpl struct {
 	closeEvent            chan byte
 	playingEventQueue     chan ISink
 	playingDoneEventQueue chan ISink
-
-	testTransStream ITransStream
 }
 
 func (s *SourceImpl) Id() string {
@@ -175,9 +174,17 @@ func (s *SourceImpl) Init() {
 	if s.transStreams == nil {
 		s.transStreams = make(map[TransStreamId]ITransStream, 10)
 	}
-	//测试传输流
-	s.testTransStream = TransStreamFactory(s, ProtocolHls, nil)
-	s.transStreams[0x100] = s.testTransStream
+
+	//创建录制流
+	if AppConfig.Record.Enable {
+
+	}
+
+	//创建HLS输出流
+	if AppConfig.Hls.Enable {
+		s.hlsStream = TransStreamFactory(s, ProtocolHls, nil)
+		s.transStreams[0x100] = s.hlsStream
+	}
 }
 
 func (s *SourceImpl) LoopEvent() {
@@ -220,7 +227,7 @@ func IsSupportMux(protocol Protocol, audioCodecId, videoCodecId utils.AVCodecID)
 	return true
 }
 
-// 分发每路Stream的Buffer给传输流
+// 分发每路StreamBuffer给传输流
 // 按照时间戳升序发送
 func (s *SourceImpl) dispatchStreamBuffer(transStream ITransStream, streams []utils.AVStream) {
 	size := len(streams)
@@ -447,12 +454,12 @@ func (s *SourceImpl) writeHeader() {
 		s.AddSink(sink)
 	}
 
-	if s.testTransStream != nil {
+	if s.hlsStream != nil {
 		for _, stream_ := range s.originStreams.All() {
-			s.testTransStream.AddTrack(stream_)
+			s.hlsStream.AddTrack(stream_)
 		}
 
-		s.testTransStream.WriteHeader()
+		s.hlsStream.WriteHeader()
 	}
 }
 

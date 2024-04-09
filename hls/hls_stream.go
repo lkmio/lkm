@@ -32,12 +32,14 @@ type transStream struct {
 	duration       int
 	m3u8File       *os.File
 	playlistLength int
+
+	m3u8Sinks map[stream.SinkId]stream.ISink
 }
 
 // NewTransStream 创建HLS传输流
 // @url   		url前缀
 // @m3u8Name	m3u8文件名
-// @tsFormat	ts文件格式, 例如: test_%d.ts
+// @tsFormat	ts文件格式, 例如: %d.ts
 // @parentDir	保存切片的绝对路径. mu38和ts切片放在同一目录下, 目录地址使用parentDir+urlPrefix
 // @segmentDuration 单个切片时长
 // @playlistLength 缓存多少个切片
@@ -47,6 +49,7 @@ func NewTransStream(url, m3u8Name, tsFormat, dir string, segmentDuration, playli
 		return nil, err
 	}
 
+	//创建m3u8文件
 	m3u8Path := fmt.Sprintf("%s/%s", dir, m3u8Name)
 	file, err := os.OpenFile(m3u8Path, os.O_CREATE|os.O_RDWR, 0666)
 	if err != nil {
@@ -62,6 +65,7 @@ func NewTransStream(url, m3u8Name, tsFormat, dir string, segmentDuration, playli
 		playlistLength: playlistLength,
 	}
 
+	//创建TS封装器
 	muxer := libmpeg.NewTSMuxer()
 	muxer.SetWriteHandler(stream_.onTSWrite)
 	muxer.SetAllocHandler(stream_.onTSAlloc)
@@ -75,6 +79,8 @@ func NewTransStream(url, m3u8Name, tsFormat, dir string, segmentDuration, playli
 	stream_.muxer = muxer
 	stream_.m3u8 = NewM3U8Writer(playlistLength)
 	stream_.m3u8File = file
+
+	stream_.m3u8Sinks = make(map[stream.SinkId]stream.ISink, 24)
 	return stream_, nil
 }
 
@@ -90,10 +96,12 @@ func (t *transStream) Input(packet utils.AVPacket) error {
 		}
 	}
 
+	pts := packet.ConvertPts(90000)
+	dts := packet.ConvertDts(90000)
 	if utils.AVMediaTypeVideo == packet.MediaType() {
-		return t.muxer.Input(packet.Index(), packet.AnnexBPacketData(), packet.Pts()*90, packet.Dts()*90, packet.KeyFrame())
+		return t.muxer.Input(packet.Index(), packet.AnnexBPacketData(), pts, dts, packet.KeyFrame())
 	} else {
-		return t.muxer.Input(packet.Index(), packet.Data(), packet.Pts()*90, packet.Dts()*90, packet.KeyFrame())
+		return t.muxer.Input(packet.Index(), packet.Data(), pts, dts, packet.KeyFrame())
 	}
 }
 
@@ -117,7 +125,22 @@ func (t *transStream) AddTrack(stream utils.AVStream) error {
 }
 
 func (t *transStream) WriteHeader() error {
+	t.Init()
+
 	return t.createSegment()
+}
+
+func (t *transStream) AddSink(sink stream.ISink) error {
+	if sink_, ok := sink.(*m3u8Sink); ok {
+		if t.m3u8.Size() > 0 {
+			return sink.Input([]byte(t.m3u8.ToString()))
+		} else {
+			t.m3u8Sinks[sink.Id()] = sink_
+			return nil
+		}
+	}
+
+	return t.TransStreamImpl.AddSink(sink)
 }
 
 func (t *transStream) onTSWrite(data []byte) {
@@ -166,22 +189,33 @@ func (t *transStream) flushSegment() error {
 		return err
 	}
 
+	//通知等待m3u8的sink
+	if len(t.m3u8Sinks) > 0 {
+		for _, sink := range t.m3u8Sinks {
+			sink.Input([]byte(m3u8Txt))
+		}
+		t.m3u8Sinks = make(map[stream.SinkId]stream.ISink, 0)
+	}
 	return nil
 }
 
+// 创建一个新的ts切片
 func (t *transStream) createSegment() error {
+	//保存上一个ts切片
 	if t.context.file != nil {
 		err := t.flushSegment()
 		t.context.segmentSeq++
 		if err != nil {
 			return err
 		}
-
 	}
 
 	tsName := fmt.Sprintf(t.tsFormat, t.context.segmentSeq)
-	t.context.path = fmt.Sprintf("%s%s", t.dir, tsName)
+	//ts文件
+	t.context.path = fmt.Sprintf("%s/%s", t.dir, tsName)
+	//m3u8中的url
 	t.context.url = fmt.Sprintf("%s%s", t.url, tsName)
+
 	file, err := os.OpenFile(t.context.path, os.O_WRONLY|os.O_CREATE, 0666)
 	if err != nil {
 		return err

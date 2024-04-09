@@ -9,6 +9,36 @@ type RtmpConfig struct {
 	Addr   string `json:"addr"`
 }
 
+type RecordConfig struct {
+	Enable bool   `json:"enable"`
+	Format string `json:"format"`
+}
+
+type HlsConfig struct {
+	Enable         bool
+	Dir            string
+	Duration       int
+	PlaylistLength int
+}
+
+// M3U8Path 根据sourceId返回m3u8的磁盘路径
+func (c HlsConfig) M3U8Path(sourceId string) string {
+	return c.Dir + "/" + c.M3U8Format(sourceId)
+}
+
+func (c HlsConfig) M3U8Format(sourceId string) string {
+	return sourceId + ".m3u8"
+}
+
+// TSPath 根据sourceId和ts文件名返回ts的磁盘路径
+func (c HlsConfig) TSPath(sourceId string, tsSeq string) string {
+	return c.Dir + "/" + c.TSFormat(sourceId, tsSeq)
+}
+
+func (c HlsConfig) TSFormat(sourceId string, tsSeq string) string {
+	return sourceId + "_" + tsSeq + ".ts"
+}
+
 type HookConfig struct {
 	Time          int
 	Enable        bool   `json:"enable"`
@@ -65,4 +95,7 @@ type AppConfig_ struct {
 	MergeWriteLatency int `json:"mw_latency"`
 	Rtmp              RtmpConfig
 	Hook              HookConfig
+
+	Record RecordConfig
+	Hls    HlsConfig
 }

@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"fmt"
 	"github.com/yangjiechina/avformat/utils"
 	"github.com/yangjiechina/live-server/log"
 	"net"
@@ -43,7 +44,10 @@ type ISink interface {
 	// DesiredVideoCodecId DescribeVideoCodecId 允许客户端拉取指定的视频流
 	DesiredVideoCodecId() utils.AVCodecID
 
+	// Close 关闭释放Sink, 从传输流或等待队列中删除sink
 	Close()
+
+	PrintInfo() string
 }
 
 // GenerateSinkId 根据网络地址生成SinkId IPV4使用一个uint64, IPV6使用String
@@ -182,6 +186,10 @@ func (s *SinkImpl) Close() {
 		s.State_ = SessionStateClose
 		//s.closed.Store(true)
 	}
+}
+
+func (s *SinkImpl) PrintInfo() string {
+	return fmt.Sprintf("%s-%v source:%s", s.ProtocolStr(), s.Id_, s.SourceId_)
 }
 
 func (s *SinkImpl) Play(sink ISink, success func(), failure func(state utils.HookState)) {

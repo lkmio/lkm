@@ -2,37 +2,30 @@ package hls
 
 import (
 	"github.com/yangjiechina/live-server/stream"
-	"net/http"
 )
 
-type sink struct {
+type tsSink struct {
 	stream.SinkImpl
-	conn http.ResponseWriter
 }
 
-func NewSink(id stream.SinkId, sourceId string, w http.ResponseWriter) stream.ISink {
-	return &sink{stream.SinkImpl{Id_: id, SourceId_: sourceId, Protocol_: stream.ProtocolHls}, w}
+func NewTSSink(id stream.SinkId, sourceId string) stream.ISink {
+	return &tsSink{stream.SinkImpl{Id_: id, SourceId_: sourceId, Protocol_: stream.ProtocolHls}}
 }
 
-func (s *sink) Input(data []byte) error {
-	if s.conn != nil {
-		_, err := s.conn.Write(data)
-
-		return err
-	}
-
+func (s *tsSink) Input(data []byte) error {
 	return nil
 }
 
 type m3u8Sink struct {
 	stream.SinkImpl
+	cb func(m3u8 []byte)
 }
 
 func (s *m3u8Sink) Input(data []byte) error {
-
+	s.cb(data)
 	return nil
 }
 
-func NewM3U8Sink(id stream.SinkId, sourceId string, w http.ResponseWriter) stream.ISink {
-	return &m3u8Sink{stream.SinkImpl{Id_: id, SourceId_: sourceId, Protocol_: stream.ProtocolHls}}
+func NewM3U8Sink(id stream.SinkId, sourceId string, cb func(m3u8 []byte)) stream.ISink {
+	return &m3u8Sink{stream.SinkImpl{Id_: id, SourceId_: sourceId, Protocol_: stream.ProtocolHls}, cb}
 }

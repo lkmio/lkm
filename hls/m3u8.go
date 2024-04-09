@@ -115,7 +115,7 @@ func (m *m3u8Writer) ToString() string {
 	m.stringBuffer.WriteString("#EXT-X-TARGETDURATION:")
 	m.stringBuffer.WriteString(strconv.Itoa(m.targetDuration()))
 	m.stringBuffer.WriteString("\r\n")
-	m.stringBuffer.WriteString("#ExtXMediaSequence:")
+	m.stringBuffer.WriteString("#Ext-X-MEDIA-SEQUENCE:")
 	m.stringBuffer.WriteString(strconv.Itoa(head[0].(Segment).sequence))
 	m.stringBuffer.WriteString("\r\n")
 
