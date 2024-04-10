@@ -192,18 +192,18 @@ func (s *SinkImpl) PrintInfo() string {
 	return fmt.Sprintf("%s-%v source:%s", s.ProtocolStr(), s.Id_, s.SourceId_)
 }
 
-func (s *SinkImpl) Play(sink ISink, success func(), failure func(state utils.HookState)) {
+func (s *SinkImpl) Play(success func(), failure func(state utils.HookState)) {
 	f := func() {
-		source := SourceManager.Find(sink.SourceId())
+		source := SourceManager.Find(s.SourceId())
 		if source == nil {
-			log.Sugar.Infof("添加sink到等待队列 sink:%s-%v source:%s", sink.ProtocolStr(), sink.Id(), sink.SourceId())
+			log.Sugar.Infof("添加sink到等待队列 sink:%s-%v source:%s", s.ProtocolStr(), s.Id(), s.SourceId())
 
-			sink.SetState(SessionStateWait)
-			AddSinkToWaitingQueue(sink.SourceId(), sink)
+			s.SetState(SessionStateWait)
+			AddSinkToWaitingQueue(s.SourceId(), s)
 		} else {
-			log.Sugar.Debugf("发送播放事件 sink:%s-%v source:%s", sink.ProtocolStr(), sink.Id(), sink.SourceId())
+			log.Sugar.Debugf("发送播放事件 sink:%s-%v source:%s", s.ProtocolStr(), s.Id(), s.SourceId())
 
-			source.AddEvent(SourceEventPlay, sink)
+			source.AddEvent(SourceEventPlay, s)
 		}
 	}
 
@@ -213,23 +213,23 @@ func (s *SinkImpl) Play(sink ISink, success func(), failure func(state utils.Hoo
 		return
 	}
 
-	err := s.Hook(HookEventPlay, NewPlayHookEventInfo(sink.SourceId(), "", sink.Protocol()), func(response *http.Response) {
+	err := s.Hook(HookEventPlay, NewPlayHookEventInfo(s.SourceId(), "", s.Protocol()), func(response *http.Response) {
 		f()
 		success()
 	}, func(response *http.Response, err error) {
-		log.Sugar.Errorf("Hook播放事件响应失败 err:%s sink:%s-%v source:%s", err.Error(), sink.ProtocolStr(), sink.Id(), sink.SourceId())
+		log.Sugar.Errorf("Hook播放事件响应失败 err:%s sink:%s-%v source:%s", err.Error(), s.ProtocolStr(), s.Id(), s.SourceId())
 
 		failure(utils.HookStateFailure)
 	})
 
 	if err != nil {
-		log.Sugar.Errorf("Hook播放事件发送失败 err:%s sink:%s-%v source:%s", err.Error(), sink.ProtocolStr(), sink.Id(), sink.SourceId())
+		log.Sugar.Errorf("Hook播放事件发送失败 err:%s sink:%s-%v source:%s", err.Error(), s.ProtocolStr(), s.Id(), s.SourceId())
 
 		failure(utils.HookStateFailure)
 		return
 	}
 }
 
-func (s *SinkImpl) PlayDone(source ISink, success func(), failure func(state utils.HookState)) {
+func (s *SinkImpl) PlayDone(success func(), failure func(state utils.HookState)) {
 
 }

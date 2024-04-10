@@ -38,9 +38,9 @@ func NewPublishHookEventInfo(stream, remoteAddr string, protocol SourceType) eve
 }
 
 type HookHandler interface {
-	Play(sink ISink, success func(), failure func(state utils.HookState))
+	Play(success func(), failure func(state utils.HookState))
 
-	PlayDone(sink ISink, success func(), failure func(state utils.HookState))
+	PlayDone(success func(), failure func(state utils.HookState))
 }
 
 type HookSession interface {

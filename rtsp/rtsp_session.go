@@ -163,7 +163,7 @@ func (s *session) onDescribe(source string, headers textproto.MIMEHeader) error 
 
 	code := utils.HookStateOK
 	s.sink_ = sink_.(*sink)
-	sink_.(*sink).Play(sink_, func() {
+	sink_.Play(func() {
 
 	}, func(state utils.HookState) {
 		code = state
