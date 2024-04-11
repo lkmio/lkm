@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/yangjiechina/avformat/transport"
 	"github.com/yangjiechina/avformat/utils"
+	"github.com/yangjiechina/live-server/log"
 	"net"
 	"net/textproto"
 )
@@ -60,6 +61,8 @@ func (s *serverImpl) Close() {
 }
 
 func (s *serverImpl) OnConnected(conn net.Conn) {
+	log.Sugar.Debugf("rtsp连接 conn:%s", conn.RemoteAddr().String())
+
 	t := conn.(*transport.Conn)
 	t.Data = NewSession(conn)
 }
@@ -83,5 +86,7 @@ func (s *serverImpl) OnPacket(conn net.Conn, data []byte) {
 }
 
 func (s *serverImpl) OnDisConnected(conn net.Conn, err error) {
+	log.Sugar.Debugf("rtsp断开连接 conn:%s", conn.RemoteAddr().String())
+
 	s.closeSession(conn)
 }

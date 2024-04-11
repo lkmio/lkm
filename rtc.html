@@ -86,6 +86,8 @@
         pc.onicecandidate = function (event) {
             console.log("ice candidate:" + event.candidate)
         }
+
+        console.log("offer:" + offer.sdp);
         fetch(url, {
             method: 'POST',
             body: JSON.stringify(data),

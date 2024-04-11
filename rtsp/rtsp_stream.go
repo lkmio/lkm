@@ -8,6 +8,7 @@ import (
 	"github.com/yangjiechina/avformat/utils"
 	"github.com/yangjiechina/live-server/stream"
 	"net"
+	"strconv"
 )
 
 const (
@@ -132,8 +133,8 @@ func (t *tranStream) Input(packet utils.AVPacket) error {
 }
 
 func (t *tranStream) AddSink(sink_ stream.ISink) error {
-	sink_.(*sink).setTrackCount(len(t.TransStreamImpl.Tracks))
-	if err := sink_.SendHeader([]byte(t.sdp)); err != nil {
+	sink_.(*Sink).setTrackCount(len(t.TransStreamImpl.Tracks))
+	if err := sink_.(*Sink).SendHeader([]byte(t.sdp)); err != nil {
 		return err
 	}
 
@@ -186,68 +187,58 @@ func (t *tranStream) WriteHeader() error {
 			RepeatTimes: nil,
 		},
 		},
+	}
 
-		MediaDescriptions: []*sdp.MediaDescription{
-			{
-				MediaName: sdp.MediaName{
-					Media:   "video",
-					Protos:  []string{"RTP", "AVP"},
-					Formats: []string{"108"},
-				},
-
-				ConnectionInformation: &sdp.ConnectionInformation{
-					NetworkType: "IN",
-					AddressType: t.addrType,
-					Address:     &sdp.Address{Address: t.addr.IP.String()},
-				},
-
-				Attributes: []sdp.Attribute{
-					sdp.NewAttribute("recvonly", ""),
-					sdp.NewAttribute("control:"+fmt.Sprintf(t.urlFormat, 0), ""),
-					sdp.NewAttribute("rtpmap:108 H264/90000", ""),
-				},
+	for i, track := range t.Tracks {
+		payloadType, _ := librtp.CodecIdPayloads[track.CodecId()]
+		mediaDescription := sdp.MediaDescription{
+			ConnectionInformation: &sdp.ConnectionInformation{
+				NetworkType: "IN",
+				AddressType: t.addrType,
+				Address:     &sdp.Address{Address: t.addr.IP.String()},
 			},
 
-			{
-				MediaName: sdp.MediaName{
-					Media:   "audio",
-					Protos:  []string{"RTP", "AVP"},
-					Formats: []string{"97"},
-				},
-
-				ConnectionInformation: &sdp.ConnectionInformation{
-					NetworkType: "IN",
-					AddressType: t.addrType,
-					Address:     &sdp.Address{Address: t.addr.IP.String()},
-				},
-
-				Attributes: []sdp.Attribute{
-					sdp.NewAttribute("recvonly", ""),
-					sdp.NewAttribute("control:"+fmt.Sprintf(t.urlFormat, 1), ""),
-					//用MP4A-LATM更准确一点
-					sdp.NewAttribute("rtpmap:97 mpeg4-generic/48000", ""),
-					//[14496-3], [RFC6416] profile-level-id:
-					//1 : Main Audio Profile Level 1
-					//9 : Speech Audio Profile Level 1
-					//15: High Quality Audio Profile Level 2
-					//30: Natural Audio Profile Level 1
-					//44: High Efficiency AAC Profile Level 2
-					//48: High Efficiency AAC v2 Profile Level 2
-					//55: Baseline MPEG Surround Profile (see ISO/IEC 23003-1) Level 3
-
-					//[RFC5619]
-					//a=fmtp:96 streamType=5; profile-level-id=44; mode=AAC-hbr; config=131
-					//     056E598; sizeLength=13; indexLength=3; indexDeltaLength=3; constant
-					//     Duration=2048; MPS-profile-level-id=55; MPS-config=F1B4CF920442029B
-					//     501185B6DA00;
-					//低比特率用sizelength=6;indexlength=2;indexdeltalength=2
-
-					//[RFC3640]
-					//mode=AAC-hbr
-					sdp.NewAttribute("fmtp:97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;", ""),
-				},
+			Attributes: []sdp.Attribute{
+				sdp.NewAttribute("recvonly", ""),
+				sdp.NewAttribute("control:"+fmt.Sprintf(t.urlFormat, i), ""),
+				sdp.NewAttribute(fmt.Sprintf("rtpmap:%d %s/%d", payloadType.Pt, payloadType.Encoding, payloadType.ClockRate), ""),
 			},
-		},
+		}
+
+		mediaDescription.MediaName.Protos = []string{"RTP", "AVP"}
+		mediaDescription.MediaName.Formats = []string{strconv.Itoa(payloadType.Pt)}
+
+		if utils.AVMediaTypeAudio == track.Type() {
+			mediaDescription.MediaName.Media = "audio"
+
+			if utils.AVCodecIdAAC == track.CodecId() {
+				//[14496-3], [RFC6416] profile-level-id:
+				//1 : Main Audio Profile Level 1
+				//9 : Speech Audio Profile Level 1
+				//15: High Quality Audio Profile Level 2
+				//30: Natural Audio Profile Level 1
+				//44: High Efficiency AAC Profile Level 2
+				//48: High Efficiency AAC v2 Profile Level 2
+				//55: Baseline MPEG Surround Profile (see ISO/IEC 23003-1) Level 3
+
+				//[RFC5619]
+				//a=fmtp:96 streamType=5; profile-level-id=44; mode=AAC-hbr; config=131
+				//     056E598; sizeLength=13; indexLength=3; indexDeltaLength=3; constant
+				//     Duration=2048; MPS-profile-level-id=55; MPS-config=F1B4CF920442029B
+				//     501185B6DA00;
+				//低比特率用sizelength=6;indexlength=2;indexdeltalength=2
+
+				//[RFC3640]
+				//mode=AAC-hbr
+				fmtp := sdp.NewAttribute("fmtp:97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;", "")
+				mediaDescription.Attributes = append(mediaDescription.Attributes, fmtp)
+			}
+
+		} else {
+			mediaDescription.MediaName.Media = "video"
+		}
+
+		description.MediaDescriptions = append(description.MediaDescriptions, &mediaDescription)
 	}
 
 	marshal, err := description.Marshal()
@@ -255,7 +246,6 @@ func (t *tranStream) WriteHeader() error {
 		return err
 	}
 
-	println(marshal)
 	t.sdp = string(marshal)
 	return nil
 }

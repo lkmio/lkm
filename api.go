@@ -71,7 +71,7 @@ func (api *ApiServer) generateSinkId(remoteAddr string) stream.SinkId {
 
 func (api *ApiServer) doPlay(sink stream.ISink) utils.HookState {
 	ok := utils.HookStateOK
-	sink.Play(func() {
+	stream.HookPlaying(sink, func() {
 
 	}, func(state utils.HookState) {
 		ok = state
