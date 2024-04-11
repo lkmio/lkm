@@ -63,6 +63,43 @@ func init() {
 	}
 }
 
+func sendHookEvent(url string, body interface{}, success func(response *http.Response), failure func(response *http.Response, err error)) error {
+	marshal, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+
+	client := &http.Client{
+		Timeout: time.Second * time.Duration(AppConfig.Hook.Time),
+	}
+	request, err := http.NewRequest("post", url, bytes.NewBuffer(marshal))
+	if err != nil {
+		return err
+	}
+
+	request.Header.Set("Content-Type", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		failure(response, err)
+	} else if response.StatusCode != http.StatusOK {
+		failure(response, fmt.Errorf("code:%d reason:%s", response.StatusCode, response.Status))
+	} else {
+		success(response)
+	}
+
+	return nil
+}
+
+func hookEvent(event HookEvent, body interface{}, success func(response *http.Response), failure func(response *http.Response, err error)) error {
+	url := hookUrls[event]
+	if url == "" {
+		success(nil)
+		return nil
+	}
+
+	return sendHookEvent(url, body, success, failure)
+}
+
 type hookSessionImpl struct {
 }
 
@@ -90,15 +127,9 @@ func (h *hookSessionImpl) send(url string, body interface{}, success func(respon
 		success(response)
 	}
 
-	return nil
+	return sendHookEvent(url, body, success, failure)
 }
 
 func (h *hookSessionImpl) Hook(event HookEvent, body interface{}, success func(response *http.Response), failure func(response *http.Response, err error)) error {
-	url := hookUrls[event]
-	if url == "" {
-		success(nil)
-		return nil
-	}
-
-	return h.send(url, body, success, failure)
+	return hookEvent(event, body, success, failure)
 }

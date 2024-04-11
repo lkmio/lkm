@@ -61,7 +61,7 @@ func (s *sessionImpl) OnPlay(app, stream_ string, response chan utils.HookState)
 
 	log.Sugar.Infof("rtmp onplay app:%s stream:%s sink:%v conn:%s", app, stream_, sink.Id(), s.conn.RemoteAddr().String())
 
-	sink.Play(func() {
+	stream.HookPlaying(sink, func() {
 		s.handle = sink
 		response <- utils.HookStateOK
 	}, func(state utils.HookState) {

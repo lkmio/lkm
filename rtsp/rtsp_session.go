@@ -43,10 +43,13 @@ const (
 type requestHandler interface {
 	onOptions(sourceId string, headers textproto.MIMEHeader)
 
+	//获取spd
 	onDescribe(sourceId string, headers textproto.MIMEHeader)
 
+	//订阅track
 	onSetup(sourceId string, index int, headers textproto.MIMEHeader)
 
+	//播放
 	onPlay(sourceId string)
 
 	onTeardown()
@@ -57,7 +60,7 @@ type requestHandler interface {
 type session struct {
 	conn net.Conn
 
-	sink_       *sink
+	sink_       *Sink
 	sessionId   string
 	writeBuffer *bytes.Buffer
 }
@@ -162,8 +165,9 @@ func (s *session) onDescribe(source string, headers textproto.MIMEHeader) error 
 	})
 
 	code := utils.HookStateOK
-	s.sink_ = sink_.(*sink)
-	sink_.Play(func() {
+	s.sink_ = sink_
+
+	stream.HookPlaying(sink_, func() {
 
 	}, func(state utils.HookState) {
 		code = state
@@ -187,8 +191,6 @@ func (s *session) onSetup(sourceId string, index int, headers textproto.MIMEHead
 		return fmt.Errorf("failed to parsing TRANSPORT header:%s", split)
 	}
 
-	var clientRtpPort int
-	var clientRtcpPort int
 	tcp := "RTP/AVP" != split[0] && "RTP/AVP/UDP" != split[0]
 	if !tcp {
 		for _, value := range split {
@@ -205,13 +207,13 @@ func (s *session) onSetup(sourceId string, index int, headers textproto.MIMEHead
 			if err != nil {
 				return err
 			}
-			clientRtpPort = port
+			_ = port
 
 			port, err = strconv.Atoi(pairPort[1])
 			if err != nil {
 				return err
 			}
-			clientRtcpPort = port
+			_ = port
 		}
 	}
 
@@ -220,8 +222,6 @@ func (s *session) onSetup(sourceId string, index int, headers textproto.MIMEHead
 		return err
 	}
 
-	println(clientRtpPort)
-	println(clientRtcpPort)
 	responseHeader := transportHeader
 	if tcp {
 		//修改interleaved为实际的stream index

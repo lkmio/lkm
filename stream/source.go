@@ -2,6 +2,7 @@ package stream
 
 import (
 	"fmt"
+	"github.com/yangjiechina/live-server/log"
 	"net"
 	"net/http"
 	"sync"
@@ -328,6 +329,8 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 			s.transStreams = make(map[TransStreamId]ITransStream, 10)
 		}
 		//创建一个新的传输流
+		log.Sugar.Debugf("创建%s-stream", sink.ProtocolStr())
+
 		transStream = TransStreamFactory(s, sink.Protocol(), streams[:size])
 		s.transStreams[transStreamId] = transStream
 
