@@ -73,9 +73,9 @@ func (t *tranStream) onRtpPacket(data []byte, timestamp uint32, params interface
 			for i, rtp := range track.header {
 				librtp.RollbackSeq(rtp[OverTcpHeaderSize:], int(seq)-(count-i-1))
 				if sink_.tcp {
-					sink_.input(index, rtp)
+					sink_.input(index, rtp, 0)
 				} else {
-					sink_.input(index, rtp[OverTcpHeaderSize:])
+					sink_.input(index, rtp[OverTcpHeaderSize:], timestamp)
 				}
 			}
 		}
@@ -84,9 +84,9 @@ func (t *tranStream) onRtpPacket(data []byte, timestamp uint32, params interface
 		t.overTCP(track.buffer[:end], index)
 
 		if sink_.tcp {
-			sink_.input(index, track.buffer[:end])
+			sink_.input(index, track.buffer[:end], 0)
 		} else {
-			sink_.input(index, data)
+			sink_.input(index, data, timestamp)
 		}
 	}
 }
@@ -133,8 +133,8 @@ func (t *tranStream) Input(packet utils.AVPacket) error {
 }
 
 func (t *tranStream) AddSink(sink_ stream.ISink) error {
-	sink_.(*Sink).setTrackCount(len(t.TransStreamImpl.Tracks))
-	if err := sink_.(*Sink).SendHeader([]byte(t.sdp)); err != nil {
+	sink_.(*sink).setTrackCount(len(t.TransStreamImpl.Tracks))
+	if err := sink_.(*sink).SendHeader([]byte(t.sdp)); err != nil {
 		return err
 	}
 

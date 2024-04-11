@@ -1,7 +1,6 @@
 package rtsp
 
 import (
-	"fmt"
 	"github.com/yangjiechina/avformat/transport"
 	"github.com/yangjiechina/avformat/utils"
 	"github.com/yangjiechina/live-server/log"
@@ -72,7 +71,7 @@ func (s *serverImpl) OnPacket(conn net.Conn, data []byte) {
 
 	message, url, header, err := parseMessage(data)
 	if err != nil {
-		println(fmt.Sprintf("failed to prase message:%s. err:%s peer:%s", string(data), err.Error(), conn.RemoteAddr().String()))
+		log.Sugar.Errorf("failed to prase message:%s. err:%s peer:%s", string(data), err.Error(), conn.RemoteAddr().String())
 		_ = conn.Close()
 		s.closeSession(conn)
 		return
@@ -80,7 +79,8 @@ func (s *serverImpl) OnPacket(conn net.Conn, data []byte) {
 
 	err = t.Data.(*session).Input(message, url, header)
 	if err != nil {
-		println(fmt.Sprintf("failed to process message of RTSP. err:%s peer:%s msg:%s", err.Error(), conn.RemoteAddr().String(), string(data)))
+		log.Sugar.Errorf("failed to process message of RTSP. err:%s peer:%s msg:%s", err.Error(), conn.RemoteAddr().String(), string(data))
+
 		_ = conn.Close()
 	}
 }

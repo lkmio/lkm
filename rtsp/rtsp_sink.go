@@ -2,10 +2,13 @@ package rtsp
 
 import (
 	"fmt"
+	"github.com/pion/rtcp"
 	"github.com/yangjiechina/avformat/transport"
 	"github.com/yangjiechina/avformat/utils"
+	"github.com/yangjiechina/live-server/log"
 	"github.com/yangjiechina/live-server/stream"
 	"net"
+	"time"
 )
 
 // 对于UDP而言, 每个sink维护一对UDPTransport
@@ -17,6 +20,7 @@ type sink struct {
 	tracks []*rtspTrack
 	sdpCb  func(sdp string)
 
+	//是否是TCP拉流
 	tcp     bool
 	playing bool
 }
@@ -35,7 +39,7 @@ func (s *sink) setTrackCount(count int) {
 	s.tracks = make([]*rtspTrack, count)
 }
 
-func (s *sink) addTrack(index int, tcp bool) (int, int, error) {
+func (s *sink) addTrack(index int, tcp bool, ssrc uint32) (int, int, error) {
 	utils.Assert(index < cap(s.tracks))
 	utils.Assert(s.tracks[index] == nil)
 
@@ -43,7 +47,9 @@ func (s *sink) addTrack(index int, tcp bool) (int, int, error) {
 	var rtpPort int
 	var rtcpPort int
 
-	track := rtspTrack{}
+	track := rtspTrack{
+		ssrc: ssrc,
+	}
 	if tcp {
 		s.tcp = true
 	} else {
@@ -83,14 +89,38 @@ func (s *sink) addTrack(index int, tcp bool) (int, int, error) {
 	return rtpPort, rtcpPort, err
 }
 
-func (s *sink) input(index int, data []byte) error {
-	utils.Assert(index < cap(s.tracks))
+func (s *sink) input(index int, data []byte, rtpTime uint32) error {
 	//拉流方还没有连上来
-	s.tracks[index].pktCount++
+	utils.Assert(index < cap(s.tracks))
+
+	track := s.tracks[index]
+	track.pktCount++
+	track.octetCount += len(data)
 	if s.tcp {
 		s.Conn.Write(data)
 	} else {
-		s.tracks[index].rtpConn.Write(data)
+		track.rtpConn.Write(data)
+
+		if track.rtcpConn == nil || track.pktCount%100 != 0 {
+			return nil
+		}
+
+		nano := uint64(time.Now().UnixNano())
+		ntp := (nano/1000000000 + 2208988800<<32) | (nano % 1000000000)
+		sr := rtcp.SenderReport{
+			SSRC:        track.ssrc,
+			NTPTime:     ntp,
+			RTPTime:     rtpTime,
+			PacketCount: uint32(track.pktCount),
+			OctetCount:  uint32(track.octetCount),
+		}
+
+		marshal, err := sr.Marshal()
+		if err != nil {
+			log.Sugar.Errorf("创建rtcp sr消息失败 err:%s msg:%v", err.Error(), sr)
+		}
+
+		track.rtcpConn.Write(marshal)
 	}
 	return nil
 }
@@ -117,6 +147,8 @@ func (s *sink) TrackConnected(index int) bool {
 }
 
 func (s *sink) Close() {
+	s.SinkImpl.Close()
+
 	for _, track := range s.tracks {
 		if track.rtp != nil {
 			track.rtp.Close()

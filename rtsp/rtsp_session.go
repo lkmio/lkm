@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/yangjiechina/avformat/utils"
+	"github.com/yangjiechina/live-server/log"
 	"github.com/yangjiechina/live-server/stream"
 	"net"
 	"net/http"
@@ -60,7 +61,7 @@ type requestHandler interface {
 type session struct {
 	conn net.Conn
 
-	sink_       *Sink
+	sink_       *sink
 	sessionId   string
 	writeBuffer *bytes.Buffer
 }
@@ -165,7 +166,7 @@ func (s *session) onDescribe(source string, headers textproto.MIMEHeader) error 
 	})
 
 	code := utils.HookStateOK
-	s.sink_ = sink_
+	s.sink_ = sink_.(*sink)
 
 	stream.HookPlaying(sink_, func() {
 
@@ -209,15 +210,18 @@ func (s *session) onSetup(sourceId string, index int, headers textproto.MIMEHead
 			}
 			_ = port
 
-			port, err = strconv.Atoi(pairPort[1])
+			port2, err := strconv.Atoi(pairPort[1])
 			if err != nil {
 				return err
 			}
-			_ = port
+			_ = port2
+
+			log.Sugar.Debugf("client port:%d-%d", port, port2)
 		}
 	}
 
-	rtpPort, rtcpPort, err := s.sink_.addTrack(index, tcp)
+	ssrc := 0xFFFFFFFF
+	rtpPort, rtcpPort, err := s.sink_.addTrack(index, tcp, uint32(ssrc))
 	if err != nil {
 		return err
 	}
@@ -229,7 +233,8 @@ func (s *session) onSetup(sourceId string, index int, headers textproto.MIMEHead
 	} else {
 		responseHeader += ";server_port=" + fmt.Sprintf("%d-%d", rtpPort, rtcpPort)
 	}
-	responseHeader += ";ssrc=FFFFFFFF"
+
+	responseHeader += ";ssrc=" + strconv.FormatInt(int64(ssrc), 16)
 
 	response := NewOKResponse(headers.Get("Cseq"))
 	response.Header.Set("Transport", responseHeader)
@@ -297,5 +302,8 @@ func (s *session) Input(method string, url_ *url.URL, headers textproto.MIMEHead
 }
 
 func (s *session) close() {
-
+	if s.sink_ != nil {
+		s.sink_.Close()
+		s.sink_ = nil
+	}
 }

@@ -13,7 +13,9 @@ type rtspTrack struct {
 	rtcpConn net.Conn
 
 	//rtcp
-	pktCount int
+	pktCount   int
+	ssrc       uint32
+	octetCount int
 }
 
 func (s *rtspTrack) onRTPPacket(conn net.Conn, data []byte) {
@@ -26,6 +28,19 @@ func (s *rtspTrack) onRTCPPacket(conn net.Conn, data []byte) {
 	if s.rtcpConn == nil {
 		s.rtcpConn = conn
 	}
+
+	//packs, err := rtcp.Unmarshal(data)
+	//if err != nil {
+	//	log.Sugar.Warnf("解析rtcp包失败 err:%s conn:%s pkt:%s", err.Error(), conn.RemoteAddr().String(), hex.EncodeToString(data))
+	//	return
+	//}
+	//
+	//for _, pkt := range packs {
+	//	if _, ok := pkt.(*rtcp.ReceiverReport); ok {
+	//	} else if _, ok := pkt.(*rtcp.SourceDescription); ok {
+	//	} else if _, ok := pkt.(*rtcp.Goodbye); ok {
+	//	}
+	//}
 }
 
 // tcp链接成功回调
