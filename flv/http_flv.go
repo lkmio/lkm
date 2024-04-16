@@ -59,9 +59,8 @@ func (t *httpTransStream) Input(packet utils.AVPacket) error {
 	if videoKey {
 		head, _ := t.StreamBuffers[0].Data()
 		if len(head) > t.SegmentOffset {
-			t.StreamBuffers[0].Mark()
+			//分配末尾换行符
 			t.StreamBuffers[0].Allocate(2)
-			t.StreamBuffers[0].Fetch()
 
 			head, _ = t.StreamBuffers[0].Data()
 			t.writeSeparator(head[t.SegmentOffset:])
@@ -84,12 +83,9 @@ func (t *httpTransStream) Input(packet utils.AVPacket) error {
 		separatorSize = 2
 	}
 
-	t.StreamBuffers[0].Mark()
 	allocate := t.StreamBuffers[0].Allocate(separatorSize + flvSize)
 	n += t.muxer.Input(allocate[n:], packet.MediaType(), len(data), packet.Dts(), packet.Pts(), packet.KeyFrame(), false)
 	copy(allocate[n:], data)
-	_ = t.StreamBuffers[0].Fetch()
-
 	if !full {
 		return nil
 	}
@@ -115,8 +111,9 @@ func (t *httpTransStream) AddTrack(stream utils.AVStream) error {
 		t.muxer.AddAudioTrack(stream.CodecId(), 0, 0, 0)
 	} else if utils.AVMediaTypeVideo == stream.Type() {
 		t.muxer.AddVideoTrack(stream.CodecId())
-		t.muxer.AddProperty("width", stream.(utils.VideoStream).Width())
-		t.muxer.AddProperty("height", stream.(utils.VideoStream).Height())
+
+		t.muxer.AddProperty("width", stream.CodecParameters().SPSInfo().Width())
+		t.muxer.AddProperty("height", stream.CodecParameters().SPSInfo().Height())
 	}
 	return nil
 }

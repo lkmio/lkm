@@ -2,6 +2,7 @@ package rtsp
 
 import (
 	"fmt"
+	"github.com/yangjiechina/avformat/libbufio"
 	"github.com/yangjiechina/avformat/utils"
 )
 
@@ -54,7 +55,7 @@ func (t *transportManager) AllocTransport(tcp bool, cb func(port int)) error {
 	}
 
 	t.nextPort = t.nextPort + 1%t.endPort
-	t.nextPort = utils.MaxInt(t.nextPort, t.startPort)
+	t.nextPort = libbufio.MaxInt(t.nextPort, t.startPort)
 	return nil
 }
 

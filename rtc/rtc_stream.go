@@ -34,7 +34,8 @@ func (t *transStream) Input(packet utils.AVPacket) error {
 				}
 				sink_.input(packet.Index(), extra, 0)
 			}
-			sink_.input(packet.Index(), packet.AnnexBPacketData(), 40)
+
+			sink_.input(packet.Index(), packet.AnnexBPacketData(t.TransStreamImpl.Tracks[packet.Index()]), uint32(packet.Duration(1000)))
 		}
 	}
 

@@ -99,7 +99,7 @@ func (t *transStream) Input(packet utils.AVPacket) error {
 	pts := packet.ConvertPts(90000)
 	dts := packet.ConvertDts(90000)
 	if utils.AVMediaTypeVideo == packet.MediaType() {
-		return t.muxer.Input(packet.Index(), packet.AnnexBPacketData(), pts, dts, packet.KeyFrame())
+		return t.muxer.Input(packet.Index(), packet.AnnexBPacketData(t.TransStreamImpl.Tracks[packet.Index()]), pts, dts, packet.KeyFrame())
 	} else {
 		return t.muxer.Input(packet.Index(), packet.Data(), pts, dts, packet.KeyFrame())
 	}

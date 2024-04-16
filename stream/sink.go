@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"encoding/binary"
 	"fmt"
 	"github.com/yangjiechina/avformat/utils"
 	"net"
@@ -50,13 +51,13 @@ type ISink interface {
 func GenerateSinkId(addr net.Addr) SinkId {
 	network := addr.Network()
 	if "tcp" == network {
-		id := uint64(utils.BytesToInt(addr.(*net.TCPAddr).IP.To4()))
+		id := uint64(binary.BigEndian.Uint32(addr.(*net.TCPAddr).IP.To4()))
 		id <<= 32
 		id |= uint64(addr.(*net.TCPAddr).Port << 16)
 
 		return id
 	} else if "udp" == network {
-		id := uint64(utils.BytesToInt(addr.(*net.UDPAddr).IP.To4()))
+		id := uint64(binary.BigEndian.Uint32(addr.(*net.UDPAddr).IP.To4()))
 		id <<= 32
 		id |= uint64(addr.(*net.UDPAddr).Port << 16)
 

@@ -198,13 +198,13 @@ func (c *CacheTransStream) Full(ts int64) bool {
 }
 
 func (c *CacheTransStream) SwapStreamBuffer() {
-	utils.Assert(c.ExistVideo)
+	if c.ExistVideo && AppConfig.MergeWriteLatency > 0 {
+		tmp := c.StreamBuffers[0]
+		c.StreamBuffers[0] = c.StreamBuffers[1]
+		c.StreamBuffers[1] = tmp
+	}
 
-	tmp := c.StreamBuffers[0]
-	c.StreamBuffers[0] = c.StreamBuffers[1]
-	c.StreamBuffers[1] = tmp
 	c.StreamBuffers[0].Clear()
-
 	c.PrePacketTS = -1
 	c.SegmentOffset = 0
 }

@@ -1,6 +1,9 @@
 package stream
 
-import "github.com/yangjiechina/avformat/utils"
+import (
+	"github.com/yangjiechina/avformat/libbufio"
+	"github.com/yangjiechina/avformat/utils"
+)
 
 type Queue struct {
 	*ringBuffer
@@ -42,7 +45,7 @@ func (q *Queue) PopBack() interface{} {
 
 	value := q.ringBuffer.Tail()
 	q.size--
-	q.tail = utils.MaxInt(0, q.tail-1)
+	q.tail = libbufio.MaxInt(0, q.tail-1)
 
 	return value
 }

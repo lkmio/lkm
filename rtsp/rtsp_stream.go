@@ -3,6 +3,8 @@ package rtsp
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/yangjiechina/avformat/libavc"
+	"github.com/yangjiechina/avformat/libhevc"
 	"github.com/yangjiechina/avformat/librtp"
 	"github.com/yangjiechina/avformat/librtsp/sdp"
 	"github.com/yangjiechina/avformat/utils"
@@ -109,23 +111,23 @@ func (t *tranStream) Input(packet utils.AVPacket) error {
 				return nil
 			}
 
-			extra, err := t.TransStreamImpl.Tracks[packet.Index()].AnnexBExtraData()
-			if err != nil {
-				return err
+			stream_.cache = true
+			parameters := t.TransStreamImpl.Tracks[packet.Index()].CodecParameters()
+
+			if utils.AVCodecIdH265 == packet.CodecId() {
+				bytes := parameters.DecoderConfRecord().(*libhevc.HEVCDecoderConfRecord).VPS
+				stream_.muxer.Input(bytes[0], uint32(packet.ConvertPts(stream_.rate)))
 			}
 
-			var count int
-			stream_.cache = true
-			utils.SplitNalU(extra, func(nalu []byte) {
-				data := utils.RemoveStartCode(nalu)
-				stream_.muxer.Input(data, uint32(packet.ConvertPts(stream_.rate)))
-				count++
-			})
+			spsBytes := parameters.DecoderConfRecord().SPSBytes()
+			ppsBytes := parameters.DecoderConfRecord().PPSBytes()
 
+			stream_.muxer.Input(spsBytes[0], uint32(packet.ConvertPts(stream_.rate)))
+			stream_.muxer.Input(ppsBytes[0], uint32(packet.ConvertPts(stream_.rate)))
 			stream_.header = stream_.tmp
 		}
 
-		data := utils.RemoveStartCode(packet.AnnexBPacketData())
+		data := libavc.RemoveStartCode(packet.AnnexBPacketData(t.TransStreamImpl.Tracks[packet.Index()]))
 		stream_.muxer.Input(data, uint32(packet.ConvertPts(stream_.rate)))
 	}
 
@@ -153,7 +155,7 @@ func (t *tranStream) AddTrack(stream utils.AVStream) error {
 
 	//创建RTP封装
 	var muxer librtp.Muxer
-	if utils.AVCodecIdH264 == stream.CodecId() {
+	if utils.AVCodecIdH264 == stream.CodecId() || utils.AVCodecIdH265 == stream.CodecId() {
 		muxer = librtp.NewH264Muxer(payloadType.Pt, 0, 0xFFFFFFFF)
 	} else if utils.AVCodecIdAAC == stream.CodecId() {
 		muxer = librtp.NewAACMuxer(payloadType.Pt, 0, 0xFFFFFFFF)

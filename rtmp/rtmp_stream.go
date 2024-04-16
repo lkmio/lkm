@@ -24,7 +24,10 @@ func NewTransStream(chunkSize int) stream.ITransStream {
 	return transStream
 }
 
+var count int
+
 func (t *TransStream) Input(packet utils.AVPacket) error {
+	count++
 	utils.Assert(t.TransStreamImpl.Completed)
 
 	var data []byte
@@ -34,12 +37,16 @@ func (t *TransStream) Input(packet utils.AVPacket) error {
 	var length int
 	//rtmp chunk消息体的数据大小
 	var payloadSize int
+	//先向rtmp buffer写的flv头,再按照chunk size分割,所以第一个chunk要跳过flv头大小
+	var chunkPayloadOffset int
+	ct := packet.Pts() - packet.Dts()
 
 	if utils.AVMediaTypeAudio == packet.MediaType() {
 		data = packet.Data()
 		length = len(data)
 		chunk = &t.audioChunk
-		payloadSize += 2 + length
+		chunkPayloadOffset = 2
+		payloadSize += chunkPayloadOffset + length
 
 	} else if utils.AVMediaTypeVideo == packet.MediaType() {
 		videoPkt = true
@@ -47,26 +54,30 @@ func (t *TransStream) Input(packet utils.AVPacket) error {
 		data = packet.AVCCPacketData()
 		length = len(data)
 		chunk = &t.videoChunk
-		payloadSize += 5 + length
+		chunkPayloadOffset = t.muxer.ComputeVideoDataSize(uint32(ct))
+		payloadSize += chunkPayloadOffset + length
 	}
 
+	//遇到视频关键帧,不考虑合并写大小,发送之前剩余的数据.
 	if videoKey {
 		tmp := t.StreamBuffers[0]
 		head, _ := tmp.Data()
-		t.SendPacket(head[t.SegmentOffset:])
-		t.SwapStreamBuffer()
+		if len(head[t.SegmentOffset:]) > 0 {
+			bytes := head[t.SegmentOffset:]
+			t.SendPacket(bytes)
+			//交替使用两块内存
+			t.SwapStreamBuffer()
+		}
 	}
 
 	//分配内存
-	t.StreamBuffers[0].Mark()
 	allocate := t.StreamBuffers[0].Allocate(12 + payloadSize + (payloadSize / t.chunkSize))
 
-	//写chunk头
 	var ts uint32
 	if packet.CodecId() == utils.AVCodecIdAAC {
-		ts = uint32(packet.ConvertPts(libflv.AACFrameSize))
+		ts = uint32(packet.ConvertDts(libflv.AACFrameSize))
 	} else {
-		ts = uint32(packet.ConvertPts(1000))
+		ts = uint32(packet.ConvertDts(1000))
 	}
 
 	chunk.Length = payloadSize
@@ -75,22 +86,22 @@ func (t *TransStream) Input(packet utils.AVPacket) error {
 	utils.Assert(n == 12)
 
 	//写flv
-	ct := packet.Pts() - packet.Dts()
 	if videoPkt {
 		n += t.muxer.WriteVideoData(allocate[12:], uint32(ct), packet.KeyFrame(), false)
-		n += chunk.WriteData(allocate[n:], data, t.chunkSize)
+		n += chunk.WriteData(allocate[n:], data, t.chunkSize, chunkPayloadOffset)
 	} else {
 		n += t.muxer.WriteAudioData(allocate[12:], false)
-		n += chunk.WriteData(allocate[n:], data, t.chunkSize)
+		n += chunk.WriteData(allocate[n:], data, t.chunkSize, chunkPayloadOffset)
 	}
 
-	_ = t.StreamBuffers[0].Fetch()[:n]
-	if t.Full(packet.Pts()) {
+	//未满合并写大小, 不发送
+	if !t.Full(packet.Dts()) {
 		return nil
 	}
 
 	head, _ := t.StreamBuffers[0].Data()
-	t.SendPacketWithOffset(head[:], t.SegmentOffset)
+	//发送合并写数据
+	t.SendPacketWithOffset(head, t.SegmentOffset)
 	return nil
 }
 

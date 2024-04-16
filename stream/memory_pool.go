@@ -6,23 +6,30 @@ import (
 
 // MemoryPool 从解复用阶段，拼凑成完整的AVPacket开始(写)，到GOP缓存结束(释放)，整个过程都使用池中内存
 // 类似环形缓冲区, 区别在于，写入的内存块是连续的、整块内存.
+// 两种使用方式:
+//  1. 已知需要分配内存大小， 直接使用Allocate()函数分配, 并且外部自行操作内存块
+//  2. 未知分配内存大小, 先使用Mark()函数，标记内存起始偏移量, 再通过Write()函数将数据拷贝进内存块，最后调用Fetch/Reset函数完成或释放内存块
+//
+// 两种使用方式互斥，不能同时使用.
 type MemoryPool interface {
-	// Mark 标记一块写的内存地址
-	//使用流程 Mark->Write/Allocate....->Fetch/Reset
+	// Allocate 分配指定大小的内存块
+	Allocate(size int) []byte
+
+	// Mark 标记内存块起始位置
 	Mark()
 
+	// Write 向内存块中写入数据, 必须先调用Mark函数
 	Write(data []byte)
+
+	// Fetch 获取当前内存块，必须先调用Mark函数
+	Fetch() []byte
+
+	// Reset 清空写入的数据，本次缓存的数据无效
+	Reset()
 
 	// Reserve 保留指定大小的内存空间
 	//主要是为了和实现和Write相似功能，但是不拷贝, 所以使用流程和Write一样.
 	Reserve(size int)
-
-	Allocate(size int) []byte
-
-	Fetch() []byte
-
-	// Reset 清空此次Write的标记，本次缓存的数据无效
-	Reset()
 
 	// FreeHead 从头部释放指定大小内存
 	FreeHead()
@@ -127,6 +134,8 @@ func (m *memoryPool) allocate(size int) []byte {
 }
 
 func (m *memoryPool) Mark() {
+	utils.Assert(!m.mark)
+
 	m.markIndex = m.tail
 	m.mark = true
 }
@@ -144,8 +153,9 @@ func (m *memoryPool) Reserve(size int) {
 }
 
 func (m *memoryPool) Allocate(size int) []byte {
-	utils.Assert(m.mark)
-	return m.allocate(size)
+	m.Mark()
+	_ = m.allocate(size)
+	return m.Fetch()
 }
 
 func (m *memoryPool) Fetch() []byte {
@@ -163,6 +173,7 @@ func (m *memoryPool) Reset() {
 }
 
 func (m *memoryPool) FreeHead() {
+	utils.Assert(!m.mark)
 	utils.Assert(!m.blockQueue.IsEmpty())
 
 	size := m.blockQueue.Pop().(int)
@@ -177,6 +188,7 @@ func (m *memoryPool) FreeHead() {
 }
 
 func (m *memoryPool) FreeTail() {
+	utils.Assert(!m.mark)
 	utils.Assert(!m.blockQueue.IsEmpty())
 
 	size := m.blockQueue.PopBack().(int)
