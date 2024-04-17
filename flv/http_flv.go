@@ -46,12 +46,23 @@ func (t *httpTransStream) Input(packet utils.AVPacket) error {
 	var flvSize int
 	var data []byte
 	var videoKey bool
+	var dts int64
+	var pts int64
+
+	if utils.AVCodecIdAAC == packet.CodecId() {
+		dts = packet.ConvertDts(1024)
+		pts = packet.ConvertPts(1024)
+	} else {
+		dts = packet.ConvertDts(1000)
+		pts = packet.ConvertPts(1000)
+	}
 
 	if utils.AVMediaTypeAudio == packet.MediaType() {
 		flvSize = 17 + len(packet.Data())
 		data = packet.Data()
 	} else if utils.AVMediaTypeVideo == packet.MediaType() {
-		flvSize = 20 + len(packet.AVCCPacketData())
+		flvSize = t.muxer.ComputeVideoDataSize(uint32(pts-dts)) + libflv.TagHeaderSize + len(packet.AVCCPacketData())
+
 		data = packet.AVCCPacketData()
 		videoKey = packet.KeyFrame()
 	}
@@ -73,7 +84,7 @@ func (t *httpTransStream) Input(packet utils.AVPacket) error {
 
 	var n int
 	var separatorSize int
-	full := t.Full(packet.Pts())
+	full := t.Full(dts)
 	if head, _ := t.StreamBuffers[0].Data(); t.SegmentOffset == len(head) {
 		separatorSize = HttpFlvBlockLengthSize
 		//10字节描述flv包长, 前2个字节描述无效字节长度
@@ -84,7 +95,7 @@ func (t *httpTransStream) Input(packet utils.AVPacket) error {
 	}
 
 	allocate := t.StreamBuffers[0].Allocate(separatorSize + flvSize)
-	n += t.muxer.Input(allocate[n:], packet.MediaType(), len(data), packet.Dts(), packet.Pts(), packet.KeyFrame(), false)
+	n += t.muxer.Input(allocate[n:], packet.MediaType(), len(data), dts, pts, packet.KeyFrame(), false)
 	copy(allocate[n:], data)
 	if !full {
 		return nil

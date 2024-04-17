@@ -39,7 +39,18 @@ func (t *TransStream) Input(packet utils.AVPacket) error {
 	var payloadSize int
 	//先向rtmp buffer写的flv头,再按照chunk size分割,所以第一个chunk要跳过flv头大小
 	var chunkPayloadOffset int
-	ct := packet.Pts() - packet.Dts()
+	var dts int64
+	var pts int64
+
+	if utils.AVCodecIdAAC == packet.CodecId() {
+		dts = packet.ConvertDts(1024)
+		pts = packet.ConvertPts(1024)
+	} else {
+		dts = packet.ConvertDts(1000)
+		pts = packet.ConvertPts(1000)
+	}
+
+	ct := pts - dts
 
 	if utils.AVMediaTypeAudio == packet.MediaType() {
 		data = packet.Data()
@@ -73,15 +84,9 @@ func (t *TransStream) Input(packet utils.AVPacket) error {
 	//分配内存
 	allocate := t.StreamBuffers[0].Allocate(12 + payloadSize + (payloadSize / t.chunkSize))
 
-	var ts uint32
-	if packet.CodecId() == utils.AVCodecIdAAC {
-		ts = uint32(packet.ConvertDts(libflv.AACFrameSize))
-	} else {
-		ts = uint32(packet.ConvertDts(1000))
-	}
-
+	//写rtmp chunk header
 	chunk.Length = payloadSize
-	chunk.Timestamp = ts
+	chunk.Timestamp = uint32(dts)
 	n := chunk.ToBytes(allocate)
 	utils.Assert(n == 12)
 
@@ -95,7 +100,7 @@ func (t *TransStream) Input(packet utils.AVPacket) error {
 	}
 
 	//未满合并写大小, 不发送
-	if !t.Full(packet.Dts()) {
+	if !t.Full(dts) {
 		return nil
 	}
 
