@@ -271,6 +271,7 @@ func (s *session) Input(method string, url_ *url.URL, headers textproto.MIMEHead
 	var err error
 	split := strings.Split(url_.Path, "/")
 	source := split[len(split)-1]
+
 	if MethodOptions == method {
 		err = s.onOptions(source, headers)
 	} else if MethodDescribe == method {

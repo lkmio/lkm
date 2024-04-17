@@ -75,13 +75,7 @@ func (p *publisher) OnDiscardPacket(pkt interface{}) {
 }
 
 func (p *publisher) OnDeMuxStream(stream_ utils.AVStream) {
-	//AVStream的Data单独拷贝出来
 	//释放掉内存池中最新分配的内存
-	tmp := stream_.Extra()
-	bytes := make([]byte, len(tmp))
-	copy(bytes, tmp)
-	stream_.SetExtraData(bytes)
-
 	if utils.AVMediaTypeAudio == stream_.Type() {
 		p.audioMemoryPool.FreeTail()
 	} else if utils.AVMediaTypeVideo == stream_.Type() {
@@ -100,10 +94,11 @@ func (p *publisher) OnDeMuxPacket(packet utils.AVPacket) {
 		return
 	}
 
+	//未开启GOP缓存，释放掉内存
 	if utils.AVMediaTypeAudio == packet.MediaType() {
-		p.audioMemoryPool.FreeHead()
+		p.audioMemoryPool.FreeTail()
 	} else if utils.AVMediaTypeVideo == packet.MediaType() {
-		p.videoMemoryPool.FreeHead()
+		p.videoMemoryPool.FreeTail()
 	}
 }
 

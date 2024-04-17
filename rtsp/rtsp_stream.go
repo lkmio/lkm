@@ -49,10 +49,13 @@ func (t *tranStream) onAllocBuffer(params interface{}) []byte {
 	return t.rtpTracks[params.(int)].buffer[OverTcpHeaderSize:]
 }
 
+// onRtpPacket 所有封装后的RTP流都将回调于此
 func (t *tranStream) onRtpPacket(data []byte, timestamp uint32, params interface{}) {
+	//params传递track索引
 	index := params.(int)
 	track := t.rtpTracks[index]
 
+	//保存sps和ssp等数据
 	if track.cache && track.header == nil {
 		bytes := make([]byte, OverTcpHeaderSize+len(data))
 		copy(bytes[OverTcpHeaderSize:], data)
@@ -155,11 +158,16 @@ func (t *tranStream) AddTrack(stream utils.AVStream) error {
 
 	//创建RTP封装
 	var muxer librtp.Muxer
-	if utils.AVCodecIdH264 == stream.CodecId() || utils.AVCodecIdH265 == stream.CodecId() {
+	if utils.AVCodecIdH264 == stream.CodecId() {
 		muxer = librtp.NewH264Muxer(payloadType.Pt, 0, 0xFFFFFFFF)
+	} else if utils.AVCodecIdH265 == stream.CodecId() {
+		muxer = librtp.NewH265Muxer(payloadType.Pt, 0, 0xFFFFFFFF)
 	} else if utils.AVCodecIdAAC == stream.CodecId() {
 		muxer = librtp.NewAACMuxer(payloadType.Pt, 0, 0xFFFFFFFF)
+	} else if utils.AVCodecIdPCMALAW == stream.CodecId() || utils.AVCodecIdPCMMULAW == stream.CodecId() {
+		muxer = librtp.NewMuxer(payloadType.Pt, 0, 0xFFFFFFFF)
 	}
+
 	muxer.SetAllocHandler(t.onAllocBuffer)
 	muxer.SetWriteHandler(t.onRtpPacket)
 
