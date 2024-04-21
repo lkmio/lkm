@@ -10,11 +10,12 @@ import (
 type TransStream struct {
 	stream.CacheTransStream
 	chunkSize int
+
 	//sequence header
 	header     []byte
 	headerSize int
-	muxer      libflv.Muxer
 
+	muxer      libflv.Muxer
 	audioChunk librtmp.Chunk
 	videoChunk librtmp.Chunk
 }
@@ -24,17 +25,13 @@ func NewTransStream(chunkSize int) stream.ITransStream {
 	return transStream
 }
 
-var count int
-
 func (t *TransStream) Input(packet utils.AVPacket) error {
-	count++
 	utils.Assert(t.TransStreamImpl.Completed)
 
 	var data []byte
 	var chunk *librtmp.Chunk
 	var videoPkt bool
 	var videoKey bool
-	var length int
 	//rtmp chunk消息体的数据大小
 	var payloadSize int
 	//先向rtmp buffer写的flv头,再按照chunk size分割,所以第一个chunk要跳过flv头大小
@@ -54,19 +51,16 @@ func (t *TransStream) Input(packet utils.AVPacket) error {
 
 	if utils.AVMediaTypeAudio == packet.MediaType() {
 		data = packet.Data()
-		length = len(data)
 		chunk = &t.audioChunk
 		chunkPayloadOffset = 2
-		payloadSize += chunkPayloadOffset + length
-
+		payloadSize += chunkPayloadOffset + len(data)
 	} else if utils.AVMediaTypeVideo == packet.MediaType() {
 		videoPkt = true
 		videoKey = packet.KeyFrame()
 		data = packet.AVCCPacketData()
-		length = len(data)
 		chunk = &t.videoChunk
 		chunkPayloadOffset = t.muxer.ComputeVideoDataSize(uint32(ct))
-		payloadSize += chunkPayloadOffset + length
+		payloadSize += chunkPayloadOffset + len(data)
 	}
 
 	//遇到视频关键帧,不考虑合并写大小,发送之前剩余的数据.
@@ -82,7 +76,7 @@ func (t *TransStream) Input(packet utils.AVPacket) error {
 	}
 
 	//分配内存
-	allocate := t.StreamBuffers[0].Allocate(12 + payloadSize + (payloadSize / t.chunkSize))
+	allocate := t.StreamBuffers[0].Allocate(12 + payloadSize + ((payloadSize - 1) / t.chunkSize))
 
 	//写rtmp chunk header
 	chunk.Length = payloadSize
@@ -93,11 +87,11 @@ func (t *TransStream) Input(packet utils.AVPacket) error {
 	//写flv
 	if videoPkt {
 		n += t.muxer.WriteVideoData(allocate[12:], uint32(ct), packet.KeyFrame(), false)
-		n += chunk.WriteData(allocate[n:], data, t.chunkSize, chunkPayloadOffset)
 	} else {
 		n += t.muxer.WriteAudioData(allocate[12:], false)
-		n += chunk.WriteData(allocate[n:], data, t.chunkSize, chunkPayloadOffset)
 	}
+
+	n += chunk.WriteData(allocate[n:], data, t.chunkSize, chunkPayloadOffset)
 
 	//未满合并写大小, 不发送
 	if !t.Full(dts) {

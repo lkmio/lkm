@@ -244,7 +244,7 @@ func (s *SourceImpl) dispatchStreamBuffer(transStream ITransStream, streams []ut
 			}
 
 			pkt := s.buffers[stream.Index()].Peek(indexs[index]).(utils.AVPacket)
-			v := pkt.Pts()
+			v := pkt.Dts()
 			if min == 0xFFFFFFFF {
 				min = v
 			} else if v < min {
@@ -264,7 +264,7 @@ func (s *SourceImpl) dispatchStreamBuffer(transStream ITransStream, streams []ut
 
 			for i := indexs[index]; i < buffer.Size(); i++ {
 				packet := buffer.Peek(i).(utils.AVPacket)
-				if packet.Pts() > min {
+				if packet.Dts() > min {
 					break
 				}
 
@@ -339,20 +339,19 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 		}
 
 		_ = transStream.WriteHeader()
-
-		if AppConfig.GOPCache {
-			s.dispatchStreamBuffer(transStream, streams[:size])
-		}
 	}
 
 	sink.SetTransStreamId(transStreamId)
-	//add sink 放在dispatchStreamBuffer后面，不然GOPCache没用
 	transStream.AddSink(sink)
 
 	state := sink.SetState(SessionStateTransferring)
 	if !state {
 		transStream.RemoveSink(sink.Id())
 		return false
+	}
+
+	if !ok && AppConfig.GOPCache {
+		s.dispatchStreamBuffer(transStream, streams[:size])
 	}
 
 	return true
@@ -473,7 +472,7 @@ func (s *SourceImpl) OnDeMuxStreamDone() {
 func (s *SourceImpl) OnDeMuxPacket(packet utils.AVPacket) {
 	if AppConfig.GOPCache {
 		buffer := s.buffers[packet.Index()]
-		buffer.AddPacket(packet, packet.KeyFrame(), packet.Pts())
+		buffer.AddPacket(packet, packet.KeyFrame(), packet.Dts())
 	}
 
 	//分发给各个传输流
