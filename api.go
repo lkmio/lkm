@@ -188,6 +188,7 @@ func (api *ApiServer) onFLV(sourceId string, w http.ResponseWriter, r *http.Requ
 	for {
 		if _, err := conn.Read(bytes); err != nil {
 			log.Sugar.Infof("http-flv 断开连接 sink:%s", sink.PrintInfo())
+			sink.Close()
 			break
 		}
 	}

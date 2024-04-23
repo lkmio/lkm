@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/yangjiechina/avformat/utils"
 	"net"
+	"sync"
 )
 
 type SinkId interface{}
@@ -26,9 +27,11 @@ type ISink interface {
 
 	ProtocolStr() string
 
+	// State 获取Sink状态, 调用前外部必须手动加锁
 	State() SessionState
 
-	SetState(state SessionState) bool
+	// SetState 设置Sink状态, 调用前外部必须手动加锁
+	SetState(state SessionState)
 
 	EnableVideo() bool
 
@@ -45,6 +48,13 @@ type ISink interface {
 	Close()
 
 	PrintInfo() string
+
+	// Lock Sink请求拉流->Source推流->Sink断开整个阶段, 是无锁线程安全
+	//如果Sink在等待队列-Sink断开, 这个过程是非线程安全的
+	//所以Source在AddSink时, SessionStateWait状态时, 需要加锁保护.
+	Lock()
+
+	UnLock()
 }
 
 // GenerateSinkId 根据网络地址生成SinkId IPV4使用一个uint64, IPV6使用String
@@ -77,10 +87,7 @@ type SinkImpl struct {
 	TransStreamId_ TransStreamId
 	disableVideo   bool
 
-	//Sink在请求拉流->Source推流->Sink断开整个阶段 是无锁线程安全
-	//如果Sink在等待队列-Sink断开，这个过程是非线程安全的
-	//SetState的时候，如果closed为true，返回false, 调用者自行删除sink
-	//closed atomic.Bool
+	lock sync.RWMutex
 
 	//HasSentKeyVideo 是否已经发送视频关键帧
 	//未开启GOP缓存的情况下，为避免播放花屏，发送的首个视频帧必须为关键帧
@@ -130,28 +137,24 @@ func (s *SinkImpl) ProtocolStr() string {
 	return streamTypeToStr(s.Protocol_)
 }
 
+func (s *SinkImpl) Lock() {
+	s.lock.Lock()
+}
+
+func (s *SinkImpl) UnLock() {
+	s.lock.Unlock()
+}
+
 func (s *SinkImpl) State() SessionState {
+	utils.Assert(!s.lock.TryLock())
+
 	return s.State_
 }
 
-func (s *SinkImpl) SetState(state SessionState) bool {
-	//load := s.closed.Load()
-	//if load {
-	//	return false
-	//}
+func (s *SinkImpl) SetState(state SessionState) {
+	utils.Assert(!s.lock.TryLock())
 
-	if s.State_ < SessionStateClose {
-		s.State_ = state
-	}
-
-	//更改状态期间，被Close
-	//if s.closed.CompareAndSwap(false, false)
-	//{
-	//
-	//}
-
-	//return !s.closed.Load()
-	return true
+	s.State_ = state
 }
 
 func (s *SinkImpl) EnableVideo() bool {
@@ -170,18 +173,42 @@ func (s *SinkImpl) DesiredVideoCodecId() utils.AVCodecID {
 	return s.DesiredVideoCodecId_
 }
 
+// Close 做如下事情:
+// 1. Sink如果正在拉流,删除任务交给Source处理. 否则直接从等待队列删除Sink.
+// 2. 发送PlayDoneHook事件
+// 什么时候调用Close? 是否考虑线程安全?
+// 拉流断开连接,不需要考虑线程安全
+// 踢流走source管道删除,并且关闭Conn
 func (s *SinkImpl) Close() {
-	//Source的TransStream中删除sink
+	utils.Assert(SessionStateClose != s.State_)
+
+	if s.Conn != nil {
+		s.Conn.Close()
+		s.Conn = nil
+	}
+
+	//还没有添加到任何队列, 不做任何处理
+	if s.State_ < SessionStateWait {
+		return
+	}
+
+	{
+		s.Lock()
+		defer s.UnLock()
+		if s.State_ == SessionStateClose {
+			return
+		}
+
+		s.State_ = SessionStateClose
+	}
+
 	if s.State_ == SessionStateTransferring {
 		source := SourceManager.Find(s.SourceId_)
 		source.AddEvent(SourceEventPlayDone, s)
-		s.State_ = SessionStateClose
 	} else if s.State_ == SessionStateWait {
-		//非线程安全
-		//从等待队列中删除sink
 		RemoveSinkFromWaitingQueue(s.SourceId_, s.Id_)
-		s.State_ = SessionStateClose
-		//s.closed.Store(true)
+		//拉流结束事件, 在等待队列直接发送通知, 在拉流由Source负责发送.
+		HookPlayingDone(s, nil, nil)
 	}
 }
 

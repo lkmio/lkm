@@ -3,6 +3,7 @@ package rtmp
 import (
 	"github.com/yangjiechina/avformat/libflv"
 	"github.com/yangjiechina/avformat/librtmp"
+	"github.com/yangjiechina/avformat/transport"
 	"github.com/yangjiechina/avformat/utils"
 	"github.com/yangjiechina/live-server/stream"
 	"net"
@@ -43,7 +44,8 @@ func NewPublisher(sourceId string, stack *librtmp.Stack, conn net.Conn) Publishe
 	//设置回调，从flv解析出来的Stream和AVPacket都将统一回调到stream.SourceImpl
 	deMuxer.SetHandler(publisher_)
 	publisher_.Input_ = publisher_.Input
-
+	//为推流方分配足够多的缓冲区
+	conn.(*transport.Conn).ReallocateRecvBuffer(1024 * 1024)
 	return publisher_
 }
 

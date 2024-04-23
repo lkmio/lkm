@@ -50,13 +50,13 @@ const (
 )
 
 const (
-	SessionStateCreate           = SessionState(1)
-	SessionStateHandshaking      = SessionState(2)
-	SessionStateHandshakeFailure = SessionState(3)
-	SessionStateHandshakeDone    = SessionState(4)
-	SessionStateWait             = SessionState(5)
-	SessionStateTransferring     = SessionState(6)
-	SessionStateClose            = SessionState(7)
+	SessionStateCreate           = SessionState(1) //新建状态
+	SessionStateHandshaking      = SessionState(2) //握手中
+	SessionStateHandshakeFailure = SessionState(3) //握手失败
+	SessionStateHandshakeDone    = SessionState(4) //握手完成
+	SessionStateWait             = SessionState(5) //位于等待队列中
+	SessionStateTransferring     = SessionState(6) //推拉流中
+	SessionStateClose            = SessionState(7) //关闭状态
 )
 
 func sourceTypeToStr(sourceType SourceType) string {
@@ -342,14 +342,20 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 	}
 
 	sink.SetTransStreamId(transStreamId)
-	transStream.AddSink(sink)
 
-	state := sink.SetState(SessionStateTransferring)
-	if !state {
-		transStream.RemoveSink(sink.Id())
-		return false
+	{
+		sink.Lock()
+		defer sink.UnLock()
+
+		if SessionStateClose == sink.State() {
+			log.Sugar.Warnf("AddSink失败, sink已经断开链接 %s", sink.PrintInfo())
+		} else {
+			transStream.AddSink(sink)
+		}
+		sink.SetState(SessionStateTransferring)
 	}
 
+	//新的传输流，发送缓存的音视频帧
 	if !ok && AppConfig.GOPCache {
 		s.dispatchStreamBuffer(transStream, streams[:size])
 	}
@@ -364,6 +370,7 @@ func (s *SourceImpl) RemoveSink(sink ISink) bool {
 		//如果从传输流没能删除sink, 再从等待队列删除
 		_, b := transStream.RemoveSink(sink.Id())
 		if b {
+			HookPlayingDone(sink, nil, nil)
 			return true
 		}
 	}
@@ -397,9 +404,15 @@ func (s *SourceImpl) Close() {
 	for _, transStream := range s.transStreams {
 		transStream.PopAllSink(func(sink ISink) {
 			sink.SetTransStreamId(0)
-			state := sink.SetState(SessionStateWait)
-			if state {
-				AddSinkToWaitingQueue(s.Id_, sink)
+			{
+				sink.Lock()
+				defer sink.UnLock()
+
+				if SessionStateClose == sink.State() {
+					log.Sugar.Warnf("添加到sink到等待队列失败, sink已经断开链接 %s", sink.PrintInfo())
+				} else {
+					AddSinkToWaitingQueue(s.Id_, sink)
+				}
 			}
 		})
 	}

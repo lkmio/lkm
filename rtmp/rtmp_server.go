@@ -65,6 +65,8 @@ func (s *serverImpl) OnDisConnected(conn net.Conn, err error) {
 	log.Sugar.Debugf("rtmp断开连接 conn:%s", conn.RemoteAddr().String())
 
 	t := conn.(*transport.Conn)
-	t.Data.(*sessionImpl).Close()
-	t.Data = nil
+	if t.Data != nil {
+		t.Data.(*sessionImpl).Close()
+		t.Data = nil
+	}
 }
