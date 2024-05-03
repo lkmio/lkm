@@ -42,6 +42,10 @@ type MemoryPool interface {
 	Clear()
 
 	Empty() bool
+
+	Capacity() int
+
+	Size() int
 }
 
 func NewMemoryPool(capacity int) MemoryPool {
@@ -220,4 +224,13 @@ func (m *memoryPool) Clear() {
 func (m *memoryPool) Empty() bool {
 	utils.Assert(!m.mark)
 	return m.blockQueue.Size() < 1
+}
+
+func (m *memoryPool) Capacity() int {
+	return m.capacity
+}
+
+func (m *memoryPool) Size() int {
+	head, tail := m.Data()
+	return len(head) + len(tail)
 }

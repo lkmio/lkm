@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+var (
+	TransportManger stream.TransportManager
+)
+
 // 对于UDP而言, 每个sink维护一对UDPTransport
 // TCP直接单端口传输
 type sink struct {
@@ -39,13 +43,13 @@ func (s *sink) setTrackCount(count int) {
 	s.tracks = make([]*rtspTrack, count)
 }
 
-func (s *sink) addTrack(index int, tcp bool, ssrc uint32) (int, int, error) {
+func (s *sink) addTrack(index int, tcp bool, ssrc uint32) (uint16, uint16, error) {
 	utils.Assert(index < cap(s.tracks))
 	utils.Assert(s.tracks[index] == nil)
 
 	var err error
-	var rtpPort int
-	var rtcpPort int
+	var rtpPort uint16
+	var rtcpPort uint16
 
 	track := rtspTrack{
 		ssrc: ssrc,
@@ -53,7 +57,7 @@ func (s *sink) addTrack(index int, tcp bool, ssrc uint32) (int, int, error) {
 	if tcp {
 		s.tcp = true
 	} else {
-		err = rtspTransportManger.AllocPairTransport(func(port int) {
+		err = TransportManger.AllocPairTransport(func(port uint16) error {
 			//rtp port
 			var addr *net.UDPAddr
 			addr, err = net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", "0.0.0.0", port))
@@ -64,7 +68,8 @@ func (s *sink) addTrack(index int, tcp bool, ssrc uint32) (int, int, error) {
 			}
 
 			rtpPort = port
-		}, func(port int) {
+			return nil
+		}, func(port uint16) error {
 			//rtcp port
 			var addr *net.UDPAddr
 			addr, err = net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", "0.0.0.0", port))
@@ -78,6 +83,8 @@ func (s *sink) addTrack(index int, tcp bool, ssrc uint32) (int, int, error) {
 			}
 
 			rtcpPort = port
+
+			return nil
 		})
 	}
 

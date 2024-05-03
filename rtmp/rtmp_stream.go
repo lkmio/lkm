@@ -25,6 +25,10 @@ func NewTransStream(chunkSize int) stream.ITransStream {
 	return transStream
 }
 
+func TransStreamFactory(source stream.ISource, protocol stream.Protocol, streams []utils.AVStream) (stream.ITransStream, error) {
+	return NewTransStream(librtmp.ChunkSize), nil
+}
+
 func (t *TransStream) Input(packet utils.AVPacket) error {
 	utils.Assert(t.TransStreamImpl.Completed)
 
@@ -38,6 +42,7 @@ func (t *TransStream) Input(packet utils.AVPacket) error {
 	var chunkPayloadOffset int
 	var dts int64
 	var pts int64
+	chunkHeaderSize := 12
 
 	if utils.AVCodecIdAAC == packet.CodecId() {
 		dts = packet.ConvertDts(1024)
@@ -45,6 +50,10 @@ func (t *TransStream) Input(packet utils.AVPacket) error {
 	} else {
 		dts = packet.ConvertDts(1000)
 		pts = packet.ConvertPts(1000)
+	}
+
+	if dts >= 0xFFFFFF {
+		chunkHeaderSize += 4
 	}
 
 	ct := pts - dts
@@ -76,19 +85,18 @@ func (t *TransStream) Input(packet utils.AVPacket) error {
 	}
 
 	//分配内存
-	allocate := t.StreamBuffers[0].Allocate(12 + payloadSize + ((payloadSize - 1) / t.chunkSize))
+	allocate := t.StreamBuffers[0].Allocate(chunkHeaderSize + payloadSize + ((payloadSize - 1) / t.chunkSize))
 
 	//写rtmp chunk header
 	chunk.Length = payloadSize
 	chunk.Timestamp = uint32(dts)
 	n := chunk.ToBytes(allocate)
-	utils.Assert(n == 12)
 
 	//写flv
 	if videoPkt {
-		n += t.muxer.WriteVideoData(allocate[12:], uint32(ct), packet.KeyFrame(), false)
+		n += t.muxer.WriteVideoData(allocate[chunkHeaderSize:], uint32(ct), packet.KeyFrame(), false)
 	} else {
-		n += t.muxer.WriteAudioData(allocate[12:], false)
+		n += t.muxer.WriteAudioData(allocate[chunkHeaderSize:], false)
 	}
 
 	n += chunk.WriteData(allocate[n:], data, t.chunkSize, chunkPayloadOffset)
@@ -183,7 +191,7 @@ func (t *TransStream) WriteHeader() error {
 	if videoStream != nil {
 		tmp := n
 		n += t.muxer.WriteVideoData(t.header[n+12:], 0, false, true)
-		extra := videoStream.Extra()
+		extra := videoStream.CodecParameters().DecoderConfRecord().ToMP4VC()
 		copy(t.header[n+12:], extra)
 		n += len(extra)
 

@@ -84,6 +84,11 @@ func NewTransStream(url, m3u8Name, tsFormat, dir string, segmentDuration, playli
 	return stream_, nil
 }
 
+func TransStreamFactory(source stream.ISource, protocol stream.Protocol, streams []utils.AVStream) (stream.ITransStream, error) {
+	id := source.Id()
+	return NewTransStream("", stream.AppConfig.Hls.M3U8Format(id), stream.AppConfig.Hls.TSFormat(id, "%d"), stream.AppConfig.Hls.Dir, stream.AppConfig.Hls.Duration, stream.AppConfig.Hls.PlaylistLength)
+}
+
 func (t *transStream) Input(packet utils.AVPacket) error {
 	if packet.Index() >= t.muxer.TrackCount() {
 		return fmt.Errorf("track not available")
@@ -112,11 +117,7 @@ func (t *transStream) AddTrack(stream utils.AVStream) error {
 	}
 
 	if stream.CodecId() == utils.AVCodecIdH264 {
-		data, err := stream.AnnexBExtraData()
-		if err != nil {
-			return err
-		}
-
+		data := stream.CodecParameters().DecoderConfRecord().ToAnnexB()
 		_, err = t.muxer.AddTrack(stream.Type(), stream.CodecId(), data)
 	} else {
 		_, err = t.muxer.AddTrack(stream.Type(), stream.CodecId(), stream.Extra())

@@ -27,7 +27,7 @@ func NewSession(conn net.Conn) Session {
 type sessionImpl struct {
 	//解析rtmp协议栈
 	stack *librtmp.Stack
-	//publisher/sink, 在publish或play成功后赋值
+	//Publisher/sink, 在publish或play成功后赋值
 	handle      interface{}
 	isPublisher bool
 
@@ -39,14 +39,16 @@ func (s *sessionImpl) OnPublish(app, stream_ string, response chan utils.HookSta
 
 	sourceId := app + "_" + stream_
 	source := NewPublisher(sourceId, s.stack, s.conn)
+	//设置推流的音视频回调
 	s.stack.SetOnPublishHandler(source)
-	s.stack.SetOnTransDeMuxerHandler(source)
 
 	//推流事件Source统一处理, 是否已经存在, Hook回调....
-	source.(*publisher).Publish(source.(*publisher), func() {
+	source.Publish(source, func() {
 		s.handle = source
 		s.isPublisher = true
-		source.Init()
+
+		source.Init(source.Input)
+		go source.LoopEvent()
 
 		response <- utils.HookStateOK
 	}, func(state utils.HookState) {
@@ -72,7 +74,7 @@ func (s *sessionImpl) OnPlay(app, stream_ string, response chan utils.HookState)
 func (s *sessionImpl) Input(conn net.Conn, data []byte) error {
 	//如果是推流，并且握手成功，后续收到的包，都将发送给LoopEvent处理
 	if s.isPublisher {
-		s.handle.(*publisher).AddEvent(stream.SourceEventInput, data)
+		s.handle.(*Publisher).AddEvent(stream.SourceEventInput, data)
 		return nil
 	} else {
 		return s.stack.Input(conn, data)
@@ -92,10 +94,10 @@ func (s *sessionImpl) Close() {
 		return
 	}
 
-	_, ok := s.handle.(*publisher)
+	_, ok := s.handle.(*Publisher)
 	if ok {
 		if s.isPublisher {
-			s.handle.(*publisher).AddEvent(stream.SourceEventClose, nil)
+			s.handle.(*Publisher).AddEvent(stream.SourceEventClose, nil)
 		}
 	} else {
 		sink := s.handle.(stream.ISink)

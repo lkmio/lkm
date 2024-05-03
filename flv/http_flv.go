@@ -42,6 +42,10 @@ func NewHttpTransStream() stream.ITransStream {
 	}
 }
 
+func TransStreamFactory(source stream.ISource, protocol stream.Protocol, streams []utils.AVStream) (stream.ITransStream, error) {
+	return NewHttpTransStream(), nil
+}
+
 func (t *httpTransStream) Input(packet utils.AVPacket) error {
 	var flvSize int
 	var data []byte
@@ -210,7 +214,7 @@ func (t *httpTransStream) WriteHeader() error {
 		if utils.AVMediaTypeAudio == track.Type() {
 			data = track.Extra()
 		} else if utils.AVMediaTypeVideo == track.Type() {
-			data, _ = track.M4VCExtraData()
+			data = track.CodecParameters().DecoderConfRecord().ToMP4VC()
 		}
 
 		t.headerSize += t.muxer.Input(t.header[t.headerSize:], track.Type(), len(data), 0, 0, false, true)

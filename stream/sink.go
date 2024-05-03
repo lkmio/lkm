@@ -25,8 +25,6 @@ type ISink interface {
 
 	Protocol() Protocol
 
-	ProtocolStr() string
-
 	// State 获取Sink状态, 调用前外部必须手动加锁
 	State() SessionState
 
@@ -133,10 +131,6 @@ func (s *SinkImpl) Protocol() Protocol {
 	return s.Protocol_
 }
 
-func (s *SinkImpl) ProtocolStr() string {
-	return streamTypeToStr(s.Protocol_)
-}
-
 func (s *SinkImpl) Lock() {
 	s.lock.Lock()
 }
@@ -213,5 +207,5 @@ func (s *SinkImpl) Close() {
 }
 
 func (s *SinkImpl) PrintInfo() string {
-	return fmt.Sprintf("%s-%v source:%s", s.ProtocolStr(), s.Id_, s.SourceId_)
+	return fmt.Sprintf("%s-%v source:%s", s.Protocol().ToString(), s.Id_, s.SourceId_)
 }

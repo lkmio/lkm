@@ -16,6 +16,10 @@ func NewTransStream() stream.ITransStream {
 	return t
 }
 
+func TransStreamFactory(source stream.ISource, protocol stream.Protocol, streams []utils.AVStream) (stream.ITransStream, error) {
+	return NewTransStream(), nil
+}
+
 func (t *transStream) Input(packet utils.AVPacket) error {
 	if utils.AVMediaTypeAudio == packet.MediaType() {
 
@@ -28,10 +32,7 @@ func (t *transStream) Input(packet utils.AVPacket) error {
 			}
 
 			if packet.KeyFrame() {
-				extra, err := t.TransStreamImpl.Tracks[packet.Index()].AnnexBExtraData()
-				if err != nil {
-					return err
-				}
+				extra := t.TransStreamImpl.Tracks[packet.Index()].CodecParameters().DecoderConfRecord().ToAnnexB()
 				sink_.input(packet.Index(), extra, 0)
 			}
 

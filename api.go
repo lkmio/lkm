@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/yangjiechina/avformat/utils"
 	"github.com/yangjiechina/live-server/flv"
+	"github.com/yangjiechina/live-server/gb28181"
 	"github.com/yangjiechina/live-server/hls"
 	"github.com/yangjiechina/live-server/log"
 	"github.com/yangjiechina/live-server/rtc"
@@ -40,6 +42,12 @@ func init() {
 
 func startApiServer(addr string) {
 	apiServer.router.HandleFunc("/live/{source}", apiServer.filterLive)
+
+	apiServer.router.HandleFunc("/v1/gb28181/source/create", apiServer.createGBSource)
+	//TCP主动,设置连接地址
+	apiServer.router.HandleFunc("/v1/gb28181/source/connect", apiServer.connectGBSource)
+	apiServer.router.HandleFunc("/v1/gb28181/source/close", apiServer.closeGBSource)
+
 	apiServer.router.HandleFunc("/rtc.html", func(writer http.ResponseWriter, request *http.Request) {
 		http.ServeFile(writer, request, "./rtc.html")
 	})
@@ -58,6 +66,147 @@ func startApiServer(addr string) {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func (api *ApiServer) createGBSource(w http.ResponseWriter, r *http.Request) {
+	//请求参数
+	v := &struct {
+		Source    string `json:"source"` //SourceId
+		Transport string `json:"transport,omitempty"`
+		Setup     string `json:"setup"` //active/passive
+		SSRC      uint32 `json:"ssrc,omitempty"`
+	}{}
+
+	//返回监听的端口
+	response := &struct {
+		Port uint16 `json:"port,omitempty"`
+	}{}
+
+	var err error
+	defer func() {
+		if err != nil {
+			log.Sugar.Errorf(err.Error())
+			httpResponse2(w, err)
+		}
+	}()
+
+	if err = HttpDecodeJSONBody(w, r, v); err != nil {
+		return
+	}
+
+	log.Sugar.Infof("gb create:%v", v)
+
+	source := stream.SourceManager.Find(v.Source)
+	if source != nil {
+		err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "gbsource 已经存在"}
+		return
+	}
+
+	tcp := strings.Contains(v.Transport, "tcp")
+	var active bool
+	if tcp && "active" == v.Setup {
+		if !stream.AppConfig.GB28181.IsMultiPort() {
+			err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "创建GB28181 Source失败, 单端口模式下不能主动拉流"}
+		} else if !tcp {
+			err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "创建GB28181 Source失败, UDP不能主动拉流"}
+		} else if !stream.AppConfig.GB28181.EnableTCP() {
+			err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "创建GB28181 Source失败, 未开启TCP, UDP不能主动拉流"}
+		}
+
+		if err != nil {
+			return
+		}
+
+		active = true
+	}
+
+	_, port, err := gb28181.NewGBSource(v.Source, v.SSRC, tcp, active)
+	if err != nil {
+		err = &MalformedRequest{Code: http.StatusInternalServerError, Msg: fmt.Sprintf("创建GB28181 Source失败 err:%s", err.Error())}
+		return
+	}
+
+	response.Port = port
+	httpResponseOk(w, response)
+}
+
+func (api *ApiServer) connectGBSource(w http.ResponseWriter, r *http.Request) {
+	//请求参数
+	v := &struct {
+		Source     string `json:"source"` //SourceId
+		RemoteAddr string `json:"remote_addr"`
+	}{}
+
+	var err error
+	defer func() {
+		if err != nil {
+			log.Sugar.Errorf(err.Error())
+			httpResponse2(w, err)
+		}
+	}()
+
+	if err = HttpDecodeJSONBody(w, r, v); err != nil {
+		return
+	}
+
+	log.Sugar.Infof("gb connect:%v", v)
+
+	source := stream.SourceManager.Find(v.Source)
+	if source == nil {
+		err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "gb28181 source 不存在"}
+		return
+	}
+
+	activeSource, ok := source.(*gb28181.ActiveSource)
+	if !ok {
+		err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "gbsource 不能转为active source"}
+		return
+	}
+
+	addr, err := net.ResolveTCPAddr("tcp", v.RemoteAddr)
+	if err != nil {
+		err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "解析连接地址失败"}
+		return
+	}
+
+	err = activeSource.Connect(addr)
+	if err != nil {
+		err = &MalformedRequest{Code: http.StatusBadRequest, Msg: fmt.Sprintf("连接Server失败 err:%s", err.Error())}
+		return
+	}
+
+	httpResponseOk(w, nil)
+}
+
+func (api *ApiServer) closeGBSource(w http.ResponseWriter, r *http.Request) {
+	//请求参数
+	v := &struct {
+		Source string `json:"source"` //SourceId
+	}{}
+
+	var err error
+	defer func() {
+		if err != nil {
+			log.Sugar.Errorf(err.Error())
+			httpResponse2(w, err)
+		}
+	}()
+
+	if err = HttpDecodeJSONBody(w, r, v); err != nil {
+		httpResponse2(w, err)
+		return
+	}
+
+	log.Sugar.Infof("gb close:%v", v)
+
+	source := stream.SourceManager.Find(v.Source)
+	if source == nil {
+		err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "gb28181 source 不存在"}
+		return
+	}
+
+	source.Close()
+	httpResponseOk(w, nil)
 }
 
 func (api *ApiServer) generateSinkId(remoteAddr string) stream.SinkId {

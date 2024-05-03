@@ -45,6 +45,14 @@ func NewTransStream(addr net.IPAddr, urlFormat string) stream.ITransStream {
 	return t
 }
 
+func TransStreamFactory(source stream.ISource, protocol stream.Protocol, streams []utils.AVStream) (stream.ITransStream, error) {
+	trackFormat := source.Id() + "?track=%d"
+	return NewTransStream(net.IPAddr{
+		IP:   net.IP{},
+		Zone: "",
+	}, trackFormat), nil
+}
+
 func (t *tranStream) onAllocBuffer(params interface{}) []byte {
 	return t.rtpTracks[params.(int)].buffer[OverTcpHeaderSize:]
 }

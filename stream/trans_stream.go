@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"fmt"
 	"github.com/yangjiechina/avformat/stream"
 	"github.com/yangjiechina/avformat/utils"
 )
@@ -8,8 +9,13 @@ import (
 // TransStreamId 每个传输流的唯一Id，由协议+流Id组成
 type TransStreamId uint64
 
-// AVCodecID转为byte的对应关系
-var narrowCodecIds map[int]byte
+type TransStreamFactory func(source ISource, protocol Protocol, streams []utils.AVStream) (ITransStream, error)
+
+var (
+	// AVCodecID转为byte的对应关系
+	narrowCodecIds       map[int]byte
+	transStreamFactories map[Protocol]TransStreamFactory
+)
 
 func init() {
 	narrowCodecIds = map[int]byte{
@@ -24,6 +30,35 @@ func init() {
 		int(utils.AVCodecIdMP3):  102,
 		int(utils.AVCodecIdOPUS): 103,
 	}
+
+	transStreamFactories = make(map[Protocol]TransStreamFactory, 8)
+}
+
+func RegisterTransStreamFactory(protocol Protocol, streamFunc TransStreamFactory) {
+	_, ok := transStreamFactories[protocol]
+	if ok {
+		panic(fmt.Sprintf("%s has been registered", protocol.ToString()))
+	}
+
+	transStreamFactories[protocol] = streamFunc
+}
+
+func FindTransStreamFactory(protocol Protocol) (TransStreamFactory, error) {
+	f, ok := transStreamFactories[protocol]
+	if !ok {
+		return nil, fmt.Errorf("unknown protocol %s", protocol.ToString())
+	}
+
+	return f, nil
+}
+
+func CreateTransStream(source ISource, protocol Protocol, streams []utils.AVStream) (ITransStream, error) {
+	factory, err := FindTransStreamFactory(protocol)
+	if err != nil {
+		return nil, err
+	}
+
+	return factory(source, protocol, streams)
 }
 
 // GenerateTransStreamId 根据传入的推拉流协议和编码器ID生成StreamId
@@ -61,8 +96,6 @@ func GenerateTransStreamId(protocol Protocol, ids ...utils.AVStream) TransStream
 
 	return TransStreamId(streamId)
 }
-
-var TransStreamFactory func(source ISource, protocol Protocol, streams []utils.AVStream) ITransStream
 
 // ITransStream 讲AVPacket封装成传输流，转发给各个Sink
 type ITransStream interface {

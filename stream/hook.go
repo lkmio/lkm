@@ -30,11 +30,11 @@ type eventInfo struct {
 }
 
 func NewPlayHookEventInfo(stream, remoteAddr string, protocol Protocol) eventInfo {
-	return eventInfo{stream: stream, protocol: streamTypeToStr(protocol), remoteAddr: remoteAddr}
+	return eventInfo{stream: stream, protocol: protocol.ToString(), remoteAddr: remoteAddr}
 }
 
 func NewPublishHookEventInfo(stream, remoteAddr string, protocol SourceType) eventInfo {
-	return eventInfo{stream: stream, protocol: sourceTypeToStr(protocol), remoteAddr: remoteAddr}
+	return eventInfo{stream: stream, protocol: protocol.ToString(), remoteAddr: remoteAddr}
 }
 
 type HookHandler interface {
