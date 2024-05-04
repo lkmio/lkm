@@ -33,6 +33,7 @@ func (p *Publisher) Input(data []byte) error {
 func (p *Publisher) OnDeMuxStream(stream utils.AVStream) {
 	//AVStream的ExtraData已经拷贝, 释放掉内存池中最新分配的内存
 	p.FindOrCreatePacketBuffer(stream.Index(), stream.Type()).FreeTail()
+	p.SourceImpl.OnDeMuxStream(stream)
 }
 
 // OnVideo 解析出来的完整视频包
