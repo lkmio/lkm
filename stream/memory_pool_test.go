@@ -13,7 +13,7 @@ func TestMemoryPool(t *testing.T) {
 		bytes[i] = byte(i)
 	}
 
-	pool := NewMemoryPool(5)
+	pool := NewDirectMemoryPool(5)
 	last := uintptr(0)
 	for i := 0; i < 10; i++ {
 		pool.Mark()

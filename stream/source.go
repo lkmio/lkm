@@ -225,15 +225,15 @@ func (s *SourceImpl) FindOrCreatePacketBuffer(index int, mediaType utils.AVMedia
 
 	if s.pktBuffers[index] == nil {
 		if utils.AVMediaTypeAudio == mediaType {
-			s.pktBuffers[index] = NewMemoryPool(48000 * 64)
+			s.pktBuffers[index] = NewRbMemoryPool(48000 * 64)
 		} else if AppConfig.GOPCache {
 			//开启GOP缓存
 			//以每秒钟4M码率大小创建视频内存池
-			s.pktBuffers[index] = NewMemoryPool(4096 * 1024)
+			s.pktBuffers[index] = NewRbMemoryPool(4096 * 1024)
 		} else {
 			//未开启GOP缓存
 			//以每秒钟4M的1/8码率大小创建视频内存池
-			s.pktBuffers[index] = NewMemoryPool(4096 * 1024 / 8)
+			s.pktBuffers[index] = NewRbMemoryPool(4096 * 1024 / 8)
 		}
 	}
 
