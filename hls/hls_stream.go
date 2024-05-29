@@ -9,12 +9,12 @@ import (
 )
 
 type tsContext struct {
-	segmentSeq      int
-	writeBuffer     []byte
-	writeBufferSize int
+	segmentSeq      int    //切片序号
+	writeBuffer     []byte //ts流的缓冲区, 由TSMuxer使用. 减少用户态和内核态交互，以及磁盘IO频率
+	writeBufferSize int    //已缓存TS流大小
 
-	url  string
-	path string
+	url  string //m3u8中的url
+	path string //位于磁盘中的path
 
 	file *os.File
 }
@@ -25,13 +25,13 @@ type transStream struct {
 	context *tsContext
 
 	m3u8           M3U8Writer
-	url            string
-	m3u8Name       string
-	tsFormat       string
-	dir            string
-	duration       int
+	url            string //m3u8中每个url的前缀
+	m3u8Name       string //m3u8文件名
+	tsFormat       string //ts文件名格式
+	dir            string //m3u8文件父目录
+	duration       int    //切片时长, 单位秒
+	playlistLength int    //最大切片文件个数
 	m3u8File       *os.File
-	playlistLength int
 
 	m3u8Sinks map[stream.SinkId]stream.ISink
 }
@@ -95,7 +95,18 @@ func (t *transStream) Input(packet utils.AVPacket) error {
 	}
 
 	//创建一下个切片
+	//已缓存时长>=指定时长, 如果存在视频, 还需要等遇到关键帧才切片
 	if (!t.ExistVideo || utils.AVMediaTypeVideo == packet.MediaType() && packet.KeyFrame()) && float32(t.muxer.Duration())/90000 >= float32(t.duration) {
+		//保存当前切片文件
+		if t.context.file != nil {
+			err := t.flushSegment()
+			t.context.segmentSeq++
+			if err != nil {
+				return err
+			}
+		}
+
+		//创建新的切片
 		if err := t.createSegment(); err != nil {
 			return err
 		}
@@ -202,15 +213,6 @@ func (t *transStream) flushSegment() error {
 
 // 创建一个新的ts切片
 func (t *transStream) createSegment() error {
-	//保存上一个ts切片
-	if t.context.file != nil {
-		err := t.flushSegment()
-		t.context.segmentSeq++
-		if err != nil {
-			return err
-		}
-	}
-
 	tsName := fmt.Sprintf(t.tsFormat, t.context.segmentSeq)
 	//ts文件
 	t.context.path = fmt.Sprintf("%s/%s", t.dir, tsName)
