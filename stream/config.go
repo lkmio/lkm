@@ -49,6 +49,11 @@ type GB28181Config struct {
 	Port      [2]uint16 //单端口模式[0]=port/多端口模式[0]=start port, [0]=end port.
 }
 
+type JT1078Config struct {
+	Enable bool
+	Addr   string
+}
+
 func (g GB28181Config) EnableTCP() bool {
 	return strings.Contains(g.Transport, "TCP")
 }
@@ -146,4 +151,6 @@ type AppConfig_ struct {
 	Http HttpConfig
 
 	GB28181 GB28181Config
+
+	JT1078 JT1078Config
 }

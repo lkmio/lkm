@@ -5,6 +5,7 @@ import (
 	"github.com/yangjiechina/live-server/flv"
 	"github.com/yangjiechina/live-server/gb28181"
 	"github.com/yangjiechina/live-server/hls"
+	"github.com/yangjiechina/live-server/jt1078"
 	"github.com/yangjiechina/live-server/log"
 	"github.com/yangjiechina/live-server/rtc"
 	"github.com/yangjiechina/live-server/rtsp"
@@ -24,7 +25,7 @@ func NewDefaultAppConfig() stream.AppConfig_ {
 		MergeWriteLatency: 350,
 
 		Hls: stream.HlsConfig{
-			Enable:         true,
+			Enable:         false,
 			Dir:            "../tmp",
 			Duration:       2,
 			PlaylistLength: 10,
@@ -58,6 +59,11 @@ func NewDefaultAppConfig() stream.AppConfig_ {
 			Addr:      "0.0.0.0",
 			Transport: "UDP|TCP",
 			Port:      [2]uint16{20000, 30000},
+		},
+
+		JT1078: stream.JT1078Config{
+			Enable: true,
+			Addr:   "0.0.0.0:1078",
 		},
 	}
 }
@@ -150,6 +156,21 @@ func main() {
 			gb28181.SharedTCPServer = server
 			log.Sugar.Info("启动GB28181 TCP收流端口成功:" + gbAddr.String())
 		}
+	}
+
+	if stream.AppConfig.JT1078.Enable {
+		jtAddr, err := net.ResolveTCPAddr("tcp", stream.AppConfig.JT1078.Addr)
+		if err != nil {
+			panic(err)
+		}
+
+		server := jt1078.NewServer()
+		err = server.Start(jtAddr)
+		if err != nil {
+			panic(err)
+		}
+
+		log.Sugar.Info("启动jt1078服务成功 addr:", jtAddr.String())
 	}
 
 	loadConfigError := http.ListenAndServe(":19999", nil)
