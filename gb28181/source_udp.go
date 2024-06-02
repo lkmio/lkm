@@ -18,7 +18,7 @@ type UDPSource struct {
 func NewUDPSource() *UDPSource {
 	return &UDPSource{
 		rtpDeMuxer: jitterbuffer.New(),
-		rtpBuffer:  stream.NewMemoryPoolWithDirect(JitterBufferSize, true),
+		rtpBuffer:  stream.NewDirectMemoryPool(JitterBufferSize),
 	}
 }
 

@@ -210,10 +210,10 @@ func (c *CacheTransStream) Init() {
 	c.TransStreamImpl.Init()
 
 	c.StreamBuffers = make([]MemoryPool, 2)
-	c.StreamBuffers[0] = NewMemoryPoolWithDirect(1024*4000, true)
+	c.StreamBuffers[0] = NewDirectMemoryPool(1024 * 4000)
 
 	if c.ExistVideo && AppConfig.MergeWriteLatency > 0 {
-		c.StreamBuffers[1] = NewMemoryPoolWithDirect(1024*4000, true)
+		c.StreamBuffers[1] = NewDirectMemoryPool(1024 * 4000)
 	}
 
 	c.SegmentOffset = 0

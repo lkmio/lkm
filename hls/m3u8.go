@@ -44,8 +44,10 @@ type M3U8Writer interface {
 
 	ToString() string
 
+	// Size 返回切片文件个数
 	Size() int
 
+	// Head 返回第一个切片文件
 	Head() Segment
 }
 
