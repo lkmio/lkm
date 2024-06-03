@@ -6,15 +6,22 @@ const (
 	DefaultMergeWriteLatency = 350
 )
 
+type TransportConfig struct {
+	Transport string    //"UDP|TCP"
+	Port      [2]uint16 //单端口模式[0]=port/多端口模式[0]=start port, [0]=end port.
+}
+
 type RtmpConfig struct {
 	Enable bool   `json:"enable"`
 	Addr   string `json:"addr"`
 }
 
 type RtspConfig struct {
-	RtmpConfig
+	TransportConfig
+
+	Addr     string
+	Enable   bool `json:"enable"`
 	Password string
-	Port     [2]uint16
 }
 
 type RecordConfig struct {
@@ -44,20 +51,19 @@ type HttpConfig struct {
 }
 
 type GB28181Config struct {
-	Addr      string
-	Transport string    //"UDP|TCP"
-	Port      [2]uint16 //单端口模式[0]=port/多端口模式[0]=start port, [0]=end port.
+	TransportConfig
+	Addr string
 }
 
-func (g GB28181Config) EnableTCP() bool {
+func (g TransportConfig) EnableTCP() bool {
 	return strings.Contains(g.Transport, "TCP")
 }
 
-func (g GB28181Config) EnableUDP() bool {
+func (g TransportConfig) EnableUDP() bool {
 	return strings.Contains(g.Transport, "UDP")
 }
 
-func (g GB28181Config) IsMultiPort() bool {
+func (g TransportConfig) IsMultiPort() bool {
 	return g.Port[1] > 0 && g.Port[1] > g.Port[0]
 }
 
@@ -127,14 +133,15 @@ func init() {
 
 // AppConfig_ GOP缓存和合并写必须保持一致，同时开启或关闭. 关闭GOP缓存，是为了降低延迟，很难理解又另外开启合并写.
 type AppConfig_ struct {
-	GOPCache     bool `json:"gop_cache"` //是否开启GOP缓存，只缓存一组音视频
-	ProbeTimeout int  `json:"probe_timeout"`
+	GOPCache     bool   `json:"gop_cache"` //是否开启GOP缓存，只缓存一组音视频
+	ProbeTimeout int    `json:"probe_timeout"`
+	PublicIP     string `json:"public_ip"`
 
 	//缓存指定时长的包，满了之后才发送给Sink. 可以降低用户态和内核态的交互频率，大幅提升性能.
 	//合并写的大小范围，应当大于一帧的时长，不超过一组GOP的时长，在实际发送流的时候也会遵循此条例.
 	MergeWriteLatency int `json:"mw_latency"`
 	Rtmp              RtmpConfig
-	Rtsp              RtmpConfig
+	Rtsp              RtspConfig
 
 	Hook HookConfig
 

@@ -18,14 +18,15 @@ const (
 	OverTcpMagic      = 0x24
 )
 
-// 低延迟是rtsp特性, 不考虑实现GOP缓存
+// rtsp传输流封装
+// 低延迟是rtsp特性, 所以不考虑实现GOP缓存
 type tranStream struct {
 	stream.TransStreamImpl
 	addr      net.IPAddr
 	addrType  string
 	urlFormat string
 
-	rtpTracks []*rtpTrack
+	rtpTracks []*rtspTrack
 	sdp       string
 }
 
@@ -48,11 +49,13 @@ func NewTransStream(addr net.IPAddr, urlFormat string) stream.ITransStream {
 func TransStreamFactory(source stream.ISource, protocol stream.Protocol, streams []utils.AVStream) (stream.ITransStream, error) {
 	trackFormat := source.Id() + "?track=%d"
 	return NewTransStream(net.IPAddr{
-		IP:   net.IP{},
+		IP:   net.ParseIP(stream.AppConfig.PublicIP),
 		Zone: "",
 	}, trackFormat), nil
 }
 
+// rtpMuxer申请输出流内存的回调
+// 无论是tcp/udp拉流, 均使用同一块内存, 并且给tcp预留4字节的包长.
 func (t *tranStream) onAllocBuffer(params interface{}) []byte {
 	return t.rtpTracks[params.(int)].buffer[OverTcpHeaderSize:]
 }
@@ -63,27 +66,30 @@ func (t *tranStream) onRtpPacket(data []byte, timestamp uint32, params interface
 	index := params.(int)
 	track := t.rtpTracks[index]
 
-	//保存sps和ssp等数据
-	if track.cache && track.header == nil {
+	//保存带有sps和ssp等编码信息的rtp包, 对所有sink通用
+	if track.cache && track.extraDataBuffer == nil {
 		bytes := make([]byte, OverTcpHeaderSize+len(data))
 		copy(bytes[OverTcpHeaderSize:], data)
 
-		track.tmp = append(track.tmp, bytes)
+		track.tmpExtraDataBuffer = append(track.tmpExtraDataBuffer, bytes)
 		t.overTCP(bytes, index)
 		return
 	}
 
+	//将rtp包发送给各个sink
 	for _, value := range t.Sinks {
 		sink_ := value.(*sink)
 		if !sink_.isConnected(index) {
 			continue
 		}
 
+		//为刚刚连接上的sink, 发送sps和pps等rtp包
 		if sink_.pktCount(index) < 1 && utils.AVMediaTypeVideo == track.mediaType {
 			seq := binary.BigEndian.Uint16(data[2:])
-			count := len(track.header)
+			count := len(track.extraDataBuffer)
 
-			for i, rtp := range track.header {
+			for i, rtp := range track.extraDataBuffer {
+				//回滚rtp包的序号
 				librtp.RollbackSeq(rtp[OverTcpHeaderSize:], int(seq)-(count-i-1))
 				if sink_.tcp {
 					sink_.input(index, rtp, 0)
@@ -96,6 +102,7 @@ func (t *tranStream) onRtpPacket(data []byte, timestamp uint32, params interface
 		end := OverTcpHeaderSize + len(data)
 		t.overTCP(track.buffer[:end], index)
 
+		//发送rtp包
 		if sink_.tcp {
 			sink_.input(index, track.buffer[:end], 0)
 		} else {
@@ -117,7 +124,7 @@ func (t *tranStream) Input(packet utils.AVPacket) error {
 	} else if utils.AVMediaTypeVideo == packet.MediaType() {
 
 		//将sps和pps按照单一模式打包
-		if stream_.header == nil {
+		if stream_.extraDataBuffer == nil {
 			if !packet.KeyFrame() {
 				return nil
 			}
@@ -135,7 +142,7 @@ func (t *tranStream) Input(packet utils.AVPacket) error {
 
 			stream_.muxer.Input(spsBytes[0], uint32(packet.ConvertPts(stream_.rate)))
 			stream_.muxer.Input(ppsBytes[0], uint32(packet.ConvertPts(stream_.rate)))
-			stream_.header = stream_.tmp
+			stream_.extraDataBuffer = stream_.tmpExtraDataBuffer
 		}
 
 		data := libavc.RemoveStartCode(packet.AnnexBPacketData(t.TransStreamImpl.Tracks[packet.Index()]))
@@ -146,7 +153,7 @@ func (t *tranStream) Input(packet utils.AVPacket) error {
 }
 
 func (t *tranStream) AddSink(sink_ stream.ISink) error {
-	sink_.(*sink).setTrackCount(len(t.TransStreamImpl.Tracks))
+	sink_.(*sink).setSenderCount(len(t.TransStreamImpl.Tracks))
 	if err := sink_.(*sink).SendHeader([]byte(t.sdp)); err != nil {
 		return err
 	}
@@ -179,7 +186,7 @@ func (t *tranStream) AddTrack(stream utils.AVStream) error {
 	muxer.SetAllocHandler(t.onAllocBuffer)
 	muxer.SetWriteHandler(t.onRtpPacket)
 
-	t.rtpTracks = append(t.rtpTracks, NewRTPTrack(muxer, byte(payloadType.Pt), payloadType.ClockRate, stream.Type()))
+	t.rtpTracks = append(t.rtpTracks, NewRTSPTrack(muxer, byte(payloadType.Pt), payloadType.ClockRate, stream.Type()))
 	muxer.SetParams(len(t.rtpTracks) - 1)
 	return nil
 }

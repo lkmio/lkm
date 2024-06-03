@@ -2,6 +2,7 @@
   "gop_cache": true,
   "probe_timeout": 2000,
   "mw_latency": 350,
+  "public_ip": "192.168.2.148",
 
   "http": {
     "addr": "0.0.0.0:8080"
@@ -29,12 +30,11 @@
 
   "webrtc": {
     "port": 8000,
-    "public_ip": "192.168.31.123",
     "transport": "UDP"
   },
 
   "gb28181": {
-    "port": "50000-60000",
+    "port": [50000,60000],
     "transport": "UDP|TCP"
   },
 

@@ -22,12 +22,13 @@ func NewDefaultAppConfig() stream.AppConfig_ {
 	return stream.AppConfig_{
 		GOPCache:          true,
 		MergeWriteLatency: 350,
+		PublicIP:          "192.168.2.148",
 
 		Hls: stream.HlsConfig{
 			Enable:         true,
 			Dir:            "../tmp",
 			Duration:       2,
-			PlaylistLength: 10,
+			PlaylistLength: 0xFFFF,
 		},
 
 		Rtmp: stream.RtmpConfig{
@@ -35,9 +36,14 @@ func NewDefaultAppConfig() stream.AppConfig_ {
 			Addr:   "0.0.0.0:1935",
 		},
 
-		Rtsp: stream.RtmpConfig{
-			Enable: true,
-			Addr:   "0.0.0.0:554",
+		Rtsp: stream.RtspConfig{
+			TransportConfig: stream.TransportConfig{
+				Transport: "UDP|TCP",
+				Port:      [2]uint16{30000, 40000},
+			},
+			Enable:   true,
+			Addr:     "0.0.0.0:554",
+			Password: "123456",
 		},
 
 		Log: stream.LogConfig{
@@ -55,9 +61,11 @@ func NewDefaultAppConfig() stream.AppConfig_ {
 		},
 
 		GB28181: stream.GB28181Config{
-			Addr:      "0.0.0.0",
-			Transport: "UDP|TCP",
-			Port:      [2]uint16{20000, 30000},
+			Addr: "0.0.0.0",
+			TransportConfig: stream.TransportConfig{
+				Transport: "UDP|TCP",
+				Port:      [2]uint16{20000, 30000},
+			},
 		},
 	}
 }
@@ -76,6 +84,10 @@ func init() {
 
 	if stream.AppConfig.GB28181.IsMultiPort() {
 		gb28181.TransportManger = stream.NewTransportManager(stream.AppConfig.GB28181.Port[0], stream.AppConfig.GB28181.Port[1])
+	}
+
+	if stream.AppConfig.Rtsp.IsMultiPort() {
+		rtsp.TransportManger = stream.NewTransportManager(stream.AppConfig.Rtsp.Port[0], stream.AppConfig.Rtsp.Port[1])
 	}
 }
 
@@ -101,7 +113,7 @@ func main() {
 			panic(rtspAddr)
 		}
 
-		rtspServer := rtsp.NewServer()
+		rtspServer := rtsp.NewServer(stream.AppConfig.Rtsp.Password)
 		err = rtspServer.Start(rtspAddr)
 		if err != nil {
 			panic(err)

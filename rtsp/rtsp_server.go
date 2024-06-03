@@ -5,7 +5,6 @@ import (
 	"github.com/yangjiechina/avformat/utils"
 	"github.com/yangjiechina/live-server/log"
 	"net"
-	"net/textproto"
 )
 
 type IServer interface {
@@ -14,36 +13,29 @@ type IServer interface {
 	Close()
 }
 
-func NewServer() IServer {
+func NewServer(password string) IServer {
 	return &serverImpl{
-		publicHeader: "OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN, PAUSE, GET_PARAMETER, SET_PARAMETER, REDIRECT, RECORD",
+		handler: newHandler(password),
 	}
 }
 
 type serverImpl struct {
-	tcp *transport.TCPServer
-
-	handlers     map[string]func(source string, headers textproto.MIMEHeader)
-	publicHeader string
+	tcp     *transport.TCPServer
+	handler *handler
 }
 
 func (s *serverImpl) Start(addr net.Addr) error {
 	utils.Assert(s.tcp == nil)
 
+	//监听TCP端口
 	server := &transport.TCPServer{}
 	server.SetHandler(s)
 	err := server.Bind(addr)
-
 	if err != nil {
 		return err
 	}
 
 	s.tcp = server
-	for key, _ := range s.handlers {
-		s.publicHeader += key + ", "
-	}
-
-	s.publicHeader = s.publicHeader[:len(s.publicHeader)-2]
 	return nil
 }
 
@@ -69,18 +61,16 @@ func (s *serverImpl) OnConnected(conn net.Conn) {
 func (s *serverImpl) OnPacket(conn net.Conn, data []byte) {
 	t := conn.(*transport.Conn)
 
-	message, url, header, err := parseMessage(data)
+	method, url, header, err := parseMessage(data)
 	if err != nil {
-		log.Sugar.Errorf("failed to prase message:%s. err:%s peer:%s", string(data), err.Error(), conn.RemoteAddr().String())
+		log.Sugar.Errorf("failed to prase message:%s. err:%s conn:%s", string(data), err.Error(), conn.RemoteAddr().String())
 		_ = conn.Close()
-		s.closeSession(conn)
 		return
 	}
 
-	err = t.Data.(*session).Input(message, url, header)
+	err = s.handler.Process(t.Data.(*session), method, url, header)
 	if err != nil {
-		log.Sugar.Errorf("failed to process message of RTSP. err:%s peer:%s msg:%s", err.Error(), conn.RemoteAddr().String(), string(data))
-
+		log.Sugar.Errorf("failed to process message of RTSP. err:%s conn:%s msg:%s", err.Error(), conn.RemoteAddr().String(), string(data))
 		_ = conn.Close()
 	}
 }

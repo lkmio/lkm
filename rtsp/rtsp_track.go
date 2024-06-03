@@ -1,56 +1,32 @@
 package rtsp
 
 import (
-	"github.com/yangjiechina/avformat/transport"
-	"net"
+	"github.com/yangjiechina/avformat/librtp"
+	"github.com/yangjiechina/avformat/utils"
 )
 
+// 对rtsp每路输出流的封装
 type rtspTrack struct {
-	rtp  transport.ITransport
-	rtcp transport.ITransport
+	pt        byte
+	rate      int
+	mediaType utils.AVMediaType
 
-	rtpConn  net.Conn
-	rtcpConn net.Conn
+	buffer []byte //buffer of rtp packet
+	muxer  librtp.Muxer
+	cache  bool
 
-	//rtcp
-	pktCount   int
-	ssrc       uint32
-	octetCount int
+	extraDataBuffer    [][]byte //缓存带有编码信息的rtp包, 对所有sink通用
+	tmpExtraDataBuffer [][]byte //缓存带有编码信息的rtp包, 整个过程会多次回调(sps->pps->sei...), 先保存到临时区, 最后再缓存到extraDataBuffer
 }
 
-func (s *rtspTrack) onRTPPacket(conn net.Conn, data []byte) {
-	if s.rtpConn == nil {
-		s.rtpConn = conn
-	}
-}
-
-func (s *rtspTrack) onRTCPPacket(conn net.Conn, data []byte) {
-	if s.rtcpConn == nil {
-		s.rtcpConn = conn
+func NewRTSPTrack(muxer librtp.Muxer, pt byte, rate int, mediaType utils.AVMediaType) *rtspTrack {
+	stream := &rtspTrack{
+		pt:        pt,
+		rate:      rate,
+		muxer:     muxer,
+		buffer:    make([]byte, 1500),
+		mediaType: mediaType,
 	}
 
-	//packs, err := rtcp.Unmarshal(data)
-	//if err != nil {
-	//	log.Sugar.Warnf("解析rtcp包失败 err:%s conn:%s pkt:%s", err.Error(), conn.RemoteAddr().String(), hex.EncodeToString(data))
-	//	return
-	//}
-	//
-	//for _, pkt := range packs {
-	//	if _, ok := pkt.(*rtcp.ReceiverReport); ok {
-	//	} else if _, ok := pkt.(*rtcp.SourceDescription); ok {
-	//	} else if _, ok := pkt.(*rtcp.Goodbye); ok {
-	//	}
-	//}
-}
-
-// tcp链接成功回调
-func (s *rtspTrack) onTCPConnected(conn net.Conn) {
-	if s.rtcpConn != nil {
-		s.rtcpConn = conn
-	}
-}
-
-// tcp断开链接回调
-func (s *rtspTrack) onTCPDisconnected(conn net.Conn, err error) {
-
+	return stream
 }
