@@ -38,6 +38,10 @@
     "transport": "UDP|TCP"
   },
 
+  "1078": {
+    "addr": "0.0.0.0:1078"
+  },
+
   "record": {
     "format": "mp4",
     "path": ""

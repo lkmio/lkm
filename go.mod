@@ -8,8 +8,8 @@ require (
 	github.com/natefinch/lumberjack v2.0.0+incompatible
 	github.com/pion/interceptor v0.1.25
 	github.com/pion/logging v0.2.2
-	github.com/pion/rtcp v1.2.12
-	github.com/pion/rtp v1.8.3
+	github.com/pion/rtcp v1.2.14
+	github.com/pion/rtp v1.8.5
 	github.com/pion/webrtc/v3 v3.2.29
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.9.0

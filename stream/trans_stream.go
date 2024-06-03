@@ -26,9 +26,11 @@ func init() {
 		int(utils.AVCodecIdVP8):  0x5,
 		int(utils.AVCodecIdVP9):  0x6,
 
-		int(utils.AVCodecIdAAC):  101,
-		int(utils.AVCodecIdMP3):  102,
-		int(utils.AVCodecIdOPUS): 103,
+		int(utils.AVCodecIdAAC):      101,
+		int(utils.AVCodecIdMP3):      102,
+		int(utils.AVCodecIdOPUS):     103,
+		int(utils.AVCodecIdPCMALAW):  104,
+		int(utils.AVCodecIdPCMMULAW): 105,
 	}
 
 	transStreamFactories = make(map[Protocol]TransStreamFactory, 8)

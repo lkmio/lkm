@@ -55,6 +55,11 @@ type GB28181Config struct {
 	Addr string
 }
 
+type JT1078Config struct {
+	Enable bool
+	Addr   string
+}
+
 func (g TransportConfig) EnableTCP() bool {
 	return strings.Contains(g.Transport, "TCP")
 }
@@ -153,4 +158,6 @@ type AppConfig_ struct {
 	Http HttpConfig
 
 	GB28181 GB28181Config
+
+	JT1078 JT1078Config
 }
