@@ -34,10 +34,20 @@ type sessionImpl struct {
 	conn net.Conn
 }
 
+func (s *sessionImpl) generateSourceId(app, stream_ string) string {
+	if len(app) == 0 {
+		return stream_
+	} else if len(stream_) == 0 {
+		return app
+	} else {
+		return app + "/" + stream_
+	}
+}
+
 func (s *sessionImpl) OnPublish(app, stream_ string, response chan utils.HookState) {
 	log.Sugar.Infof("rtmp onpublish app:%s stream:%s conn:%s", app, stream_, s.conn.RemoteAddr().String())
 
-	sourceId := app + "_" + stream_
+	sourceId := s.generateSourceId(app, stream_)
 	source := NewPublisher(sourceId, s.stack, s.conn)
 	//设置推流的音视频回调
 	s.stack.SetOnPublishHandler(source)
@@ -57,7 +67,7 @@ func (s *sessionImpl) OnPublish(app, stream_ string, response chan utils.HookSta
 }
 
 func (s *sessionImpl) OnPlay(app, stream_ string, response chan utils.HookState) {
-	sourceId := app + "_" + stream_
+	sourceId := s.generateSourceId(app, stream_)
 	//拉流事件Sink统一处理
 	sink := NewSink(stream.GenerateSinkId(s.conn.RemoteAddr()), sourceId, s.conn)
 

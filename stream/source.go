@@ -52,34 +52,6 @@ const (
 	SessionStateClose            = SessionState(7) //关闭状态
 )
 
-func (s SourceType) ToString() string {
-	if SourceTypeRtmp == s {
-		return "rtmp"
-	} else if SourceType28181 == s {
-		return "28181"
-	} else if SourceType1078 == s {
-		return "jt1078"
-	}
-
-	panic(fmt.Sprintf("unknown source type %d", s))
-}
-
-func (p Protocol) ToString() string {
-	if ProtocolRtmp == p {
-		return "rtmp"
-	} else if ProtocolFlv == p {
-		return "flv"
-	} else if ProtocolRtsp == p {
-		return "rtsp"
-	} else if ProtocolHls == p {
-		return "hls"
-	} else if ProtocolRtc == p {
-		return "rtc"
-	}
-
-	panic(fmt.Sprintf("unknown stream protocol %d", p))
-}
-
 // ISource 父类Source负责, 除解析流以外的所有事情
 type ISource interface {
 	// Id Source的唯一ID/**
@@ -139,8 +111,6 @@ type ISource interface {
 
 	Init(input func(data []byte) error)
 }
-
-var TranscoderFactory func(src utils.AVStream, dst utils.AVStream) transcode.ITranscoder
 
 type SourceImpl struct {
 	hookSessionImpl

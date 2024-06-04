@@ -70,9 +70,14 @@ func (h handler) Process(session *session, method string, url_ *url.URL, headers
 		return fmt.Errorf("please establish a session first")
 	}
 
-	var err error
-	split := strings.Split(url_.Path, "/")
-	source := split[len(split)-1]
+	source := strings.TrimSpace(url_.Path)
+	if strings.HasPrefix(source, "/") {
+		source = source[1:]
+	}
+
+	if len(strings.TrimSpace(source)) == 0 {
+		return fmt.Errorf("the request source cannot be empty")
+	}
 
 	//反射调用各个处理函数
 	results := m.Call([]reflect.Value{
@@ -80,7 +85,7 @@ func (h handler) Process(session *session, method string, url_ *url.URL, headers
 		reflect.ValueOf(Request{session, source, method, url_, headers}),
 	})
 
-	err, _ = results[2].Interface().(error)
+	err, _ := results[2].Interface().(error)
 	if err != nil {
 		return err
 	}

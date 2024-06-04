@@ -40,8 +40,34 @@ func init() {
 	}
 }
 
+func withCheckParams(f func(sourceId string, w http.ResponseWriter, req *http.Request), suffix string) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, req *http.Request) {
+		source, err := stream.Path2SourceId(req.URL.Path, suffix)
+		if err != nil {
+			httpResponse(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		f(source, w, req)
+	}
+}
+
 func startApiServer(addr string) {
-	apiServer.router.HandleFunc("/live/{source}", apiServer.filterLive)
+	/**
+	  http://host:port/xxx.flv
+	  http://host:port/xxx.rtc
+	  http://host:port/xxx.m3u8
+	  http://host:port/xxx_0.ts
+	  ws://host:port/xxx.flv
+	*/
+	apiServer.router.HandleFunc("/{source}.flv", withCheckParams(apiServer.onFlv, ".flv"))
+	apiServer.router.HandleFunc("/{source}/{stream}.flv", withCheckParams(apiServer.onFlv, ".flv"))
+	apiServer.router.HandleFunc("/{source}.m3u8", withCheckParams(apiServer.onHLS, ".m3u8"))
+	apiServer.router.HandleFunc("/{source}/{stream}.m3u8", withCheckParams(apiServer.onHLS, ".m3u8"))
+	apiServer.router.HandleFunc("/{source}.ts", withCheckParams(apiServer.onTS, ".ts"))
+	apiServer.router.HandleFunc("/{source}/{stream}.ts", withCheckParams(apiServer.onTS, ".ts"))
+	apiServer.router.HandleFunc("/{source}.rtc", withCheckParams(apiServer.onRtc, ".rtc"))
+	apiServer.router.HandleFunc("/{source}/{stream}.rtc", withCheckParams(apiServer.onRtc, ".rtc"))
 
 	apiServer.router.HandleFunc("/v1/gb28181/source/create", apiServer.createGBSource)
 	//TCP主动,设置连接地址
@@ -218,6 +244,15 @@ func (api *ApiServer) generateSinkId(remoteAddr string) stream.SinkId {
 	return stream.GenerateSinkId(tcpAddr)
 }
 
+func (api *ApiServer) generateSourceId(remoteAddr string) stream.SinkId {
+	tcpAddr, err := net.ResolveTCPAddr("tcp", remoteAddr)
+	if err != nil {
+		panic(err)
+	}
+
+	return stream.GenerateSinkId(tcpAddr)
+}
+
 func (api *ApiServer) doPlay(sink stream.ISink) utils.HookState {
 	ok := utils.HookStateOK
 	stream.HookPlaying(sink, func() {
@@ -229,52 +264,22 @@ func (api *ApiServer) doPlay(sink stream.ISink) utils.HookState {
 	return ok
 }
 
-func (api *ApiServer) filterLive(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	source := vars["source"]
-	index := strings.LastIndex(source, ".")
-	if index < 0 || index == len(source)-1 {
-		log.Sugar.Errorf("bad request:%s. stream format must be passed at the end of the URL", r.URL.Path)
-		w.WriteHeader(http.StatusBadRequest)
-		return
+func (api *ApiServer) onFlv(sourceId string, w http.ResponseWriter, r *http.Request) {
+	ws := true
+	if !("upgrade" == strings.ToLower(r.Header.Get("Connection"))) {
+		ws = false
+	} else if !("websocket" == strings.ToLower(r.Header.Get("Upgrade"))) {
+		ws = false
+	} else if !("13" == r.Header.Get("Sec-Websocket-Version")) {
+		ws = false
 	}
 
-	sourceId := source[:index]
-	format := source[index+1:]
-
-	/**
-	  http://host:port/xxx.flv
-	  http://host:port/xxx.rtc
-	  http://host:port/xxx.m3u8
-	  http://host:port/xxx_0.ts
-	  ws://host:port/xxx.flv
-	*/
-	if "flv" == format {
-		//判断是否是websocket请求
-		ws := true
-		if !("upgrade" == strings.ToLower(r.Header.Get("Connection"))) {
-			ws = false
-		} else if !("websocket" == strings.ToLower(r.Header.Get("Upgrade"))) {
-			ws = false
-		} else if !("13" == r.Header.Get("Sec-Websocket-Version")) {
-			ws = false
-		}
-
-		if ws {
-			api.onWSFlv(sourceId, w, r)
-		} else {
-			api.onFLV(sourceId, w, r)
-		}
-
-	} else if "m3u8" == format {
-		api.onHLS(sourceId, w, r)
-	} else if "ts" == format {
-		api.onTS(sourceId, w, r)
-	} else if "rtc" == format {
-		api.onRtc(sourceId, w, r)
+	if ws {
+		apiServer.onWSFlv(sourceId, w, r)
+	} else {
+		apiServer.onHttpFLV(sourceId, w, r)
 	}
 }
-
 func (api *ApiServer) onWSFlv(sourceId string, w http.ResponseWriter, r *http.Request) {
 	conn, err := api.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -304,7 +309,7 @@ func (api *ApiServer) onWSFlv(sourceId string, w http.ResponseWriter, r *http.Re
 	}
 }
 
-func (api *ApiServer) onFLV(sourceId string, w http.ResponseWriter, r *http.Request) {
+func (api *ApiServer) onHttpFLV(sourceId string, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "video/x-flv")
 	w.Header().Set("Connection", "Keep-Alive")
 	w.Header().Set("Transfer-Encoding", "chunked")

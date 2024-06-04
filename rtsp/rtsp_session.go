@@ -97,7 +97,7 @@ func parseMessage(data []byte) (string, *url.URL, textproto.MIMEHeader, error) {
 	line, err := tp.ReadLine()
 	split := strings.Split(line, " ")
 	if len(split) < 3 {
-		panic(fmt.Errorf("unknow response line of response:%s", line))
+		panic(fmt.Errorf("wrong request line %s", line))
 	}
 
 	method := strings.ToUpper(split[0])
@@ -107,6 +107,15 @@ func parseMessage(data []byte) (string, *url.URL, textproto.MIMEHeader, error) {
 	url_, err := url.Parse(split[1])
 	if err != nil {
 		return "", nil, nil, err
+	}
+
+	path := strings.TrimSpace(url_.Path)
+	if strings.HasPrefix(path, "/") {
+		path = path[1:]
+	}
+
+	if len(strings.TrimSpace(path)) == 0 {
+		return "", nil, nil, fmt.Errorf("the request source cannot be empty")
 	}
 
 	header, err := tp.ReadMIMEHeader()
