@@ -8,25 +8,17 @@ import (
 )
 
 type TransStream struct {
-	stream.CacheTransStream
+	stream.TransStreamImpl
+
 	chunkSize int
 
-	//sequence header
-	header     []byte
+	header     []byte //sequence header
 	headerSize int
 
 	muxer      libflv.Muxer
 	audioChunk librtmp.Chunk
 	videoChunk librtmp.Chunk
-}
-
-func NewTransStream(chunkSize int) stream.ITransStream {
-	transStream := &TransStream{chunkSize: chunkSize}
-	return transStream
-}
-
-func TransStreamFactory(source stream.ISource, protocol stream.Protocol, streams []utils.AVStream) (stream.ITransStream, error) {
-	return NewTransStream(librtmp.ChunkSize), nil
+	mwBuffer   stream.MergeWritingBuffer
 }
 
 func (t *TransStream) Input(packet utils.AVPacket) error {
@@ -72,20 +64,16 @@ func (t *TransStream) Input(packet utils.AVPacket) error {
 		payloadSize += chunkPayloadOffset + len(data)
 	}
 
-	//遇到视频关键帧,不考虑合并写大小,发送之前剩余的数据.
+	//遇到视频关键帧, 发送剩余的流
 	if videoKey {
-		tmp := t.StreamBuffers[0]
-		head, _ := tmp.Data()
-		if len(head[t.SegmentOffset:]) > 0 {
-			bytes := head[t.SegmentOffset:]
-			t.SendPacket(bytes)
-			//交替使用两块内存
-			t.SwapStreamBuffer()
+		segment := t.mwBuffer.PopSegment()
+		if len(segment) > 0 {
+			t.SendPacket(segment)
 		}
 	}
 
 	//分配内存
-	allocate := t.StreamBuffers[0].Allocate(chunkHeaderSize + payloadSize + ((payloadSize - 1) / t.chunkSize))
+	allocate := t.mwBuffer.Allocate(chunkHeaderSize + payloadSize + ((payloadSize - 1) / t.chunkSize))
 
 	//写rtmp chunk header
 	chunk.Length = payloadSize
@@ -101,14 +89,10 @@ func (t *TransStream) Input(packet utils.AVPacket) error {
 
 	n += chunk.WriteData(allocate[n:], data, t.chunkSize, chunkPayloadOffset)
 
-	//未满合并写大小, 不发送
-	if !t.Full(dts) {
-		return nil
+	segment := t.mwBuffer.PeekCompletedSegment(dts)
+	if len(segment) > 0 {
+		t.SendPacket(segment)
 	}
-
-	head, _ := t.StreamBuffers[0].Data()
-	//发送合并写数据
-	t.SendPacketWithOffset(head, t.SegmentOffset)
 	return nil
 }
 
@@ -120,18 +104,9 @@ func (t *TransStream) AddSink(sink stream.ISink) error {
 	sink.Input(t.header[:t.headerSize])
 
 	//发送当前内存池已有的合并写切片
-	if t.SegmentOffset > 0 {
-		data, _ := t.StreamBuffers[0].Data()
-		utils.Assert(len(data) > 0)
-		sink.Input(data[:t.SegmentOffset])
-		return nil
-	}
-
-	//发送上一组GOP
-	if t.StreamBuffers[1] != nil && !t.StreamBuffers[1].Empty() {
-		data, _ := t.StreamBuffers[0].Data()
-		utils.Assert(len(data) > 0)
-		sink.Input(data)
+	segmentList := t.mwBuffer.SegmentList()
+	if len(segmentList) > 0 {
+		sink.Input(segmentList)
 		return nil
 	}
 
@@ -201,5 +176,24 @@ func (t *TransStream) WriteHeader() error {
 	}
 
 	t.headerSize = n
+
+	t.mwBuffer = stream.NewMergeWritingBuffer(t.ExistVideo)
 	return nil
+}
+
+func (t *TransStream) Close() error {
+	//发送剩余的流
+	segment := t.mwBuffer.PopSegment()
+	if len(segment) > 0 {
+		t.SendPacket(segment)
+	}
+	return nil
+}
+
+func NewTransStream(chunkSize int) stream.ITransStream {
+	return &TransStream{chunkSize: chunkSize}
+}
+
+func TransStreamFactory(source stream.ISource, protocol stream.Protocol, streams []utils.AVStream) (stream.ITransStream, error) {
+	return NewTransStream(librtmp.ChunkSize), nil
 }

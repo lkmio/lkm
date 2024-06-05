@@ -22,6 +22,7 @@ import (
 func NewDefaultAppConfig() stream.AppConfig_ {
 	return stream.AppConfig_{
 		GOPCache:          true,
+		GOPBufferSize:     8196000,
 		MergeWriteLatency: 350,
 		PublicIP:          "192.168.2.148",
 

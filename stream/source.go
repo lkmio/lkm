@@ -61,6 +61,9 @@ type ISource interface {
 	//@Return bool fatal error.释放Source
 	Input(data []byte) error
 
+	// Type 推流类型
+	Type() SourceType
+
 	// OriginStreams 返回推流的原始Streams
 	OriginStreams() []utils.AVStream
 
@@ -83,14 +86,11 @@ type ISource interface {
 	// 将Sink添加到等待队列
 	Close()
 
-	// Type 推流类型
-	Type() SourceType
-
 	// FindOrCreatePacketBuffer 查找或者创建AVPacket的内存池
 	FindOrCreatePacketBuffer(index int, mediaType utils.AVMediaType) MemoryPool
 
 	// OnDiscardPacket GOP缓存溢出回调, 释放AVPacket
-	OnDiscardPacket(pkt interface{})
+	OnDiscardPacket(pkt utils.AVPacket)
 
 	// OnDeMuxStream 解析出AVStream回调
 	OnDeMuxStream(stream utils.AVStream)
@@ -127,13 +127,14 @@ type SourceImpl struct {
 	videoTranscoders []transcode.ITranscoder //视频解码器
 	originStreams    StreamManager           //推流的音视频Streams
 	allStreams       StreamManager           //推流Streams+转码器获得的Stream
-	gopBuffers       []StreamBuffer          //推流每路的GOP缓存
 	pktBuffers       [8]MemoryPool           //推流每路的AVPacket缓存, AVPacket的data从该内存池中分配. 在GOP缓存溢出时,释放池中内存.
+	gopBuffer        GOPBuffer               //GOP缓存, 音频和视频混合使用, 以视频关键帧为界, 缓存第二个视频关键帧时, 释放前一组gop. 如果不存在视频流, 不缓存音频
 
-	Input_ func(data []byte) error //解决多态无法传递给子类的问题
-
+	existVideo bool //是否存在视频
 	completed  bool
 	probeTimer *time.Timer
+
+	Input_ func(data []byte) error //解决多态无法传递给子类的问题
 
 	//所有的输出协议, 持有Sink
 	transStreams map[TransStreamId]ITransStream
@@ -199,11 +200,11 @@ func (s *SourceImpl) FindOrCreatePacketBuffer(index int, mediaType utils.AVMedia
 		} else if AppConfig.GOPCache {
 			//开启GOP缓存
 			//以每秒钟4M码率大小创建视频内存池
-			s.pktBuffers[index] = NewRbMemoryPool(4096 * 1024)
+			s.pktBuffers[index] = NewRbMemoryPool(AppConfig.GOPBufferSize)
 		} else {
 			//未开启GOP缓存
 			//以每秒钟4M的1/8码率大小创建视频内存池
-			s.pktBuffers[index] = NewRbMemoryPool(4096 * 1024 / 8)
+			s.pktBuffers[index] = NewRbMemoryPool(1024 * 1000)
 		}
 	}
 
@@ -261,53 +262,6 @@ func IsSupportMux(protocol Protocol, audioCodecId, videoCodecId utils.AVCodecID)
 	}
 
 	return true
-}
-
-// 将GOP缓存发送给TransStream
-// 按照时间戳升序发送
-func (s *SourceImpl) dispatchStreamBuffer(transStream ITransStream, streams []utils.AVStream) {
-	size := len(streams)
-	indexs := make([]int, size)
-
-	for {
-		min := int64(0xFFFFFFFF)
-
-		//找出最小的时间戳
-		for index, stream_ := range streams[:size] {
-			if s.gopBuffers[stream_.Index()].Size() == indexs[index] {
-				continue
-			}
-
-			pkt := s.gopBuffers[stream_.Index()].Peek(indexs[index]).(utils.AVPacket)
-			v := pkt.Dts()
-			if min == 0xFFFFFFFF {
-				min = v
-			} else if v < min {
-				min = v
-			}
-		}
-
-		if min == 0xFFFFFFFF {
-			break
-		}
-
-		for index, stream_ := range streams[:size] {
-			buffer := s.gopBuffers[stream_.Index()]
-			if buffer.Size() == indexs[index] {
-				continue
-			}
-
-			for i := indexs[index]; i < buffer.Size(); i++ {
-				packet := buffer.Peek(i).(utils.AVPacket)
-				if packet.Dts() > min {
-					break
-				}
-
-				transStream.Input(packet)
-				indexs[index]++
-			}
-		}
-	}
 }
 
 func (s *SourceImpl) AddSink(sink ISink) bool {
@@ -397,8 +351,10 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 	}
 
 	//新的传输流，发送缓存的音视频帧
-	if !ok && AppConfig.GOPCache {
-		s.dispatchStreamBuffer(transStream, streams[:size])
+	if !ok && AppConfig.GOPCache && s.existVideo {
+		s.gopBuffer.PeekAll(func(packet utils.AVPacket) {
+			transStream.Input(packet)
+		})
 	}
 
 	return true
@@ -438,11 +394,18 @@ func (s *SourceImpl) SetState(state SessionState) {
 }
 
 func (s *SourceImpl) Close() {
+	//释放GOP缓存
+	if s.gopBuffer != nil {
+		s.gopBuffer.Clear()
+	}
+
 	//释放解复用器
 	//释放转码器
 	//释放每路转协议流， 将所有sink添加到等待队列
 	_, _ = SourceManager.Remove(s.Id_)
 	for _, transStream := range s.transStreams {
+		transStream.Close()
+
 		transStream.PopAllSink(func(sink ISink) {
 			sink.SetTransStreamId(0)
 			{
@@ -461,8 +424,7 @@ func (s *SourceImpl) Close() {
 	s.transStreams = nil
 }
 
-func (s *SourceImpl) OnDiscardPacket(pkt interface{}) {
-	packet := pkt.(utils.AVPacket)
+func (s *SourceImpl) OnDiscardPacket(packet utils.AVPacket) {
 	s.FindOrCreatePacketBuffer(packet.Index(), packet.MediaType()).FreeHead()
 }
 
@@ -486,13 +448,15 @@ func (s *SourceImpl) OnDeMuxStream(stream utils.AVStream) {
 		})
 	}
 
+	if utils.AVMediaTypeVideo == stream.Type() {
+		s.existVideo = true
+	}
+
 	//为每个Stream创建对应的Buffer
-	if AppConfig.GOPCache {
-		buffer := NewStreamBuffer(200)
-		//OnDeMuxStream的调用顺序，就是AVStream和AVPacket的Index的递增顺序
-		s.gopBuffers = append(s.gopBuffers, buffer)
+	if AppConfig.GOPCache && s.existVideo {
+		s.gopBuffer = NewStreamBuffer()
 		//设置GOP缓存溢出回调
-		buffer.SetDiscardHandler(s.OnDiscardPacket)
+		s.gopBuffer.SetDiscardHandler(s.OnDiscardPacket)
 	}
 }
 
@@ -534,9 +498,8 @@ func (s *SourceImpl) OnDeMuxStreamDone() {
 }
 
 func (s *SourceImpl) OnDeMuxPacket(packet utils.AVPacket) {
-	if AppConfig.GOPCache {
-		buffer := s.gopBuffers[packet.Index()]
-		buffer.AddPacket(packet, packet.KeyFrame(), packet.Dts())
+	if AppConfig.GOPCache && s.existVideo {
+		s.gopBuffer.AddPacket(packet)
 	}
 
 	//分发给各个传输流
@@ -544,12 +507,10 @@ func (s *SourceImpl) OnDeMuxPacket(packet utils.AVPacket) {
 		stream_.Input(packet)
 	}
 
-	if AppConfig.GOPCache {
-		return
+	//未开启GOP缓存或只存在音频流, 释放掉内存
+	if !AppConfig.GOPCache || !s.existVideo {
+		s.FindOrCreatePacketBuffer(packet.Index(), packet.MediaType()).FreeTail()
 	}
-
-	//未开启GOP缓存，释放掉内存
-	s.FindOrCreatePacketBuffer(packet.Index(), packet.MediaType()).FreeTail()
 }
 
 func (s *SourceImpl) OnDeMuxDone() {

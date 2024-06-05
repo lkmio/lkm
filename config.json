@@ -1,5 +1,6 @@
 {
   "gop_cache": true,
+  "gop_buffer_size": 8192000,
   "probe_timeout": 2000,
   "mw_latency": 350,
   "public_ip": "192.168.2.148",

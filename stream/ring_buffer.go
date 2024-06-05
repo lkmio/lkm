@@ -19,6 +19,8 @@ type RingBuffer interface {
 
 	Size() int
 
+	Capacity() int
+
 	Data() ([]interface{}, []interface{})
 
 	Clear()
@@ -27,20 +29,22 @@ type RingBuffer interface {
 func NewRingBuffer(capacity int) RingBuffer {
 	utils.Assert(capacity > 0)
 	r := &ringBuffer{
-		data: make([]interface{}, capacity),
-		head: 0,
-		tail: 0,
-		size: 0,
+		data:     make([]interface{}, capacity),
+		head:     0,
+		tail:     0,
+		size:     0,
+		capacity: capacity,
 	}
 
 	return r
 }
 
 type ringBuffer struct {
-	data []interface{}
-	head int
-	tail int
-	size int
+	data     []interface{}
+	head     int
+	tail     int
+	size     int
+	capacity int
 }
 
 func (r *ringBuffer) IsEmpty() bool {
@@ -90,6 +94,10 @@ func (r *ringBuffer) Tail() interface{} {
 
 func (r *ringBuffer) Size() int {
 	return r.size
+}
+
+func (r *ringBuffer) Capacity() int {
+	return r.capacity
 }
 
 func (r *ringBuffer) Data() ([]interface{}, []interface{}) {
