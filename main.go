@@ -2,21 +2,21 @@ package main
 
 import (
 	"fmt"
-	"github.com/yangjiechina/live-server/flv"
-	"github.com/yangjiechina/live-server/gb28181"
-	"github.com/yangjiechina/live-server/hls"
-	"github.com/yangjiechina/live-server/jt1078"
-	"github.com/yangjiechina/live-server/log"
-	"github.com/yangjiechina/live-server/rtc"
-	"github.com/yangjiechina/live-server/rtsp"
+	"github.com/yangjiechina/lkm/flv"
+	"github.com/yangjiechina/lkm/gb28181"
+	"github.com/yangjiechina/lkm/hls"
+	"github.com/yangjiechina/lkm/jt1078"
+	"github.com/yangjiechina/lkm/log"
+	"github.com/yangjiechina/lkm/rtc"
+	"github.com/yangjiechina/lkm/rtsp"
 	"go.uber.org/zap/zapcore"
 	"net"
 	"net/http"
 
 	_ "net/http/pprof"
 
-	"github.com/yangjiechina/live-server/rtmp"
-	"github.com/yangjiechina/live-server/stream"
+	"github.com/yangjiechina/lkm/rtmp"
+	"github.com/yangjiechina/lkm/stream"
 )
 
 func NewDefaultAppConfig() stream.AppConfig_ {

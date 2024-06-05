@@ -2,7 +2,7 @@ package hls
 
 import (
 	"bytes"
-	"github.com/yangjiechina/live-server/stream"
+	"github.com/yangjiechina/lkm/stream"
 	"math"
 	"strconv"
 )

@@ -2,14 +2,14 @@ package stream
 
 import (
 	"fmt"
-	"github.com/yangjiechina/live-server/log"
+	"github.com/yangjiechina/lkm/log"
 	"net"
 	"net/http"
 	"time"
 
 	"github.com/yangjiechina/avformat/stream"
 	"github.com/yangjiechina/avformat/utils"
-	"github.com/yangjiechina/live-server/transcode"
+	"github.com/yangjiechina/lkm/transcode"
 )
 
 // SourceType 推流类型

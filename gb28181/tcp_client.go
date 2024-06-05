@@ -3,7 +3,7 @@ package gb28181
 import (
 	"fmt"
 	"github.com/yangjiechina/avformat/transport"
-	"github.com/yangjiechina/live-server/stream"
+	"github.com/yangjiechina/lkm/stream"
 	"net"
 )
 

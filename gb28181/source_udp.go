@@ -3,8 +3,8 @@ package gb28181
 import (
 	"fmt"
 	"github.com/pion/rtp"
-	"github.com/yangjiechina/live-server/jitterbuffer"
-	"github.com/yangjiechina/live-server/stream"
+	"github.com/yangjiechina/lkm/jitterbuffer"
+	"github.com/yangjiechina/lkm/stream"
 )
 
 type UDPSource struct {

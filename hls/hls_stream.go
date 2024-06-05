@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"github.com/yangjiechina/avformat/libmpeg"
 	"github.com/yangjiechina/avformat/utils"
-	"github.com/yangjiechina/live-server/stream"
+	"github.com/yangjiechina/lkm/stream"
 	"os"
 )
 

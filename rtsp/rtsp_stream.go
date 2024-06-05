@@ -8,7 +8,7 @@ import (
 	"github.com/yangjiechina/avformat/librtp"
 	"github.com/yangjiechina/avformat/librtsp/sdp"
 	"github.com/yangjiechina/avformat/utils"
-	"github.com/yangjiechina/live-server/stream"
+	"github.com/yangjiechina/lkm/stream"
 	"net"
 	"strconv"
 )

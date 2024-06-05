@@ -4,7 +4,7 @@ import (
 	"github.com/yangjiechina/avformat/libflv"
 	"github.com/yangjiechina/avformat/librtmp"
 	"github.com/yangjiechina/avformat/utils"
-	"github.com/yangjiechina/live-server/stream"
+	"github.com/yangjiechina/lkm/stream"
 )
 
 type TransStream struct {

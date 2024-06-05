@@ -1,7 +1,7 @@
 package rtmp
 
 import (
-	"github.com/yangjiechina/live-server/log"
+	"github.com/yangjiechina/lkm/log"
 	"net"
 
 	"github.com/yangjiechina/avformat/transport"

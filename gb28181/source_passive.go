@@ -2,7 +2,7 @@ package gb28181
 
 import (
 	"github.com/pion/rtp"
-	"github.com/yangjiechina/live-server/stream"
+	"github.com/yangjiechina/lkm/stream"
 )
 
 type PassiveSource struct {

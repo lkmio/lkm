@@ -3,7 +3,7 @@ package rtc
 import (
 	"github.com/pion/webrtc/v3"
 	"github.com/yangjiechina/avformat/utils"
-	"github.com/yangjiechina/live-server/stream"
+	"github.com/yangjiechina/lkm/stream"
 )
 
 type transStream struct {

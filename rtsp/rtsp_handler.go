@@ -3,8 +3,8 @@ package rtsp
 import (
 	"fmt"
 	"github.com/yangjiechina/avformat/utils"
-	"github.com/yangjiechina/live-server/log"
-	"github.com/yangjiechina/live-server/stream"
+	"github.com/yangjiechina/lkm/log"
+	"github.com/yangjiechina/lkm/stream"
 	"net/http"
 	"net/textproto"
 	"net/url"

@@ -1,7 +1,7 @@
 package hls
 
 import (
-	"github.com/yangjiechina/live-server/stream"
+	"github.com/yangjiechina/lkm/stream"
 )
 
 type tsSink struct {

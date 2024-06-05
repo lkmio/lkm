@@ -1,4 +1,4 @@
-module github.com/yangjiechina/live-server
+module github.com/yangjiechina/lkm
 
 require github.com/yangjiechina/avformat v0.0.0
 
