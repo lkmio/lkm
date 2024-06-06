@@ -20,7 +20,7 @@ type tsContext struct {
 }
 
 type transStream struct {
-	stream.TransStreamImpl
+	stream.BaseTransStream
 	muxer   libmpeg.TSMuxer
 	context *tsContext
 
@@ -33,7 +33,7 @@ type transStream struct {
 	playlistLength int    //最大切片文件个数
 	m3u8File       *os.File
 
-	m3u8Sinks map[stream.SinkId]stream.ISink
+	m3u8Sinks map[stream.SinkId]stream.Sink
 }
 
 // NewTransStream 创建HLS传输流
@@ -43,7 +43,7 @@ type transStream struct {
 // @parentDir	保存切片的绝对路径. mu38和ts切片放在同一目录下, 目录地址使用parentDir+urlPrefix
 // @segmentDuration 单个切片时长
 // @playlistLength 缓存多少个切片
-func NewTransStream(url, m3u8Name, tsFormat, dir string, segmentDuration, playlistLength int) (stream.ITransStream, error) {
+func NewTransStream(url, m3u8Name, tsFormat, dir string, segmentDuration, playlistLength int) (stream.TransStream, error) {
 	//创建文件夹
 	if err := os.MkdirAll(dir, 0666); err != nil {
 		return nil, err
@@ -80,11 +80,11 @@ func NewTransStream(url, m3u8Name, tsFormat, dir string, segmentDuration, playli
 	stream_.m3u8 = NewM3U8Writer(playlistLength)
 	stream_.m3u8File = file
 
-	stream_.m3u8Sinks = make(map[stream.SinkId]stream.ISink, 24)
+	stream_.m3u8Sinks = make(map[stream.SinkId]stream.Sink, 24)
 	return stream_, nil
 }
 
-func TransStreamFactory(source stream.ISource, protocol stream.Protocol, streams []utils.AVStream) (stream.ITransStream, error) {
+func TransStreamFactory(source stream.Source, protocol stream.Protocol, streams []utils.AVStream) (stream.TransStream, error) {
 	id := source.Id()
 	return NewTransStream("", stream.AppConfig.Hls.M3U8Format(id), stream.AppConfig.Hls.TSFormat(id, "%d"), stream.AppConfig.Hls.Dir, stream.AppConfig.Hls.Duration, stream.AppConfig.Hls.PlaylistLength)
 }
@@ -115,14 +115,14 @@ func (t *transStream) Input(packet utils.AVPacket) error {
 	pts := packet.ConvertPts(90000)
 	dts := packet.ConvertDts(90000)
 	if utils.AVMediaTypeVideo == packet.MediaType() {
-		return t.muxer.Input(packet.Index(), packet.AnnexBPacketData(t.TransStreamImpl.Tracks[packet.Index()]), pts, dts, packet.KeyFrame())
+		return t.muxer.Input(packet.Index(), packet.AnnexBPacketData(t.BaseTransStream.Tracks[packet.Index()]), pts, dts, packet.KeyFrame())
 	} else {
 		return t.muxer.Input(packet.Index(), packet.Data(), pts, dts, packet.KeyFrame())
 	}
 }
 
 func (t *transStream) AddTrack(stream utils.AVStream) error {
-	err := t.TransStreamImpl.AddTrack(stream)
+	err := t.BaseTransStream.AddTrack(stream)
 	if err != nil {
 		return err
 	}
@@ -142,7 +142,7 @@ func (t *transStream) WriteHeader() error {
 	return t.createSegment()
 }
 
-func (t *transStream) AddSink(sink stream.ISink) error {
+func (t *transStream) AddSink(sink stream.Sink) error {
 	if sink_, ok := sink.(*m3u8Sink); ok {
 		if t.m3u8.Size() > 0 {
 			return sink.Input([]byte(t.m3u8.ToString()))
@@ -152,7 +152,7 @@ func (t *transStream) AddSink(sink stream.ISink) error {
 		}
 	}
 
-	return t.TransStreamImpl.AddSink(sink)
+	return t.BaseTransStream.AddSink(sink)
 }
 
 func (t *transStream) onTSWrite(data []byte) {
@@ -206,7 +206,7 @@ func (t *transStream) flushSegment() error {
 		for _, sink := range t.m3u8Sinks {
 			sink.Input([]byte(m3u8Txt))
 		}
-		t.m3u8Sinks = make(map[stream.SinkId]stream.ISink, 0)
+		t.m3u8Sinks = make(map[stream.SinkId]stream.Sink, 0)
 	}
 	return nil
 }

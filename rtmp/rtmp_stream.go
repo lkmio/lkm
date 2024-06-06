@@ -8,7 +8,7 @@ import (
 )
 
 type TransStream struct {
-	stream.TransStreamImpl
+	stream.BaseTransStream
 
 	chunkSize int
 
@@ -22,7 +22,7 @@ type TransStream struct {
 }
 
 func (t *TransStream) Input(packet utils.AVPacket) error {
-	utils.Assert(t.TransStreamImpl.Completed)
+	utils.Assert(t.BaseTransStream.Completed)
 
 	var data []byte
 	var chunk *librtmp.Chunk
@@ -96,10 +96,10 @@ func (t *TransStream) Input(packet utils.AVPacket) error {
 	return nil
 }
 
-func (t *TransStream) AddSink(sink stream.ISink) error {
+func (t *TransStream) AddSink(sink stream.Sink) error {
 	utils.Assert(t.headerSize > 0)
 
-	t.TransStreamImpl.AddSink(sink)
+	t.BaseTransStream.AddSink(sink)
 	//发送sequence header
 	sink.Input(t.header[:t.headerSize])
 
@@ -115,7 +115,7 @@ func (t *TransStream) AddSink(sink stream.ISink) error {
 
 func (t *TransStream) WriteHeader() error {
 	utils.Assert(t.Tracks != nil)
-	utils.Assert(!t.TransStreamImpl.Completed)
+	utils.Assert(!t.BaseTransStream.Completed)
 
 	t.Init()
 
@@ -139,7 +139,7 @@ func (t *TransStream) WriteHeader() error {
 	utils.Assert(audioStream != nil || videoStream != nil)
 
 	//初始化
-	t.TransStreamImpl.Completed = true
+	t.BaseTransStream.Completed = true
 	t.header = make([]byte, 1024)
 	t.muxer = libflv.NewMuxer()
 	if utils.AVCodecIdNONE != audioCodecId {
@@ -190,10 +190,10 @@ func (t *TransStream) Close() error {
 	return nil
 }
 
-func NewTransStream(chunkSize int) stream.ITransStream {
+func NewTransStream(chunkSize int) stream.TransStream {
 	return &TransStream{chunkSize: chunkSize}
 }
 
-func TransStreamFactory(source stream.ISource, protocol stream.Protocol, streams []utils.AVStream) (stream.ITransStream, error) {
+func TransStreamFactory(source stream.Source, protocol stream.Protocol, streams []utils.AVStream) (stream.TransStream, error) {
 	return NewTransStream(librtmp.ChunkSize), nil
 }

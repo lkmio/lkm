@@ -14,10 +14,10 @@ type Filter interface {
 	ParseRtpPacket(conn net.Conn, data []byte) (*rtp.Packet, error)
 }
 
-type FilterImpl struct {
+type BaseFilter struct {
 }
 
-func (r FilterImpl) ParseRtpPacket(conn net.Conn, data []byte) (*rtp.Packet, error) {
+func (r BaseFilter) ParseRtpPacket(conn net.Conn, data []byte) (*rtp.Packet, error) {
 	packet := rtp.Packet{}
 	err := packet.Unmarshal(data)
 

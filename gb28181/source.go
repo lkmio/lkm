@@ -14,12 +14,12 @@ import (
 	"net"
 )
 
-type Transport int
+type TransportType int
 
 const (
-	TransportUDP        = Transport(0)
-	TransportTCPPassive = Transport(1)
-	TransportTCPActive  = Transport(2)
+	TransportTypeUDP        = TransportType(0)
+	TransportTypeTCPPassive = TransportType(1)
+	TransportTypeTCPActive  = TransportType(2)
 
 	PsProbeBufferSize = 1024 * 1024 * 2
 	JitterBufferSize  = 1024 * 1024
@@ -32,19 +32,19 @@ var (
 )
 
 type GBSource interface {
-	stream.ISource
+	stream.Source
 
 	InputRtp(pkt *rtp.Packet) error
 
-	Transport() Transport
+	TransportType() TransportType
 
 	PrepareTransDeMuxer(id string, ssrc uint32)
 }
 
-// GBSourceImpl GB28181推流Source
+// BaseGBSource GB28181推流Source
 // 负责解析生成AVStream和AVPacket, 后续全权交给父类Source处理.
-type GBSourceImpl struct {
-	stream.SourceImpl
+type BaseGBSource struct {
+	stream.PublishSource
 
 	deMuxerCtx *libmpeg.PSDeMuxerContext
 
@@ -148,15 +148,15 @@ func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, uint1
 	return source, port, err
 }
 
-func (source *GBSourceImpl) InputRtp(pkt *rtp.Packet) error {
+func (source *BaseGBSource) InputRtp(pkt *rtp.Packet) error {
 	panic("implement me")
 }
 
-func (source *GBSourceImpl) Transport() Transport {
+func (source *BaseGBSource) Transport() TransportType {
 	panic("implement me")
 }
 
-func (source *GBSourceImpl) PrepareTransDeMuxer(id string, ssrc uint32) {
+func (source *BaseGBSource) PrepareTransDeMuxer(id string, ssrc uint32) {
 	source.Id_ = id
 	source.ssrc = ssrc
 	source.deMuxerCtx = libmpeg.NewPSDeMuxerContext(make([]byte, PsProbeBufferSize))
@@ -164,12 +164,12 @@ func (source *GBSourceImpl) PrepareTransDeMuxer(id string, ssrc uint32) {
 }
 
 // Input 输入PS流
-func (source *GBSourceImpl) Input(data []byte) error {
+func (source *BaseGBSource) Input(data []byte) error {
 	return source.deMuxerCtx.Input(data)
 }
 
 // OnPartPacket 部分es流回调
-func (source *GBSourceImpl) OnPartPacket(index int, mediaType utils.AVMediaType, codec utils.AVCodecID, data []byte, first bool) {
+func (source *BaseGBSource) OnPartPacket(index int, mediaType utils.AVMediaType, codec utils.AVCodecID, data []byte, first bool) {
 	buffer := source.FindOrCreatePacketBuffer(index, mediaType)
 
 	//第一个es包, 标记内存起始位置
@@ -181,7 +181,7 @@ func (source *GBSourceImpl) OnPartPacket(index int, mediaType utils.AVMediaType,
 }
 
 // OnLossPacket 非完整es包丢弃回调, 直接释放内存块
-func (source *GBSourceImpl) OnLossPacket(index int, mediaType utils.AVMediaType, codec utils.AVCodecID) {
+func (source *BaseGBSource) OnLossPacket(index int, mediaType utils.AVMediaType, codec utils.AVCodecID) {
 	buffer := source.FindOrCreatePacketBuffer(index, mediaType)
 
 	buffer.Fetch()
@@ -189,7 +189,7 @@ func (source *GBSourceImpl) OnLossPacket(index int, mediaType utils.AVMediaType,
 }
 
 // OnCompletePacket 完整帧回调
-func (source *GBSourceImpl) OnCompletePacket(index int, mediaType utils.AVMediaType, codec utils.AVCodecID, dts int64, pts int64, key bool) error {
+func (source *BaseGBSource) OnCompletePacket(index int, mediaType utils.AVMediaType, codec utils.AVCodecID, dts int64, pts int64, key bool) error {
 	buffer := source.FindOrCreatePacketBuffer(index, mediaType)
 
 	data := buffer.Fetch()
@@ -302,11 +302,11 @@ func (source *GBSourceImpl) OnCompletePacket(index int, mediaType utils.AVMediaT
 	return nil
 }
 
-func (source *GBSourceImpl) Close() {
+func (source *BaseGBSource) Close() {
 	if source.transport != nil {
 		source.transport.Close()
 		source.transport = nil
 	}
 
-	source.SourceImpl.Close()
+	source.PublishSource.Close()
 }

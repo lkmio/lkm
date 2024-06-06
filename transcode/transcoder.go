@@ -1,4 +1,4 @@
 package transcode
 
-type ITranscoder interface {
+type Transcoder interface {
 }

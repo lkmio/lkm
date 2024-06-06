@@ -5,6 +5,6 @@ import (
 	"net"
 )
 
-func NewFLVSink(id stream.SinkId, sourceId string, conn net.Conn) stream.ISink {
-	return &stream.SinkImpl{Id_: id, SourceId_: sourceId, Protocol_: stream.ProtocolFlv, Conn: conn}
+func NewFLVSink(id stream.SinkId, sourceId string, conn net.Conn) stream.Sink {
+	return &stream.BaseSink{Id_: id, SourceId_: sourceId, Protocol_: stream.ProtocolFlv, Conn: conn}
 }

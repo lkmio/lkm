@@ -31,7 +31,7 @@ const (
 )
 
 type Session struct {
-	stream.SourceImpl
+	stream.PublishSource
 
 	phone   string
 	decoder *transport.DelimiterFrameDecoder

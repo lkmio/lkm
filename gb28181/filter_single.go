@@ -5,7 +5,7 @@ import (
 )
 
 type SingleFilter struct {
-	FilterImpl
+	BaseFilter
 
 	source GBSource
 }

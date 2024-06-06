@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func CreateTransStream(source stream.ISource, protocol stream.Protocol, streams []utils.AVStream) stream.ITransStream {
+func CreateTransStream(source stream.Source, protocol stream.Protocol, streams []utils.AVStream) stream.TransStream {
 	if stream.ProtocolRtmp == protocol {
 		return NewTransStream(librtmp.ChunkSize)
 	}
@@ -23,7 +23,7 @@ func init() {
 func TestServer(t *testing.T) {
 	stream.AppConfig.GOPCache = true
 	stream.AppConfig.MergeWriteLatency = 350
-	impl := serverImpl{}
+	impl := server{}
 	addr := "0.0.0.0:1935"
 	tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {

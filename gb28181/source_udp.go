@@ -8,7 +8,7 @@ import (
 )
 
 type UDPSource struct {
-	GBSourceImpl
+	BaseGBSource
 
 	rtpDeMuxer *jitterbuffer.JitterBuffer
 
@@ -22,8 +22,8 @@ func NewUDPSource() *UDPSource {
 	}
 }
 
-func (u UDPSource) Transport() Transport {
-	return TransportUDP
+func (u UDPSource) TransportType() TransportType {
+	return TransportTypeUDP
 }
 
 func (u UDPSource) InputRtp(pkt *rtp.Packet) error {
@@ -45,6 +45,6 @@ func (u UDPSource) InputRtp(pkt *rtp.Packet) error {
 
 		u.rtpBuffer.FreeHead()
 
-		u.SourceImpl.AddEvent(stream.SourceEventInput, pkt.Payload)
+		u.PublishSource.AddEvent(stream.SourceEventInput, pkt.Payload)
 	}
 }

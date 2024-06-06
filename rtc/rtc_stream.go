@@ -7,16 +7,16 @@ import (
 )
 
 type transStream struct {
-	stream.TransStreamImpl
+	stream.BaseTransStream
 }
 
-func NewTransStream() stream.ITransStream {
+func NewTransStream() stream.TransStream {
 	t := &transStream{}
 	t.Init()
 	return t
 }
 
-func TransStreamFactory(source stream.ISource, protocol stream.Protocol, streams []utils.AVStream) (stream.ITransStream, error) {
+func TransStreamFactory(source stream.Source, protocol stream.Protocol, streams []utils.AVStream) (stream.TransStream, error) {
 	return NewTransStream(), nil
 }
 
@@ -32,18 +32,18 @@ func (t *transStream) Input(packet utils.AVPacket) error {
 			}
 
 			if packet.KeyFrame() {
-				extra := t.TransStreamImpl.Tracks[packet.Index()].CodecParameters().DecoderConfRecord().ToAnnexB()
+				extra := t.BaseTransStream.Tracks[packet.Index()].CodecParameters().DecoderConfRecord().ToAnnexB()
 				sink_.input(packet.Index(), extra, 0)
 			}
 
-			sink_.input(packet.Index(), packet.AnnexBPacketData(t.TransStreamImpl.Tracks[packet.Index()]), uint32(packet.Duration(1000)))
+			sink_.input(packet.Index(), packet.AnnexBPacketData(t.BaseTransStream.Tracks[packet.Index()]), uint32(packet.Duration(1000)))
 		}
 	}
 
 	return nil
 }
 
-func (t *transStream) AddSink(sink_ stream.ISink) error {
+func (t *transStream) AddSink(sink_ stream.Sink) error {
 	//创建PeerConnection
 	var videoTrack *webrtc.TrackLocalStaticSample
 	rtcSink := sink_.(*sink)
@@ -97,7 +97,7 @@ func (t *transStream) AddSink(sink_ stream.ISink) error {
 
 	rtcSink.peer = connection
 	rtcSink.SendHeader([]byte(connection.LocalDescription().SDP))
-	return t.TransStreamImpl.AddSink(sink_)
+	return t.BaseTransStream.AddSink(sink_)
 }
 
 func (t *transStream) WriteHeader() error {

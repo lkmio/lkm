@@ -5,11 +5,11 @@ import (
 )
 
 type tsSink struct {
-	stream.SinkImpl
+	stream.BaseSink
 }
 
-func NewTSSink(id stream.SinkId, sourceId string) stream.ISink {
-	return &tsSink{stream.SinkImpl{Id_: id, SourceId_: sourceId, Protocol_: stream.ProtocolHls}}
+func NewTSSink(id stream.SinkId, sourceId string) stream.Sink {
+	return &tsSink{stream.BaseSink{Id_: id, SourceId_: sourceId, Protocol_: stream.ProtocolHls}}
 }
 
 func (s *tsSink) Input(data []byte) error {
@@ -17,7 +17,7 @@ func (s *tsSink) Input(data []byte) error {
 }
 
 type m3u8Sink struct {
-	stream.SinkImpl
+	stream.BaseSink
 	cb func(m3u8 []byte)
 }
 
@@ -26,6 +26,6 @@ func (s *m3u8Sink) Input(data []byte) error {
 	return nil
 }
 
-func NewM3U8Sink(id stream.SinkId, sourceId string, cb func(m3u8 []byte)) stream.ISink {
-	return &m3u8Sink{stream.SinkImpl{Id_: id, SourceId_: sourceId, Protocol_: stream.ProtocolHls}, cb}
+func NewM3U8Sink(id stream.SinkId, sourceId string, cb func(m3u8 []byte)) stream.Sink {
+	return &m3u8Sink{stream.BaseSink{Id_: id, SourceId_: sourceId, Protocol_: stream.ProtocolHls}, cb}
 }

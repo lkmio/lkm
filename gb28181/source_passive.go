@@ -6,18 +6,18 @@ import (
 )
 
 type PassiveSource struct {
-	GBSourceImpl
+	BaseGBSource
 }
 
 func NewPassiveSource() *PassiveSource {
 	return &PassiveSource{}
 }
 
-func (t PassiveSource) Transport() Transport {
-	return TransportTCPPassive
+func (t PassiveSource) TransportType() TransportType {
+	return TransportTypeTCPPassive
 }
 
 func (t PassiveSource) InputRtp(pkt *rtp.Packet) error {
-	t.SourceImpl.AddEvent(stream.SourceEventInput, pkt.Payload)
+	t.PublishSource.AddEvent(stream.SourceEventInput, pkt.Payload)
 	return nil
 }

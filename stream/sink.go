@@ -10,7 +10,7 @@ import (
 
 type SinkId interface{}
 
-type ISink interface {
+type Sink interface {
 	Id() SinkId
 
 	Input(data []byte) error
@@ -75,8 +75,8 @@ func GenerateSinkId(addr net.Addr) SinkId {
 	return addr.String()
 }
 
-type SinkImpl struct {
-	hookSessionImpl
+type BaseSink struct {
+	hookSession
 
 	Id_            SinkId
 	SourceId_      string
@@ -97,11 +97,11 @@ type SinkImpl struct {
 	Conn net.Conn
 }
 
-func (s *SinkImpl) Id() SinkId {
+func (s *BaseSink) Id() SinkId {
 	return s.Id_
 }
 
-func (s *SinkImpl) Input(data []byte) error {
+func (s *BaseSink) Input(data []byte) error {
 	if s.Conn != nil {
 		_, err := s.Conn.Write(data)
 
@@ -111,59 +111,59 @@ func (s *SinkImpl) Input(data []byte) error {
 	return nil
 }
 
-func (s *SinkImpl) SendHeader(data []byte) error {
+func (s *BaseSink) SendHeader(data []byte) error {
 	return s.Input(data)
 }
 
-func (s *SinkImpl) SourceId() string {
+func (s *BaseSink) SourceId() string {
 	return s.SourceId_
 }
 
-func (s *SinkImpl) TransStreamId() TransStreamId {
+func (s *BaseSink) TransStreamId() TransStreamId {
 	return s.TransStreamId_
 }
 
-func (s *SinkImpl) SetTransStreamId(id TransStreamId) {
+func (s *BaseSink) SetTransStreamId(id TransStreamId) {
 	s.TransStreamId_ = id
 }
 
-func (s *SinkImpl) Protocol() Protocol {
+func (s *BaseSink) Protocol() Protocol {
 	return s.Protocol_
 }
 
-func (s *SinkImpl) Lock() {
+func (s *BaseSink) Lock() {
 	s.lock.Lock()
 }
 
-func (s *SinkImpl) UnLock() {
+func (s *BaseSink) UnLock() {
 	s.lock.Unlock()
 }
 
-func (s *SinkImpl) State() SessionState {
+func (s *BaseSink) State() SessionState {
 	utils.Assert(!s.lock.TryLock())
 
 	return s.State_
 }
 
-func (s *SinkImpl) SetState(state SessionState) {
+func (s *BaseSink) SetState(state SessionState) {
 	utils.Assert(!s.lock.TryLock())
 
 	s.State_ = state
 }
 
-func (s *SinkImpl) EnableVideo() bool {
+func (s *BaseSink) EnableVideo() bool {
 	return !s.disableVideo
 }
 
-func (s *SinkImpl) SetEnableVideo(enable bool) {
+func (s *BaseSink) SetEnableVideo(enable bool) {
 	s.disableVideo = !enable
 }
 
-func (s *SinkImpl) DesiredAudioCodecId() utils.AVCodecID {
+func (s *BaseSink) DesiredAudioCodecId() utils.AVCodecID {
 	return s.DesiredAudioCodecId_
 }
 
-func (s *SinkImpl) DesiredVideoCodecId() utils.AVCodecID {
+func (s *BaseSink) DesiredVideoCodecId() utils.AVCodecID {
 	return s.DesiredVideoCodecId_
 }
 
@@ -173,7 +173,7 @@ func (s *SinkImpl) DesiredVideoCodecId() utils.AVCodecID {
 // 什么时候调用Close? 是否考虑线程安全?
 // 拉流断开连接,不需要考虑线程安全
 // 踢流走source管道删除,并且关闭Conn
-func (s *SinkImpl) Close() {
+func (s *BaseSink) Close() {
 	utils.Assert(SessionStateClose != s.State_)
 
 	if s.Conn != nil {
@@ -206,6 +206,6 @@ func (s *SinkImpl) Close() {
 	}
 }
 
-func (s *SinkImpl) PrintInfo() string {
+func (s *BaseSink) PrintInfo() string {
 	return fmt.Sprintf("%s-%v source:%s", s.Protocol().ToString(), s.Id_, s.SourceId_)
 }

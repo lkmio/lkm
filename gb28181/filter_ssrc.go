@@ -5,7 +5,7 @@ import (
 )
 
 type SSRCFilter struct {
-	FilterImpl
+	BaseFilter
 
 	sources map[uint32]GBSource
 }

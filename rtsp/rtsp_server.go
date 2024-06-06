@@ -7,39 +7,39 @@ import (
 	"net"
 )
 
-type IServer interface {
+type Server interface {
 	Start(addr net.Addr) error
 
 	Close()
 }
 
-func NewServer(password string) IServer {
-	return &serverImpl{
+func NewServer(password string) Server {
+	return &server{
 		handler: newHandler(password),
 	}
 }
 
-type serverImpl struct {
+type server struct {
 	tcp     *transport.TCPServer
 	handler *handler
 }
 
-func (s *serverImpl) Start(addr net.Addr) error {
+func (s *server) Start(addr net.Addr) error {
 	utils.Assert(s.tcp == nil)
 
 	//监听TCP端口
-	server := &transport.TCPServer{}
-	server.SetHandler(s)
-	err := server.Bind(addr)
+	tcp := &transport.TCPServer{}
+	tcp.SetHandler(s)
+	err := tcp.Bind(addr)
 	if err != nil {
 		return err
 	}
 
-	s.tcp = server
+	s.tcp = tcp
 	return nil
 }
 
-func (s *serverImpl) closeSession(conn net.Conn) {
+func (s *server) closeSession(conn net.Conn) {
 	t := conn.(*transport.Conn)
 	if t.Data != nil {
 		t.Data.(*session).close()
@@ -47,18 +47,18 @@ func (s *serverImpl) closeSession(conn net.Conn) {
 	}
 }
 
-func (s *serverImpl) Close() {
+func (s *server) Close() {
 
 }
 
-func (s *serverImpl) OnConnected(conn net.Conn) {
+func (s *server) OnConnected(conn net.Conn) {
 	log.Sugar.Debugf("rtsp连接 conn:%s", conn.RemoteAddr().String())
 
 	t := conn.(*transport.Conn)
 	t.Data = NewSession(conn)
 }
 
-func (s *serverImpl) OnPacket(conn net.Conn, data []byte) {
+func (s *server) OnPacket(conn net.Conn, data []byte) {
 	t := conn.(*transport.Conn)
 
 	method, url, header, err := parseMessage(data)
@@ -75,7 +75,7 @@ func (s *serverImpl) OnPacket(conn net.Conn, data []byte) {
 	}
 }
 
-func (s *serverImpl) OnDisConnected(conn net.Conn, err error) {
+func (s *server) OnDisConnected(conn net.Conn, err error) {
 	log.Sugar.Debugf("rtsp断开连接 conn:%s", conn.RemoteAddr().String())
 
 	s.closeSession(conn)

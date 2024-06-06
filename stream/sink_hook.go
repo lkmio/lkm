@@ -6,7 +6,7 @@ import (
 	"net/http"
 )
 
-func HookPlaying(s ISink, success func(), failure func(state utils.HookState)) {
+func HookPlaying(s Sink, success func(), failure func(state utils.HookState)) {
 	f := func() {
 		source := SourceManager.Find(s.SourceId())
 		if source == nil {
@@ -63,7 +63,7 @@ func HookPlaying(s ISink, success func(), failure func(state utils.HookState)) {
 	}
 }
 
-func HookPlayingDone(s ISink, success func(), failure func(state utils.HookState)) {
+func HookPlayingDone(s Sink, success func(), failure func(state utils.HookState)) {
 	if !AppConfig.Hook.EnableOnPlayDone() {
 		if success != nil {
 			success()

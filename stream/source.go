@@ -52,8 +52,8 @@ const (
 	SessionStateClose            = SessionState(7) //关闭状态
 )
 
-// ISource 父类Source负责, 除解析流以外的所有事情
-type ISource interface {
+// Source 父类Source负责, 除解析流以外的所有事情
+type Source interface {
 	// Id Source的唯一ID/**
 	Id() string
 
@@ -72,10 +72,10 @@ type ISource interface {
 
 	// AddSink 添加Sink, 在此之前请确保Sink已经握手、授权通过. 如果Source还未WriteHeader，先将Sink添加到等待队列.
 	// 匹配拉流的编码器, 创建TransStream或向存在TransStream添加Sink
-	AddSink(sink ISink) bool
+	AddSink(sink Sink) bool
 
 	// RemoveSink 删除Sink/**
-	RemoveSink(sink ISink) bool
+	RemoveSink(sink Sink) bool
 
 	AddEvent(event SourceEvent, data interface{})
 
@@ -112,23 +112,23 @@ type ISource interface {
 	Init(input func(data []byte) error)
 }
 
-type SourceImpl struct {
-	hookSessionImpl
+type PublishSource struct {
+	hookSession
 
 	Id_   string
 	Type_ SourceType
 	state SessionState
 	Conn  net.Conn
 
-	TransDeMuxer     stream.DeMuxer          //负责从推流协议中解析出AVStream和AVPacket
-	recordSink       ISink                   //每个Source的录制流
-	hlsStream        ITransStream            //如果开开启HLS传输流, 不等拉流时, 创建直接生成
-	audioTranscoders []transcode.ITranscoder //音频解码器
-	videoTranscoders []transcode.ITranscoder //视频解码器
-	originStreams    StreamManager           //推流的音视频Streams
-	allStreams       StreamManager           //推流Streams+转码器获得的Stream
-	pktBuffers       [8]MemoryPool           //推流每路的AVPacket缓存, AVPacket的data从该内存池中分配. 在GOP缓存溢出时,释放池中内存.
-	gopBuffer        GOPBuffer               //GOP缓存, 音频和视频混合使用, 以视频关键帧为界, 缓存第二个视频关键帧时, 释放前一组gop. 如果不存在视频流, 不缓存音频
+	TransDeMuxer     stream.DeMuxer         //负责从推流协议中解析出AVStream和AVPacket
+	recordSink       Sink                   //每个Source的录制流
+	hlsStream        TransStream            //如果开开启HLS传输流, 不等拉流时, 创建直接生成
+	audioTranscoders []transcode.Transcoder //音频解码器
+	videoTranscoders []transcode.Transcoder //视频解码器
+	originStreams    StreamManager          //推流的音视频Streams
+	allStreams       StreamManager          //推流Streams+转码器获得的Stream
+	pktBuffers       [8]MemoryPool          //推流每路的AVPacket缓存, AVPacket的data从该内存池中分配. 在GOP缓存溢出时,释放池中内存.
+	gopBuffer        GOPBuffer              //GOP缓存, 音频和视频混合使用, 以视频关键帧为界, 缓存第二个视频关键帧时, 释放前一组gop. 如果不存在视频流, 不缓存音频
 
 	existVideo bool //是否存在视频
 	completed  bool
@@ -137,23 +137,23 @@ type SourceImpl struct {
 	Input_ func(data []byte) error //解决多态无法传递给子类的问题
 
 	//所有的输出协议, 持有Sink
-	transStreams map[TransStreamId]ITransStream
+	transStreams map[TransStreamId]TransStream
 
 	//sink的拉流和断开拉流事件，都通过管道交给Source处理. 意味着Source内部解析流、封装流、传输流都可以做到无锁操作
 	//golang的管道是有锁的(https://github.com/golang/go/blob/d38f1d13fa413436d38d86fe86d6a146be44bb84/src/runtime/chan.go#L202), 后面使用cas队列传输事件, 并且可以做到一次读取多个事件
 	inputEvent            chan []byte
 	responseEvent         chan byte //解析完input的数据后，才能继续从网络io中读取流
 	closeEvent            chan byte
-	playingEventQueue     chan ISink
-	playingDoneEventQueue chan ISink
+	playingEventQueue     chan Sink
+	playingDoneEventQueue chan Sink
 	probeTimoutEvent      chan bool
 }
 
-func (s *SourceImpl) Id() string {
+func (s *PublishSource) Id() string {
 	return s.Id_
 }
 
-func (s *SourceImpl) Init(input func(data []byte) error) {
+func (s *PublishSource) Init(input func(data []byte) error) {
 	s.Input_ = input
 
 	//初始化事件接收缓冲区
@@ -163,12 +163,12 @@ func (s *SourceImpl) Init(input func(data []byte) error) {
 	s.inputEvent = make(chan []byte)
 	s.responseEvent = make(chan byte)
 	s.closeEvent = make(chan byte)
-	s.playingEventQueue = make(chan ISink, 128)
-	s.playingDoneEventQueue = make(chan ISink, 128)
+	s.playingEventQueue = make(chan Sink, 128)
+	s.playingDoneEventQueue = make(chan Sink, 128)
 	s.probeTimoutEvent = make(chan bool)
 
 	if s.transStreams == nil {
-		s.transStreams = make(map[TransStreamId]ITransStream, 10)
+		s.transStreams = make(map[TransStreamId]TransStream, 10)
 	}
 
 	//创建录制流
@@ -189,7 +189,7 @@ func (s *SourceImpl) Init(input func(data []byte) error) {
 }
 
 // FindOrCreatePacketBuffer 查找或者创建AVPacket的内存池
-func (s *SourceImpl) FindOrCreatePacketBuffer(index int, mediaType utils.AVMediaType) MemoryPool {
+func (s *PublishSource) FindOrCreatePacketBuffer(index int, mediaType utils.AVMediaType) MemoryPool {
 	if index >= cap(s.pktBuffers) {
 		panic("流路数过多...")
 	}
@@ -211,7 +211,7 @@ func (s *SourceImpl) FindOrCreatePacketBuffer(index int, mediaType utils.AVMedia
 	return s.pktBuffers[index]
 }
 
-func (s *SourceImpl) LoopEvent() {
+func (s *PublishSource) LoopEvent() {
 	for {
 		select {
 		case data := <-s.inputEvent:
@@ -244,15 +244,15 @@ func (s *SourceImpl) LoopEvent() {
 	}
 }
 
-func (s *SourceImpl) Input(data []byte) error {
+func (s *PublishSource) Input(data []byte) error {
 	return nil
 }
 
-func (s *SourceImpl) OriginStreams() []utils.AVStream {
+func (s *PublishSource) OriginStreams() []utils.AVStream {
 	return s.originStreams.All()
 }
 
-func (s *SourceImpl) TranscodeStreams() []utils.AVStream {
+func (s *PublishSource) TranscodeStreams() []utils.AVStream {
 	return s.allStreams.All()
 }
 
@@ -264,7 +264,7 @@ func IsSupportMux(protocol Protocol, audioCodecId, videoCodecId utils.AVCodecID)
 	return true
 }
 
-func (s *SourceImpl) AddSink(sink ISink) bool {
+func (s *PublishSource) AddSink(sink Sink) bool {
 	// 暂时不考虑多路视频流，意味着只能1路视频流和多路音频流，同理originStreams和allStreams里面的Stream互斥. 同时多路音频流的Codec必须一致
 	audioCodecId, videoCodecId := sink.DesiredAudioCodecId(), sink.DesiredVideoCodecId()
 	audioStream := s.originStreams.FindStreamWithType(utils.AVMediaTypeAudio)
@@ -315,7 +315,7 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 	transStream, ok := s.transStreams[transStreamId]
 	if !ok {
 		if s.transStreams == nil {
-			s.transStreams = make(map[TransStreamId]ITransStream, 10)
+			s.transStreams = make(map[TransStreamId]TransStream, 10)
 		}
 		//创建一个新的传输流
 		log.Sugar.Debugf("创建%s-stream", sink.Protocol().ToString())
@@ -360,7 +360,7 @@ func (s *SourceImpl) AddSink(sink ISink) bool {
 	return true
 }
 
-func (s *SourceImpl) RemoveSink(sink ISink) bool {
+func (s *PublishSource) RemoveSink(sink Sink) bool {
 	id := sink.TransStreamId()
 	if id > 0 {
 		transStream := s.transStreams[id]
@@ -376,24 +376,24 @@ func (s *SourceImpl) RemoveSink(sink ISink) bool {
 	return b
 }
 
-func (s *SourceImpl) AddEvent(event SourceEvent, data interface{}) {
+func (s *PublishSource) AddEvent(event SourceEvent, data interface{}) {
 	if SourceEventInput == event {
 		s.inputEvent <- data.([]byte)
 		<-s.responseEvent
 	} else if SourceEventPlay == event {
-		s.playingEventQueue <- data.(ISink)
+		s.playingEventQueue <- data.(Sink)
 	} else if SourceEventPlayDone == event {
-		s.playingDoneEventQueue <- data.(ISink)
+		s.playingDoneEventQueue <- data.(Sink)
 	} else if SourceEventClose == event {
 		s.closeEvent <- 0
 	}
 }
 
-func (s *SourceImpl) SetState(state SessionState) {
+func (s *PublishSource) SetState(state SessionState) {
 	s.state = state
 }
 
-func (s *SourceImpl) Close() {
+func (s *PublishSource) Close() {
 	//释放GOP缓存
 	if s.gopBuffer != nil {
 		s.gopBuffer.Clear()
@@ -406,7 +406,7 @@ func (s *SourceImpl) Close() {
 	for _, transStream := range s.transStreams {
 		transStream.Close()
 
-		transStream.PopAllSink(func(sink ISink) {
+		transStream.PopAllSink(func(sink Sink) {
 			sink.SetTransStreamId(0)
 			{
 				sink.Lock()
@@ -424,11 +424,11 @@ func (s *SourceImpl) Close() {
 	s.transStreams = nil
 }
 
-func (s *SourceImpl) OnDiscardPacket(packet utils.AVPacket) {
+func (s *PublishSource) OnDiscardPacket(packet utils.AVPacket) {
 	s.FindOrCreatePacketBuffer(packet.Index(), packet.MediaType()).FreeHead()
 }
 
-func (s *SourceImpl) OnDeMuxStream(stream utils.AVStream) {
+func (s *PublishSource) OnDeMuxStream(stream utils.AVStream) {
 	if s.completed {
 		log.Sugar.Warnf("添加Stream失败 Source: %s已经WriteHeader", s.Id_)
 		return
@@ -461,7 +461,7 @@ func (s *SourceImpl) OnDeMuxStream(stream utils.AVStream) {
 }
 
 // 从DeMuxer解析完Stream后, 处理等待Sinks
-func (s *SourceImpl) writeHeader() {
+func (s *PublishSource) writeHeader() {
 	if s.completed {
 		fmt.Printf("添加Stream失败 Source: %s已经WriteHeader", s.Id_)
 		return
@@ -489,15 +489,15 @@ func (s *SourceImpl) writeHeader() {
 	}
 }
 
-func (s *SourceImpl) IsCompleted() bool {
+func (s *PublishSource) IsCompleted() bool {
 	return s.completed
 }
 
-func (s *SourceImpl) OnDeMuxStreamDone() {
+func (s *PublishSource) OnDeMuxStreamDone() {
 	s.writeHeader()
 }
 
-func (s *SourceImpl) OnDeMuxPacket(packet utils.AVPacket) {
+func (s *PublishSource) OnDeMuxPacket(packet utils.AVPacket) {
 	if AppConfig.GOPCache && s.existVideo {
 		s.gopBuffer.AddPacket(packet)
 	}
@@ -513,11 +513,11 @@ func (s *SourceImpl) OnDeMuxPacket(packet utils.AVPacket) {
 	}
 }
 
-func (s *SourceImpl) OnDeMuxDone() {
+func (s *PublishSource) OnDeMuxDone() {
 
 }
 
-func (s *SourceImpl) Publish(source ISource, success func(), failure func(state utils.HookState)) {
+func (s *PublishSource) Publish(source Source, success func(), failure func(state utils.HookState)) {
 	//streamId 已经被占用
 	if source_ := SourceManager.Find(source.Id()); source_ != nil {
 		fmt.Printf("推流已经占用 Source:%s", source.Id())
@@ -553,10 +553,10 @@ func (s *SourceImpl) Publish(source ISource, success func(), failure func(state 
 	}
 }
 
-func (s *SourceImpl) PublishDone(source ISource, success func(), failure func(state utils.HookState)) {
+func (s *PublishSource) PublishDone(source Source, success func(), failure func(state utils.HookState)) {
 
 }
 
-func (s *SourceImpl) Type() SourceType {
+func (s *PublishSource) Type() SourceType {
 	return s.Type_
 }

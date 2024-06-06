@@ -253,7 +253,7 @@ func (api *ApiServer) generateSourceId(remoteAddr string) stream.SinkId {
 	return stream.GenerateSinkId(tcpAddr)
 }
 
-func (api *ApiServer) doPlay(sink stream.ISink) utils.HookState {
+func (api *ApiServer) doPlay(sink stream.Sink) utils.HookState {
 	ok := utils.HookStateOK
 	stream.HookPlaying(sink, func() {
 

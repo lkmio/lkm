@@ -21,7 +21,7 @@ const (
 // rtsp传输流封装
 // 低延迟是rtsp特性, 所以不考虑实现GOP缓存
 type tranStream struct {
-	stream.TransStreamImpl
+	stream.BaseTransStream
 	addr      net.IPAddr
 	addrType  string
 	urlFormat string
@@ -30,7 +30,7 @@ type tranStream struct {
 	sdp       string
 }
 
-func NewTransStream(addr net.IPAddr, urlFormat string) stream.ITransStream {
+func NewTransStream(addr net.IPAddr, urlFormat string) stream.TransStream {
 	t := &tranStream{
 		addr:      addr,
 		urlFormat: urlFormat,
@@ -46,7 +46,7 @@ func NewTransStream(addr net.IPAddr, urlFormat string) stream.ITransStream {
 	return t
 }
 
-func TransStreamFactory(source stream.ISource, protocol stream.Protocol, streams []utils.AVStream) (stream.ITransStream, error) {
+func TransStreamFactory(source stream.Source, protocol stream.Protocol, streams []utils.AVStream) (stream.TransStream, error) {
 	trackFormat := source.Id() + "?track=%d"
 	return NewTransStream(net.IPAddr{
 		IP:   net.ParseIP(stream.AppConfig.PublicIP),
@@ -130,7 +130,7 @@ func (t *tranStream) Input(packet utils.AVPacket) error {
 			}
 
 			stream_.cache = true
-			parameters := t.TransStreamImpl.Tracks[packet.Index()].CodecParameters()
+			parameters := t.BaseTransStream.Tracks[packet.Index()].CodecParameters()
 
 			if utils.AVCodecIdH265 == packet.CodecId() {
 				bytes := parameters.DecoderConfRecord().(*libhevc.HEVCDecoderConfRecord).VPS
@@ -145,24 +145,24 @@ func (t *tranStream) Input(packet utils.AVPacket) error {
 			stream_.extraDataBuffer = stream_.tmpExtraDataBuffer
 		}
 
-		data := libavc.RemoveStartCode(packet.AnnexBPacketData(t.TransStreamImpl.Tracks[packet.Index()]))
+		data := libavc.RemoveStartCode(packet.AnnexBPacketData(t.BaseTransStream.Tracks[packet.Index()]))
 		stream_.muxer.Input(data, uint32(packet.ConvertPts(stream_.rate)))
 	}
 
 	return nil
 }
 
-func (t *tranStream) AddSink(sink_ stream.ISink) error {
-	sink_.(*sink).setSenderCount(len(t.TransStreamImpl.Tracks))
+func (t *tranStream) AddSink(sink_ stream.Sink) error {
+	sink_.(*sink).setSenderCount(len(t.BaseTransStream.Tracks))
 	if err := sink_.(*sink).SendHeader([]byte(t.sdp)); err != nil {
 		return err
 	}
 
-	return t.TransStreamImpl.AddSink(sink_)
+	return t.BaseTransStream.AddSink(sink_)
 }
 
 func (t *tranStream) AddTrack(stream utils.AVStream) error {
-	if err := t.TransStreamImpl.AddTrack(stream); err != nil {
+	if err := t.BaseTransStream.AddTrack(stream); err != nil {
 		return err
 	}
 

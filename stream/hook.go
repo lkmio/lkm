@@ -100,10 +100,10 @@ func hookEvent(event HookEvent, body interface{}, success func(response *http.Re
 	return sendHookEvent(url, body, success, failure)
 }
 
-type hookSessionImpl struct {
+type hookSession struct {
 }
 
-func (h *hookSessionImpl) send(url string, body interface{}, success func(response *http.Response), failure func(response *http.Response, err error)) error {
+func (h *hookSession) send(url string, body interface{}, success func(response *http.Response), failure func(response *http.Response, err error)) error {
 	marshal, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -130,6 +130,6 @@ func (h *hookSessionImpl) send(url string, body interface{}, success func(respon
 	return sendHookEvent(url, body, success, failure)
 }
 
-func (h *hookSessionImpl) Hook(event HookEvent, body interface{}, success func(response *http.Response), failure func(response *http.Response, err error)) error {
+func (h *hookSession) Hook(event HookEvent, body interface{}, success func(response *http.Response), failure func(response *http.Response, err error)) error {
 	return hookEvent(event, body, success, failure)
 }

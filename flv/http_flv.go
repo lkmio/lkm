@@ -28,7 +28,7 @@ func init() {
 }
 
 type httpTransStream struct {
-	stream.TransStreamImpl
+	stream.BaseTransStream
 
 	muxer         libflv.Muxer
 	mwBuffer      stream.MergeWritingBuffer
@@ -101,7 +101,7 @@ func (t *httpTransStream) Input(packet utils.AVPacket) error {
 }
 
 func (t *httpTransStream) AddTrack(stream utils.AVStream) error {
-	if err := t.TransStreamImpl.AddTrack(stream); err != nil {
+	if err := t.BaseTransStream.AddTrack(stream); err != nil {
 		return err
 	}
 
@@ -124,7 +124,7 @@ func (t *httpTransStream) sendUnpackedSegment(segment []byte) {
 }
 
 // 为单个sink发送flv切片, 切片已经添加分隔符
-func (t *httpTransStream) sendSegment(sink stream.ISink, data []byte) error {
+func (t *httpTransStream) sendSegment(sink stream.Sink, data []byte) error {
 	return sink.Input(data[t.computeSkipCount(data):])
 }
 
@@ -132,10 +132,10 @@ func (t *httpTransStream) computeSkipCount(data []byte) int {
 	return int(6 + binary.BigEndian.Uint16(data[4:]))
 }
 
-func (t *httpTransStream) AddSink(sink stream.ISink) error {
+func (t *httpTransStream) AddSink(sink stream.Sink) error {
 	utils.Assert(t.headerSize > 0)
 
-	t.TransStreamImpl.AddSink(sink)
+	t.BaseTransStream.AddSink(sink)
 	//发送sequence header
 	t.sendSegment(sink, t.header[:t.headerSize])
 
@@ -190,7 +190,7 @@ func (t *httpTransStream) WriteHeader() error {
 
 	t.headerSize += t.muxer.WriteHeader(t.header[HttpFlvBlockLengthSize:])
 
-	for _, track := range t.TransStreamImpl.Tracks {
+	for _, track := range t.BaseTransStream.Tracks {
 		var data []byte
 		if utils.AVMediaTypeAudio == track.Type() {
 			data = track.Extra()
@@ -223,7 +223,7 @@ func (t *httpTransStream) Close() error {
 	return nil
 }
 
-func NewHttpTransStream() stream.ITransStream {
+func NewHttpTransStream() stream.TransStream {
 	return &httpTransStream{
 		muxer:      libflv.NewMuxer(),
 		header:     make([]byte, 1024),
@@ -231,6 +231,6 @@ func NewHttpTransStream() stream.ITransStream {
 	}
 }
 
-func TransStreamFactory(source stream.ISource, protocol stream.Protocol, streams []utils.AVStream) (stream.ITransStream, error) {
+func TransStreamFactory(source stream.Source, protocol stream.Protocol, streams []utils.AVStream) (stream.TransStream, error) {
 	return NewHttpTransStream(), nil
 }

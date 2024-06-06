@@ -20,7 +20,7 @@ var (
 // 对于udp而言, 每个sink维护多个transport
 // tcp直接单端口传输
 type sink struct {
-	stream.SinkImpl
+	stream.BaseSink
 
 	senders []*librtp.RtpSender //一个rtsp源，可能存在多个流, 每个流都需要拉取
 	sdpCb   func(sdp string)    //rtsp_stream生成sdp后，使用该回调给rtsp_session, 响应describe
@@ -29,9 +29,9 @@ type sink struct {
 	playing bool //是否已经收到play请求
 }
 
-func NewSink(id stream.SinkId, sourceId string, conn net.Conn, cb func(sdp string)) stream.ISink {
+func NewSink(id stream.SinkId, sourceId string, conn net.Conn, cb func(sdp string)) stream.Sink {
 	return &sink{
-		stream.SinkImpl{Id_: id, SourceId_: sourceId, Protocol_: stream.ProtocolRtsp, Conn: conn},
+		stream.BaseSink{Id_: id, SourceId_: sourceId, Protocol_: stream.ProtocolRtsp, Conn: conn},
 		nil,
 		cb,
 		false,
@@ -157,7 +157,7 @@ func (s *sink) SendHeader(data []byte) error {
 }
 
 func (s *sink) Close() {
-	s.SinkImpl.Close()
+	s.BaseSink.Close()
 
 	for _, sender := range s.senders {
 		if sender.Rtp != nil {

@@ -5,13 +5,13 @@ import (
 )
 
 type SourceHook interface {
-	Publish(source ISource, success func(), failure func(state utils.HookState))
+	Publish(source Source, success func(), failure func(state utils.HookState))
 
-	PublishDone(source ISource, success func(), failure func(state utils.HookState))
+	PublishDone(source Source, success func(), failure func(state utils.HookState))
 }
 
 type SinkHook interface {
-	Play(sink ISink, success func(), failure func(state utils.HookState))
+	Play(sink Sink, success func(), failure func(state utils.HookState))
 
-	PlayDone(source ISink, success func(), failure func(state utils.HookState))
+	PlayDone(source Sink, success func(), failure func(state utils.HookState))
 }

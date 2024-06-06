@@ -5,25 +5,17 @@ import (
 	"sync"
 )
 
-type ISourceManager interface {
-	Add(source ISource) error
-
-	Find(id string) ISource
-
-	Remove(id string) (ISource, error)
-}
-
-var SourceManager ISourceManager
+var SourceManager *sourceManger
 
 func init() {
-	SourceManager = &sourceMangerImpl{}
+	SourceManager = &sourceManger{}
 }
 
-type sourceMangerImpl struct {
+type sourceManger struct {
 	m sync.Map
 }
 
-func (s *sourceMangerImpl) Add(source ISource) error {
+func (s *sourceManger) Add(source Source) error {
 	_, ok := s.m.LoadOrStore(source.Id(), source)
 	if ok {
 		return fmt.Errorf("the source %s has been exist", source.Id())
@@ -32,19 +24,19 @@ func (s *sourceMangerImpl) Add(source ISource) error {
 	return nil
 }
 
-func (s *sourceMangerImpl) Find(id string) ISource {
+func (s *sourceManger) Find(id string) Source {
 	value, ok := s.m.Load(id)
 	if ok {
-		return value.(ISource)
+		return value.(Source)
 	}
 
 	return nil
 }
 
-func (s *sourceMangerImpl) Remove(id string) (ISource, error) {
+func (s *sourceManger) Remove(id string) (Source, error) {
 	value, loaded := s.m.LoadAndDelete(id)
 	if loaded {
-		return value.(ISource), nil
+		return value.(Source), nil
 	}
 
 	return nil, fmt.Errorf("source with id %s was not find", id)
