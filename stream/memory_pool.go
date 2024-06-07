@@ -146,13 +146,13 @@ func (m *memoryPool) Reset() {
 
 func (m *memoryPool) FreeHead() {
 	utils.Assert(!m.marked)
-	utils.Assert(!m.blockQueue.IsEmpty())
 
-	if m.discardBlockCount > 1 {
+	if m.discardBlockCount > 0 {
 		m.discardBlockCount--
 		return
 	}
 
+	utils.Assert(!m.blockQueue.IsEmpty())
 	size := m.blockQueue.Pop().(int)
 	m.head += size
 
@@ -162,21 +162,29 @@ func (m *memoryPool) FreeHead() {
 	} else if m.head >= m.capacity {
 		m.head = 0
 	}
+
+	if m.blockQueue.IsEmpty() {
+		m.markIndex = 0
+	}
 }
 
 func (m *memoryPool) FreeTail() {
 	utils.Assert(!m.marked)
-	utils.Assert(!m.blockQueue.IsEmpty())
 
-	if m.discardBlockCount > 1 {
+	if m.discardBlockCount > 0 {
 		m.discardBlockCount--
 		return
 	}
 
+	utils.Assert(!m.blockQueue.IsEmpty())
 	size := m.blockQueue.PopBack().(int)
 	m.tail -= size
 	if m.tail == 0 && !m.blockQueue.IsEmpty() {
 		m.tail = m.capacity
+	}
+
+	if m.blockQueue.IsEmpty() {
+		m.markIndex = 0
 	}
 }
 

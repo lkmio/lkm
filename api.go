@@ -253,17 +253,6 @@ func (api *ApiServer) generateSourceId(remoteAddr string) stream.SinkId {
 	return stream.GenerateSinkId(tcpAddr)
 }
 
-func (api *ApiServer) doPlay(sink stream.Sink) utils.HookState {
-	ok := utils.HookStateOK
-	stream.HookPlaying(sink, func() {
-
-	}, func(state utils.HookState) {
-		ok = state
-	})
-
-	return ok
-}
-
 func (api *ApiServer) onFlv(sourceId string, w http.ResponseWriter, r *http.Request) {
 	ws := true
 	if !("upgrade" == strings.ToLower(r.Header.Get("Connection"))) {
@@ -291,9 +280,9 @@ func (api *ApiServer) onWSFlv(sourceId string, w http.ResponseWriter, r *http.Re
 	sink := flv.NewFLVSink(api.generateSinkId(r.RemoteAddr), sourceId, flv.NewWSConn(conn))
 	log.Sugar.Infof("ws-flv 连接 sink:%s", sink.PrintInfo())
 
-	state := api.doPlay(sink)
+	_, state := stream.PreparePlaySink(sink)
 	if utils.HookStateOK != state {
-		log.Sugar.Warnf("ws-flv 播放失败 state:%d sink:%s", state, sink.PrintInfo())
+		log.Sugar.Warnf("ws-flv 播放失败 sink:%s", sink.PrintInfo())
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
@@ -330,9 +319,9 @@ func (api *ApiServer) onHttpFLV(sourceId string, w http.ResponseWriter, r *http.
 	sink := flv.NewFLVSink(api.generateSinkId(r.RemoteAddr), sourceId, conn)
 	log.Sugar.Infof("http-flv 连接 sink:%s", sink.PrintInfo())
 
-	state := api.doPlay(sink)
+	_, state := stream.PreparePlaySink(sink)
 	if utils.HookStateOK != state {
-		log.Sugar.Warnf("http-flv 播放失败 state:%d sink:%s", state, sink.PrintInfo())
+		log.Sugar.Warnf("http-flv 播放失败 sink:%s", sink.PrintInfo())
 
 		w.WriteHeader(http.StatusForbidden)
 		return
@@ -398,9 +387,9 @@ func (api *ApiServer) onHLS(sourceId string, w http.ResponseWriter, r *http.Requ
 			done <- 0
 		})
 
-		state := api.doPlay(sink)
+		_, state := stream.PreparePlaySink(sink)
 		if utils.HookStateOK != state {
-			log.Sugar.Warnf("m3u8 请求失败 state:%d sink:%s", state, sink.PrintInfo())
+			log.Sugar.Warnf("m3u8 请求失败 sink:%s", sink.PrintInfo())
 
 			w.WriteHeader(http.StatusForbidden)
 			return
@@ -460,9 +449,9 @@ func (api *ApiServer) onRtc(sourceId string, w http.ResponseWriter, r *http.Requ
 
 	log.Sugar.Infof("rtc 请求 sink:%s sdp:%v", sink.PrintInfo(), v.SDP)
 
-	state := api.doPlay(sink)
+	_, state := stream.PreparePlaySink(sink)
 	if utils.HookStateOK != state {
-		log.Sugar.Warnf("rtc 播放失败 state:%d sink:%s", state, sink.PrintInfo())
+		log.Sugar.Warnf("rtc 播放失败 sink:%s", sink.PrintInfo())
 
 		w.WriteHeader(http.StatusForbidden)
 		group.Done()

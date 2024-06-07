@@ -12,6 +12,7 @@ import (
 	"github.com/yangjiechina/lkm/log"
 	"github.com/yangjiechina/lkm/stream"
 	"net"
+	"net/http"
 )
 
 type TransportType int
@@ -137,10 +138,9 @@ func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, uint1
 	}
 
 	source.PrepareTransDeMuxer(id, ssrc)
-
-	if err = stream.SourceManager.Add(source); err != nil {
-		source.Close()
-		return nil, 0, err
+	_, state := stream.PreparePublishSource(source, false)
+	if http.StatusOK != state {
+		return nil, 0, fmt.Errorf("error code %d", state)
 	}
 
 	source.Init(source.Input)

@@ -38,17 +38,18 @@ func (s *Session) OnPublish(app, stream_ string, response chan utils.HookState) 
 	s.stack.SetOnPublishHandler(source)
 
 	//推流事件Source统一处理, 是否已经存在, Hook回调....
-	source.Publish(source, func() {
+	_, state := stream.PreparePublishSource(source, true)
+	if utils.HookStateOK != state {
+		log.Sugar.Errorf("rtmp推流失败 source:%s", sourceId)
+	} else {
 		s.handle = source
 		s.isPublisher = true
 
 		source.Init(source.Input)
 		go source.LoopEvent()
+	}
 
-		response <- utils.HookStateOK
-	}, func(state utils.HookState) {
-		response <- state
-	})
+	response <- state
 }
 
 func (s *Session) OnPlay(app, stream_ string, response chan utils.HookState) {
@@ -58,12 +59,14 @@ func (s *Session) OnPlay(app, stream_ string, response chan utils.HookState) {
 
 	log.Sugar.Infof("rtmp onplay app:%s stream:%s sink:%v conn:%s", app, stream_, sink.Id(), s.conn.RemoteAddr().String())
 
-	stream.HookPlaying(sink, func() {
+	_, state := stream.PreparePlaySink(sink)
+	if utils.HookStateOK != state {
+		log.Sugar.Errorf("rtmp拉流失败 source:%s sink:%s", sourceId, sink.Id())
+	} else {
 		s.handle = sink
-		response <- utils.HookStateOK
-	}, func(state utils.HookState) {
-		response <- state
-	})
+	}
+
+	response <- state
 }
 
 func (s *Session) Input(conn net.Conn, data []byte) error {

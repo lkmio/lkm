@@ -211,11 +211,12 @@ func (s *Session) OnJtPTPPacket(data []byte) {
 		s.rtpPacket = &RtpPacket{}
 		*s.rtpPacket = packet
 
-		s.Publish(s, func() {
-			//response <- utils.HookStateOK
-		}, func(state utils.HookState) {
-			//response <- state
-		})
+		_, state := stream.PreparePublishSource(s, true)
+		if utils.HookStateOK != state {
+			log.Sugar.Errorf("1078推流失败 source:%s", s.phone)
+		}
+
+		s.Close()
 	}
 
 	//完整包/最后一个分包, 创建AVPacket

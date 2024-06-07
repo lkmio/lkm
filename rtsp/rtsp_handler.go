@@ -138,14 +138,7 @@ func (h handler) OnDescribe(request Request) (*http.Response, []byte, error) {
 		request.session.response(response, []byte(sdp))
 	})
 
-	code := utils.HookStateOK
-
-	stream.HookPlaying(sink_, func() {
-
-	}, func(state utils.HookState) {
-		code = state
-	})
-
+	_, code := stream.PreparePlaySink(sink_)
 	if utils.HookStateOK != code {
 		return nil, nil, fmt.Errorf("hook failed. code:%d", code)
 	}

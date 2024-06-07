@@ -3,8 +3,8 @@ package stream
 import (
 	"fmt"
 	"github.com/yangjiechina/lkm/log"
+	"math"
 	"net"
-	"net/http"
 	"time"
 
 	"github.com/yangjiechina/avformat/stream"
@@ -107,14 +107,20 @@ type Source interface {
 	// OnDeMuxDone 所有流解析完毕回调
 	OnDeMuxDone()
 
+	Init(input func(data []byte) error)
+
 	LoopEvent()
 
-	Init(input func(data []byte) error)
+	RemoteAddr() string
+
+	// StartReceiveDataTimer 启动收流超时计时器
+	StartReceiveDataTimer()
+
+	// StartIdleTimer 启动拉流空闲计时器
+	StartIdleTimer()
 }
 
 type PublishSource struct {
-	hookSession
-
 	Id_   string
 	Type_ SourceType
 	state SessionState
@@ -141,12 +147,20 @@ type PublishSource struct {
 
 	//sink的拉流和断开拉流事件，都通过管道交给Source处理. 意味着Source内部解析流、封装流、传输流都可以做到无锁操作
 	//golang的管道是有锁的(https://github.com/golang/go/blob/d38f1d13fa413436d38d86fe86d6a146be44bb84/src/runtime/chan.go#L202), 后面使用cas队列传输事件, 并且可以做到一次读取多个事件
-	inputEvent            chan []byte
-	responseEvent         chan byte //解析完input的数据后，才能继续从网络io中读取流
-	closeEvent            chan byte
-	playingEventQueue     chan Sink
-	playingDoneEventQueue chan Sink
-	probeTimoutEvent      chan bool
+	inputDataEvent          chan []byte
+	dataConsumedEvent       chan byte //解析完input的数据后，才能继续从网络io中读取流
+	closedEvent             chan byte
+	playingEventQueue       chan Sink
+	playingDoneEventQueue   chan Sink
+	probeTimoutEvent        chan bool
+	receiveDataTimeoutEvent chan byte
+	idleTimeoutEvent        chan byte
+
+	lastPacketTime   time.Time
+	removeSinkTime   time.Time
+	receiveDataTimer *time.Timer
+	idleTimer        *time.Timer
+	sinkCount        int
 }
 
 func (s *PublishSource) Id() string {
@@ -160,12 +174,19 @@ func (s *PublishSource) Init(input func(data []byte) error) {
 	s.SetState(SessionStateTransferring)
 
 	//收流和网络断开的chan都阻塞执行
-	s.inputEvent = make(chan []byte)
-	s.responseEvent = make(chan byte)
-	s.closeEvent = make(chan byte)
+	s.inputDataEvent = make(chan []byte)
+	s.dataConsumedEvent = make(chan byte)
+	s.closedEvent = make(chan byte)
 	s.playingEventQueue = make(chan Sink, 128)
 	s.playingDoneEventQueue = make(chan Sink, 128)
 	s.probeTimoutEvent = make(chan bool)
+
+	if AppConfig.ReceiveTimeout > 0 {
+		s.receiveDataTimeoutEvent = make(chan byte)
+	}
+	if AppConfig.IdleTimeout > 0 {
+		s.idleTimeoutEvent = make(chan byte)
+	}
 
 	if s.transStreams == nil {
 		s.transStreams = make(map[TransStreamId]TransStream, 10)
@@ -199,11 +220,10 @@ func (s *PublishSource) FindOrCreatePacketBuffer(index int, mediaType utils.AVMe
 			s.pktBuffers[index] = NewRbMemoryPool(48000 * 64)
 		} else if AppConfig.GOPCache {
 			//开启GOP缓存
-			//以每秒钟4M码率大小创建视频内存池
 			s.pktBuffers[index] = NewRbMemoryPool(AppConfig.GOPBufferSize)
 		} else {
 			//未开启GOP缓存
-			//以每秒钟4M的1/8码率大小创建视频内存池
+			//1M缓存大小, 单帧绰绰有余
 			s.pktBuffers[index] = NewRbMemoryPool(1024 * 1000)
 		}
 	}
@@ -214,13 +234,17 @@ func (s *PublishSource) FindOrCreatePacketBuffer(index int, mediaType utils.AVMe
 func (s *PublishSource) LoopEvent() {
 	for {
 		select {
-		case data := <-s.inputEvent:
+		case data := <-s.inputDataEvent:
+			if AppConfig.ReceiveTimeout > 0 {
+				s.lastPacketTime = time.Now()
+			}
+
 			if err := s.Input_(data); err != nil {
 				log.Sugar.Errorf("处理输入流失败 释放source:%s err:%s", s.Id_, err.Error())
 				s.Close()
 			}
 
-			s.responseEvent <- 0
+			s.dataConsumedEvent <- 0
 			break
 		case sink := <-s.playingEventQueue:
 			if !s.completed {
@@ -234,11 +258,21 @@ func (s *PublishSource) LoopEvent() {
 		case sink := <-s.playingDoneEventQueue:
 			s.RemoveSink(sink)
 			break
-		case _ = <-s.closeEvent:
+		case _ = <-s.closedEvent:
 			s.Close()
 			return
 		case _ = <-s.probeTimoutEvent:
 			s.writeHeader()
+			break
+		case _ = <-s.receiveDataTimeoutEvent:
+			log.Sugar.Errorf("收流超时 source:%s", s.Id_)
+			s.Close()
+			HookReceiveTimeoutEvent(s)
+			break
+		case _ = <-s.idleTimeoutEvent:
+			log.Sugar.Errorf("空闲超时 source:%s", s.Id_)
+			s.Close()
+			HookIdleTimeoutEvent(s)
 			break
 		}
 	}
@@ -350,6 +384,8 @@ func (s *PublishSource) AddSink(sink Sink) bool {
 		sink.SetState(SessionStateTransferring)
 	}
 
+	s.sinkCount++
+
 	//新的传输流，发送缓存的音视频帧
 	if !ok && AppConfig.GOPCache && s.existVideo {
 		s.gopBuffer.PeekAll(func(packet utils.AVPacket) {
@@ -367,7 +403,9 @@ func (s *PublishSource) RemoveSink(sink Sink) bool {
 		//如果从传输流没能删除sink, 再从等待队列删除
 		_, b := transStream.RemoveSink(sink.Id())
 		if b {
-			HookPlayingDone(sink, nil, nil)
+			s.sinkCount--
+			s.removeSinkTime = time.Now()
+			HookPlayDoneEvent(sink)
 			return true
 		}
 	}
@@ -378,14 +416,14 @@ func (s *PublishSource) RemoveSink(sink Sink) bool {
 
 func (s *PublishSource) AddEvent(event SourceEvent, data interface{}) {
 	if SourceEventInput == event {
-		s.inputEvent <- data.([]byte)
-		<-s.responseEvent
+		s.inputDataEvent <- data.([]byte)
+		<-s.dataConsumedEvent
 	} else if SourceEventPlay == event {
 		s.playingEventQueue <- data.(Sink)
 	} else if SourceEventPlayDone == event {
 		s.playingDoneEventQueue <- data.(Sink)
 	} else if SourceEventClose == event {
-		s.closeEvent <- 0
+		s.closedEvent <- 0
 	}
 }
 
@@ -398,11 +436,24 @@ func (s *PublishSource) Close() {
 	if s.gopBuffer != nil {
 		s.gopBuffer.Clear()
 	}
+	if s.probeTimer != nil {
+		s.probeTimer.Stop()
+	}
+	if s.receiveDataTimer != nil {
+		s.receiveDataTimer.Stop()
+	}
+	if s.idleTimer != nil {
+		s.idleTimer.Stop()
+	}
 
 	//释放解复用器
 	//释放转码器
 	//释放每路转协议流， 将所有sink添加到等待队列
-	_, _ = SourceManager.Remove(s.Id_)
+	_, err := SourceManager.Remove(s.Id_)
+	if err != nil {
+		log.Sugar.Errorf("删除源失败 source:%s err:%s", s.Id_, err.Error())
+	}
+
 	for _, transStream := range s.transStreams {
 		transStream.Close()
 
@@ -421,6 +472,7 @@ func (s *PublishSource) Close() {
 		})
 	}
 
+	HookPublishDoneEvent(s)
 	s.transStreams = nil
 }
 
@@ -517,46 +569,46 @@ func (s *PublishSource) OnDeMuxDone() {
 
 }
 
-func (s *PublishSource) Publish(source Source, success func(), failure func(state utils.HookState)) {
-	//streamId 已经被占用
-	if source_ := SourceManager.Find(source.Id()); source_ != nil {
-		fmt.Printf("推流已经占用 Source:%s", source.Id())
-		failure(utils.HookStateOccupy)
-	}
-
-	if !AppConfig.Hook.EnableOnPublish() {
-		if err := SourceManager.Add(source); err == nil {
-			success()
-		} else {
-			fmt.Printf("添加失败 Source:%s", source.Id())
-			failure(utils.HookStateOccupy)
-		}
-
-		return
-	}
-
-	err := s.Hook(HookEventPublish, NewPublishHookEventInfo(source.Id(), "", source.Type()),
-		func(response *http.Response) {
-			if err := SourceManager.Add(source); err == nil {
-				success()
-			} else {
-				failure(utils.HookStateOccupy)
-			}
-		}, func(response *http.Response, err error) {
-			failure(utils.HookStateFailure)
-		})
-
-	//hook地址连接失败
-	if err != nil {
-		failure(utils.HookStateFailure)
-		return
-	}
-}
-
-func (s *PublishSource) PublishDone(source Source, success func(), failure func(state utils.HookState)) {
-
-}
-
 func (s *PublishSource) Type() SourceType {
 	return s.Type_
+}
+
+func (s *PublishSource) RemoteAddr() string {
+	if s.Conn == nil {
+		return ""
+	}
+
+	return s.Conn.RemoteAddr().String()
+}
+
+func (s *PublishSource) StartReceiveDataTimer() {
+	utils.Assert(s.receiveDataTimer == nil)
+	utils.Assert(AppConfig.ReceiveTimeout > 0)
+
+	s.lastPacketTime = time.Now()
+	s.receiveDataTimer = time.AfterFunc(time.Duration(AppConfig.ReceiveTimeout), func() {
+		dis := time.Now().Sub(s.lastPacketTime)
+
+		if dis >= time.Duration(AppConfig.ReceiveTimeout) {
+			s.receiveDataTimeoutEvent <- 0
+		} else {
+			s.receiveDataTimer.Reset(time.Duration(math.Abs(float64(time.Duration(AppConfig.ReceiveTimeout) - dis))))
+		}
+	})
+}
+
+func (s *PublishSource) StartIdleTimer() {
+	utils.Assert(s.idleTimer == nil)
+	utils.Assert(AppConfig.IdleTimeout > 0)
+
+	s.removeSinkTime = time.Now()
+	s.idleTimer = time.AfterFunc(time.Duration(AppConfig.IdleTimeout), func() {
+		dis := time.Now().Sub(s.removeSinkTime)
+
+		if s.sinkCount < 1 && dis >= time.Duration(AppConfig.IdleTimeout) {
+			s.idleTimeoutEvent <- 0
+		} else {
+			s.idleTimer.Reset(time.Duration(math.Abs(float64(AppConfig.IdleTimeout - int64(dis)))))
+		}
+	})
 }

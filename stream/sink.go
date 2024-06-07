@@ -47,6 +47,8 @@ type Sink interface {
 
 	PrintInfo() string
 
+	RemoteAddr() string
+
 	// Lock Sink请求拉流->Source推流->Sink断开整个阶段, 是无锁线程安全
 	//如果Sink在等待队列-Sink断开, 这个过程是非线程安全的
 	//所以Source在AddSink时, SessionStateWait状态时, 需要加锁保护.
@@ -76,8 +78,6 @@ func GenerateSinkId(addr net.Addr) SinkId {
 }
 
 type BaseSink struct {
-	hookSession
-
 	Id_            SinkId
 	SourceId_      string
 	Protocol_      Protocol
@@ -202,10 +202,17 @@ func (s *BaseSink) Close() {
 	} else if s.State_ == SessionStateWait {
 		RemoveSinkFromWaitingQueue(s.SourceId_, s.Id_)
 		//拉流结束事件, 在等待队列直接发送通知, 在拉流由Source负责发送.
-		HookPlayingDone(s, nil, nil)
+		HookPlayDoneEvent(s)
 	}
 }
-
 func (s *BaseSink) PrintInfo() string {
 	return fmt.Sprintf("%s-%v source:%s", s.Protocol().ToString(), s.Id_, s.SourceId_)
+}
+
+func (s *BaseSink) RemoteAddr() string {
+	if s.Conn == nil {
+		return ""
+	}
+
+	return s.Conn.RemoteAddr().String()
 }

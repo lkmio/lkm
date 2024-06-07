@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	"net"
 	"net/http"
+	"time"
 
 	_ "net/http/pprof"
 
@@ -25,6 +26,8 @@ func NewDefaultAppConfig() stream.AppConfig_ {
 		GOPBufferSize:     8196000,
 		MergeWriteLatency: 350,
 		PublicIP:          "192.168.2.148",
+		IdleTimeout:       int64(60 * time.Second),
+		ReceiveTimeout:    int64(60 * time.Second),
 
 		Hls: stream.HlsConfig{
 			Enable:         false,
@@ -74,6 +77,18 @@ func NewDefaultAppConfig() stream.AppConfig_ {
 			Enable: true,
 			Addr:   "0.0.0.0:1078",
 		},
+
+		Hook: stream.HookConfig{
+			Enable:              true,
+			Timeout:             int64(60 * time.Second),
+			OnPublishUrl:        "http://localhost:8082/api/v1/on_publish",
+			OnPublishDoneUrl:    "http://localhost:8082/api/v1/on_publish_done",
+			OnPlayUrl:           "http://localhost:8082/api/v1/on_play",
+			OnPlayDoneUrl:       "http://localhost:8082/api/on_play_done",
+			OnRecordUrl:         "http://localhost:8082/api/v1/on_reocrd",
+			OnIdleTimeoutUrl:    "http://localhost:8082/api/v1/on_idle_timeout",
+			OnReceiveTimeoutUrl: "http://localhost:8082/api/v1/on_recv_timeout",
+		},
 	}
 }
 
@@ -85,6 +100,7 @@ func init() {
 	stream.RegisterTransStreamFactory(stream.ProtocolRtc, rtc.TransStreamFactory)
 
 	stream.AppConfig = NewDefaultAppConfig()
+	stream.InitHookUrl()
 
 	//初始化日志
 	log.InitLogger(zapcore.Level(stream.AppConfig.Log.Level), stream.AppConfig.Log.Name, stream.AppConfig.Log.MaxSize, stream.AppConfig.Log.MaxBackup, stream.AppConfig.Log.MaxAge, stream.AppConfig.Log.Compress)
