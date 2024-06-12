@@ -105,6 +105,7 @@ func (api *ApiServer) createGBSource(w http.ResponseWriter, r *http.Request) {
 
 	//返回监听的端口
 	response := &struct {
+		IP   string `json:"ip"`
 		Port uint16 `json:"port,omitempty"`
 	}{}
 
@@ -124,7 +125,7 @@ func (api *ApiServer) createGBSource(w http.ResponseWriter, r *http.Request) {
 
 	source := stream.SourceManager.Find(v.Source)
 	if source != nil {
-		err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "gbsource 已经存在"}
+		err = &MalformedRequest{Code: http.StatusBadRequest, Msg: fmt.Sprintf("创建GB28181 Source失败 %s 已经存在", v.Source)}
 		return
 	}
 
@@ -152,6 +153,7 @@ func (api *ApiServer) createGBSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	response.IP = stream.AppConfig.PublicIP
 	response.Port = port
 	httpResponseOk(w, response)
 }

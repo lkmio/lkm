@@ -47,7 +47,7 @@ func HookPlayDoneEvent(sink Sink) (*http.Response, bool) {
 	var response *http.Response
 
 	if AppConfig.Hook.EnableOnPlayDone() {
-		hook, err := Hook(HookEventPlay, NewHookPlayEventInfo(sink))
+		hook, err := Hook(HookEventPlayDone, NewHookPlayEventInfo(sink))
 		if err != nil {
 			log.Sugar.Errorf("通知播放结束事件失败 err:%s sink:%s-%v source:%s", err.Error(), sink.Protocol().ToString(), sink.Id(), sink.SourceId())
 			return hook, false

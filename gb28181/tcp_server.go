@@ -32,7 +32,7 @@ func NewTCPServer(addr net.Addr, filter Filter) (*TCPServer, error) {
 }
 
 func (T *TCPServer) OnConnected(conn net.Conn) {
-	log.Sugar.Infof("客户端链接 conn:%s", conn.RemoteAddr().String())
+	log.Sugar.Infof("GB28181连接 conn:%s", conn.RemoteAddr().String())
 }
 
 func (T *TCPServer) OnPacket(conn net.Conn, data []byte) {
@@ -53,7 +53,7 @@ func (T *TCPServer) OnPacket(conn net.Conn, data []byte) {
 }
 
 func (T *TCPServer) OnDisConnected(conn net.Conn, err error) {
-	log.Sugar.Infof("客户端断开链接 conn:%s", conn.RemoteAddr().String())
+	log.Sugar.Infof("GB28181断开连接 conn:%s", conn.RemoteAddr().String())
 
 	con := conn.(*transport.Conn)
 	if con.Data != nil {

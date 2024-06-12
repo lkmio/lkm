@@ -59,20 +59,34 @@ func HookPublishDoneEvent(source Source) {
 	}
 }
 
-func HookReceiveTimeoutEvent(source Source) {
+func HookReceiveTimeoutEvent(source Source) (*http.Response, utils.HookState) {
+	var response *http.Response
+
 	if AppConfig.Hook.EnableOnReceiveTimeout() {
-		_, err := Hook(HookEventReceiveTimeout, NewHookPublishEventInfo(source))
+		resp, err := Hook(HookEventReceiveTimeout, NewHookPublishEventInfo(source))
 		if err != nil {
 			log.Sugar.Errorf("通知收流超时事件失败 source:%s err:%s", source.Id(), err.Error())
+			return resp, utils.HookStateFailure
 		}
+
+		response = resp
 	}
+
+	return response, utils.HookStateOK
 }
 
-func HookIdleTimeoutEvent(source Source) {
+func HookIdleTimeoutEvent(source Source) (*http.Response, utils.HookState) {
+	var response *http.Response
+
 	if AppConfig.Hook.EnableOnIdleTimeout() {
-		_, err := Hook(HookEventIdleTimeout, NewHookPublishEventInfo(source))
+		resp, err := Hook(HookEventIdleTimeout, NewHookPublishEventInfo(source))
 		if err != nil {
 			log.Sugar.Errorf("通知空闲超时时间失败 source:%s err:%s", source.Id(), err.Error())
+			return resp, utils.HookStateFailure
 		}
+
+		response = resp
 	}
+
+	return response, utils.HookStateOK
 }

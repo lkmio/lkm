@@ -27,7 +27,7 @@ func NewDefaultAppConfig() stream.AppConfig_ {
 		MergeWriteLatency: 350,
 		PublicIP:          "192.168.2.148",
 		IdleTimeout:       int64(60 * time.Second),
-		ReceiveTimeout:    int64(60 * time.Second),
+		ReceiveTimeout:    int64(10 * time.Second),
 
 		Hls: stream.HlsConfig{
 			Enable:         false,
@@ -81,13 +81,13 @@ func NewDefaultAppConfig() stream.AppConfig_ {
 		Hook: stream.HookConfig{
 			Enable:              true,
 			Timeout:             int64(60 * time.Second),
-			OnPublishUrl:        "http://localhost:8082/api/v1/on_publish",
-			OnPublishDoneUrl:    "http://localhost:8082/api/v1/on_publish_done",
-			OnPlayUrl:           "http://localhost:8082/api/v1/on_play",
-			OnPlayDoneUrl:       "http://localhost:8082/api/on_play_done",
-			OnRecordUrl:         "http://localhost:8082/api/v1/on_reocrd",
-			OnIdleTimeoutUrl:    "http://localhost:8082/api/v1/on_idle_timeout",
-			OnReceiveTimeoutUrl: "http://localhost:8082/api/v1/on_recv_timeout",
+			OnPublishUrl:        "http://localhost:9000/api/v1/hook/on_publish",
+			OnPublishDoneUrl:    "http://localhost:9000/api/v1/hook/on_publish_done",
+			OnPlayUrl:           "http://localhost:9000/api/v1/hook/on_play",
+			OnPlayDoneUrl:       "http://localhost:9000/api/v1/hook/on_play_done",
+			OnRecordUrl:         "http://localhost:9000/api/v1/hook/on_reocrd",
+			OnIdleTimeoutUrl:    "http://localhost:9000/api/v1/hook/on_idle_timeout",
+			OnReceiveTimeoutUrl: "http://localhost:9000/api/v1/hook/on_receive_timeout",
 		},
 	}
 }

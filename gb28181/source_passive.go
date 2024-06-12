@@ -2,7 +2,6 @@ package gb28181
 
 import (
 	"github.com/pion/rtp"
-	"github.com/yangjiechina/lkm/stream"
 )
 
 type PassiveSource struct {
@@ -18,6 +17,6 @@ func (t PassiveSource) TransportType() TransportType {
 }
 
 func (t PassiveSource) InputRtp(pkt *rtp.Packet) error {
-	t.PublishSource.AddEvent(stream.SourceEventInput, pkt.Payload)
+	t.PublishSource.Input(pkt.Payload)
 	return nil
 }

@@ -45,7 +45,7 @@ func (s *Session) OnPublish(app, stream_ string, response chan utils.HookState) 
 		s.handle = source
 		s.isPublisher = true
 
-		source.Init(source.Input)
+		source.Init(source.Input, source.Close)
 		go source.LoopEvent()
 	}
 
@@ -72,7 +72,7 @@ func (s *Session) OnPlay(app, stream_ string, response chan utils.HookState) {
 func (s *Session) Input(conn net.Conn, data []byte) error {
 	//如果是推流，并且握手成功，后续收到的包，都将发送给LoopEvent处理
 	if s.isPublisher {
-		s.handle.(*Publisher).AddEvent(stream.SourceEventInput, data)
+		s.handle.(*Publisher).PublishSource.Input(data)
 		return nil
 	} else {
 		return s.stack.Input(conn, data)
@@ -80,8 +80,6 @@ func (s *Session) Input(conn net.Conn, data []byte) error {
 }
 
 func (s *Session) Close() {
-	log.Sugar.Debugf("释放rtmp session conn:%s", s.conn.RemoteAddr().String())
-
 	//释放协议栈
 	if s.stack != nil {
 		s.stack.Close()
@@ -92,13 +90,16 @@ func (s *Session) Close() {
 		return
 	}
 
-	_, ok := s.handle.(*Publisher)
+	publisher, ok := s.handle.(*Publisher)
 	if ok {
+		log.Sugar.Infof("rtmp推流结束 %s", publisher.PrintInfo())
+
 		if s.isPublisher {
-			s.handle.(*Publisher).AddEvent(stream.SourceEventClose, nil)
+			s.handle.(*Publisher).Close()
 		}
 	} else {
 		sink := s.handle.(stream.Sink)
+		log.Sugar.Infof("rtmp拉流结束 %s", sink.PrintInfo())
 		sink.Close()
 	}
 }

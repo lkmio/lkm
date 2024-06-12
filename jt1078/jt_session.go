@@ -7,6 +7,7 @@ import (
 	"github.com/yangjiechina/avformat/utils"
 	"github.com/yangjiechina/lkm/log"
 	"github.com/yangjiechina/lkm/stream"
+	"net"
 )
 
 const (
@@ -211,12 +212,16 @@ func (s *Session) OnJtPTPPacket(data []byte) {
 		s.rtpPacket = &RtpPacket{}
 		*s.rtpPacket = packet
 
-		_, state := stream.PreparePublishSource(s, true)
-		if utils.HookStateOK != state {
-			log.Sugar.Errorf("1078推流失败 source:%s", s.phone)
-		}
+		go func() {
+			_, state := stream.PreparePublishSource(s, true)
+			if utils.HookStateOK != state {
+				log.Sugar.Errorf("1078推流失败 source:%s", s.phone)
 
-		s.Close()
+				if s.Conn != nil {
+					s.Conn.Close()
+				}
+			}
+		}()
 	}
 
 	//完整包/最后一个分包, 创建AVPacket
@@ -271,15 +276,30 @@ func (s *Session) Input(data []byte) error {
 }
 
 func (s *Session) Close() {
+	log.Sugar.Infof("1078推流结束 phone number:%s %s", s.phone, s.PublishSource.PrintInfo())
 
+	if s.audioBuffer != nil {
+		s.audioBuffer.Clear()
+	}
+
+	if s.videoBuffer != nil {
+		s.videoBuffer.Clear()
+	}
+
+	s.PublishSource.Close()
 }
 
-func NewSession() *Session {
-	session := Session{}
+func NewSession(conn net.Conn) *Session {
+	session := Session{
+		PublishSource: stream.PublishSource{
+			Conn:  conn,
+			Type_: stream.SourceType1078,
+		},
+	}
 	delimiter := [4]byte{0x30, 0x31, 0x63, 0x64}
 	session.decoder = transport.NewDelimiterFrameDecoder(1024*1024*2, delimiter[:], session.OnJtPTPPacket)
 
-	session.Init(session.Input)
+	session.Init(session.Input, session.Close)
 	go session.LoopEvent()
 	return &session
 }

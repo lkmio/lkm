@@ -45,6 +45,6 @@ func (u UDPSource) InputRtp(pkt *rtp.Packet) error {
 
 		u.rtpBuffer.FreeHead()
 
-		u.PublishSource.AddEvent(stream.SourceEventInput, pkt.Payload)
+		u.PublishSource.Input(pkt.Payload)
 	}
 }

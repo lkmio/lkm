@@ -137,10 +137,10 @@ func createSource(source, transport, setup string, ssrc uint32) int {
 func TestUDPRecv(t *testing.T) {
 	path := "D:\\GOProjects\\avformat\\gb28181_h264.rtp"
 	ssrc := 0xBEBC201
-	ip := "192.168.31.112"
+	ip := "192.168.2.148"
 	localAddr := "0.0.0.0:20001"
 	network := "tcp"
-	setup := "active"
+	setup := "passive"
 	id := "hls_mystream"
 
 	port := createSource(id, network, setup, uint32(ssrc))
@@ -190,7 +190,7 @@ func TestUDPRecv(t *testing.T) {
 			panic(err)
 		}
 
-		connectSource(id, "192.168.31.112:20001")
+		connectSource(id, "192.168.2.148:20001")
 		//
 	}
 

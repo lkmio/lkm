@@ -4,22 +4,23 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/yangjiechina/lkm/log"
 	"net/http"
 	"time"
 )
 
-// 每个通知的时间都需要携带的字段
+// 每个通知事件都需要携带的字段
 type eventInfo struct {
-	stream     string //stream id
-	protocol   string //推拉流协议
-	remoteAddr string //peer地址
+	Stream     string `json:"stream"`      //stream id
+	Protocol   string `json:"protocol"`    //推拉流协议
+	RemoteAddr string `json:"remote_addr"` //peer地址
 }
 
 func NewHookPlayEventInfo(sink Sink) eventInfo {
-	return eventInfo{stream: sink.SourceId(), protocol: sink.Protocol().ToString(), remoteAddr: sink.PrintInfo()}
+	return eventInfo{Stream: sink.SourceId(), Protocol: sink.Protocol().ToString(), RemoteAddr: sink.PrintInfo()}
 }
 func NewHookPublishEventInfo(source Source) eventInfo {
-	return eventInfo{stream: source.Id(), protocol: source.Type().ToString(), remoteAddr: source.RemoteAddr()}
+	return eventInfo{Stream: source.Id(), Protocol: source.Type().ToString(), RemoteAddr: source.RemoteAddr()}
 }
 
 func sendHookEvent(url string, body interface{}) (*http.Response, error) {
@@ -36,6 +37,8 @@ func sendHookEvent(url string, body interface{}) (*http.Response, error) {
 		return nil, err
 	}
 
+	log.Sugar.Infof("发送hook通知 url:%s body:%s", url, marshal)
+
 	request.Header.Set("Content-Type", "application/json")
 	return client.Do(request)
 }
@@ -47,8 +50,8 @@ func Hook(event HookEvent, body interface{}) (*http.Response, error) {
 	}
 
 	response, err := sendHookEvent(url, body)
-	if err != nil && http.StatusOK != response.StatusCode {
-		return response, fmt.Errorf("code:%d reason:%s", response.StatusCode, response.Status)
+	if err == nil && http.StatusOK != response.StatusCode {
+		return response, fmt.Errorf("reason %s", response.Status)
 	}
 
 	return response, err

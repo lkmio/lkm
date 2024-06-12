@@ -100,8 +100,8 @@ type HookConfig struct {
 	OnPlayUrl           string `json:"on_play"`            //拉流回调
 	OnPlayDoneUrl       string `json:"on_play_done"`       //拉流结束回调
 	OnRecordUrl         string `json:"on_record"`          //录制流回调
-	OnIdleTimeoutUrl    string `json:"on_idle_timeout"`    //多久没有sink拉流回调
-	OnReceiveTimeoutUrl string `json:"on_receive_timeout"` //多久没有推流回调
+	OnIdleTimeoutUrl    string `json:"on_idle_timeout"`    //没有sink拉流回调
+	OnReceiveTimeoutUrl string `json:"on_receive_timeout"` //没有推流回调
 }
 
 func (hook *HookConfig) EnablePublishEvent() bool {
@@ -144,8 +144,8 @@ type AppConfig_ struct {
 	GOPBufferSize  int    `json:"gop_buffer_size"` //预估GOPBuffer大小, AVPacket缓存池和合并写缓存池都会参考此大小
 	ProbeTimeout   int    `json:"probe_timeout"`
 	PublicIP       string `json:"public_ip"`
-	IdleTimeout    int64  `json:"idle_timeout"`    //多长时间没有sink拉流, 单位秒
-	ReceiveTimeout int64  `json:"receive_timeout"` //多长时间没有收到流, 单位秒
+	IdleTimeout    int64  `json:"idle_timeout"`    //多长时间没有拉流, 单位秒. 如果开启hook通知, 根据hook响应, 决定是否关闭Source(200-不关闭/非200关闭). 否则会直接关闭Source.
+	ReceiveTimeout int64  `json:"receive_timeout"` //多长时间没有收到流, 单位秒. 如果开启hook通知, 根据hook响应, 决定是否关闭Source(200-不关闭/非200关闭). 否则会直接关闭Source.
 
 	//缓存指定时长的包，满了之后才发送给Sink. 可以降低用户态和内核态的交互频率，大幅提升性能.
 	//合并写的大小范围，应当大于一帧的时长，不超过一组GOP的时长，在实际发送流的时候也会遵循此条例.

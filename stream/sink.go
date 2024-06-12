@@ -186,6 +186,7 @@ func (s *BaseSink) Close() {
 		return
 	}
 
+	var state SessionState
 	{
 		s.Lock()
 		defer s.UnLock()
@@ -193,16 +194,17 @@ func (s *BaseSink) Close() {
 			return
 		}
 
+		state = s.State_
 		s.State_ = SessionStateClose
 	}
 
-	if s.State_ == SessionStateTransferring {
+	if state == SessionStateTransferring {
 		source := SourceManager.Find(s.SourceId_)
 		source.AddEvent(SourceEventPlayDone, s)
-	} else if s.State_ == SessionStateWait {
+	} else if state == SessionStateWait {
 		RemoveSinkFromWaitingQueue(s.SourceId_, s.Id_)
 		//拉流结束事件, 在等待队列直接发送通知, 在拉流由Source负责发送.
-		HookPlayDoneEvent(s)
+		go HookPlayDoneEvent(s)
 	}
 }
 func (s *BaseSink) PrintInfo() string {

@@ -12,7 +12,6 @@ import (
 	"github.com/yangjiechina/lkm/log"
 	"github.com/yangjiechina/lkm/stream"
 	"net"
-	"net/http"
 )
 
 type TransportType int
@@ -32,6 +31,8 @@ var (
 	SharedTCPServer *TCPServer
 )
 
+// GBSource GB28181推流Source, 接收PS流解析生成AVStream和AVPacket, 后续全权交给父类Source处理.
+// udp/passive/active 都继承本接口, filter负责解析rtp包, 根据ssrc匹配对应的Source.
 type GBSource interface {
 	stream.Source
 
@@ -40,20 +41,20 @@ type GBSource interface {
 	TransportType() TransportType
 
 	PrepareTransDeMuxer(id string, ssrc uint32)
+
+	SetConn(conn net.Conn)
+
+	SetSSRC(ssrc uint32)
 }
 
-// BaseGBSource GB28181推流Source
-// 负责解析生成AVStream和AVPacket, 后续全权交给父类Source处理.
 type BaseGBSource struct {
 	stream.PublishSource
 
-	deMuxerCtx *libmpeg.PSDeMuxerContext
-
+	deMuxerCtx  *libmpeg.PSDeMuxerContext
 	audioStream utils.AVStream
 	videoStream utils.AVStream
 
-	ssrc uint32
-
+	ssrc      uint32
 	transport transport.ITransport
 }
 
@@ -94,7 +95,7 @@ func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, uint1
 		}
 
 		if !success {
-			return nil, 0, fmt.Errorf("source existing")
+			return nil, 0, fmt.Errorf("ssrc conflict")
 		}
 
 		port = stream.AppConfig.GB28181.Port[0]
@@ -139,11 +140,12 @@ func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, uint1
 
 	source.PrepareTransDeMuxer(id, ssrc)
 	_, state := stream.PreparePublishSource(source, false)
-	if http.StatusOK != state {
+	if utils.HookStateOK != state {
 		return nil, 0, fmt.Errorf("error code %d", state)
 	}
 
-	source.Init(source.Input)
+	source.SetType(stream.SourceType28181)
+	source.Init(source.Input, source.Close)
 	go source.LoopEvent()
 	return source, port, err
 }
@@ -303,10 +305,32 @@ func (source *BaseGBSource) OnCompletePacket(index int, mediaType utils.AVMediaT
 }
 
 func (source *BaseGBSource) Close() {
+	log.Sugar.Infof("GB28181推流结束 ssrc:%d %s", source.ssrc, source.PublishSource.PrintInfo())
+
+	//释放收流端口
 	if source.transport != nil {
 		source.transport.Close()
 		source.transport = nil
 	}
 
+	//删除ssrc关联
+	if !stream.AppConfig.GB28181.IsMultiPort() {
+		if SharedTCPServer != nil {
+			SharedTCPServer.filter.RemoveSource(source.ssrc)
+		}
+
+		if SharedUDPServer != nil {
+			SharedUDPServer.filter.RemoveSource(source.ssrc)
+		}
+	}
+
 	source.PublishSource.Close()
+}
+
+func (source *BaseGBSource) SetConn(conn net.Conn) {
+	source.Conn = conn
+}
+
+func (source *BaseGBSource) SetSSRC(ssrc uint32) {
+	source.ssrc = ssrc
 }
