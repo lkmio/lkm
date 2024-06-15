@@ -42,6 +42,8 @@ type GBSource interface {
 
 	PrepareTransDeMuxer(id string, ssrc uint32)
 
+	PreparePublishSource(conn net.Conn, ssrc uint32, source GBSource)
+
 	SetConn(conn net.Conn)
 
 	SetSSRC(ssrc uint32)
@@ -54,8 +56,9 @@ type BaseGBSource struct {
 	audioStream utils.AVStream
 	videoStream utils.AVStream
 
-	ssrc      uint32
-	transport transport.ITransport
+	ssrc          uint32
+	transport     transport.ITransport
+	receiveBuffer *stream.ReceiveBuffer
 }
 
 func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, uint16, error) {
@@ -144,8 +147,15 @@ func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, uint1
 		return nil, 0, fmt.Errorf("error code %d", state)
 	}
 
+	var bufferBlockCount int
+	if active || tcp {
+		bufferBlockCount = stream.ReceiveBufferTCPBlockCount
+	} else {
+		bufferBlockCount = stream.ReceiveBufferUdpBlockCount
+	}
+
 	source.SetType(stream.SourceType28181)
-	source.Init(source.Input, source.Close)
+	source.Init(source.Input, source.Close, bufferBlockCount)
 	go source.LoopEvent()
 	return source, port, err
 }
@@ -333,4 +343,32 @@ func (source *BaseGBSource) SetConn(conn net.Conn) {
 
 func (source *BaseGBSource) SetSSRC(ssrc uint32) {
 	source.ssrc = ssrc
+}
+
+func (source *BaseGBSource) SetReceiveBuffer(buffer *stream.ReceiveBuffer) {
+	source.receiveBuffer = buffer
+}
+
+func (source *BaseGBSource) ReceiveBuffer() *stream.ReceiveBuffer {
+	return source.receiveBuffer
+}
+
+func (source *BaseGBSource) PreparePublishSource(conn net.Conn, ssrc uint32, source_ GBSource) {
+	source.SetConn(conn)
+	source.SetSSRC(ssrc)
+
+	source.SetState(stream.SessionStateTransferring)
+
+	if stream.AppConfig.Hook.EnablePublishEvent() {
+		go func() {
+			_, state := stream.HookPublishEvent(source_)
+			if utils.HookStateOK != state {
+				log.Sugar.Errorf("GB28181 推流失败 source:%s", source.Id())
+
+				if conn != nil {
+					conn.Close()
+				}
+			}
+		}()
+	}
 }

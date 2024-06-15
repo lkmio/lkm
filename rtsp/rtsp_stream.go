@@ -30,30 +30,6 @@ type tranStream struct {
 	sdp       string
 }
 
-func NewTransStream(addr net.IPAddr, urlFormat string) stream.TransStream {
-	t := &tranStream{
-		addr:      addr,
-		urlFormat: urlFormat,
-	}
-
-	if addr.IP.To4() != nil {
-		t.addrType = "IP4"
-	} else {
-		t.addrType = "IP6"
-	}
-
-	t.Init()
-	return t
-}
-
-func TransStreamFactory(source stream.Source, protocol stream.Protocol, streams []utils.AVStream) (stream.TransStream, error) {
-	trackFormat := source.Id() + "?track=%d"
-	return NewTransStream(net.IPAddr{
-		IP:   net.ParseIP(stream.AppConfig.PublicIP),
-		Zone: "",
-	}, trackFormat), nil
-}
-
 // rtpMuxer申请输出流内存的回调
 // 无论是tcp/udp拉流, 均使用同一块内存, 并且给tcp预留4字节的包长.
 func (t *tranStream) onAllocBuffer(params interface{}) []byte {
@@ -273,4 +249,27 @@ func (t *tranStream) WriteHeader() error {
 
 	t.sdp = string(marshal)
 	return nil
+}
+
+func NewTransStream(addr net.IPAddr, urlFormat string) stream.TransStream {
+	t := &tranStream{
+		addr:      addr,
+		urlFormat: urlFormat,
+	}
+
+	if addr.IP.To4() != nil {
+		t.addrType = "IP4"
+	} else {
+		t.addrType = "IP6"
+	}
+
+	return t
+}
+
+func TransStreamFactory(source stream.Source, protocol stream.Protocol, streams []utils.AVStream) (stream.TransStream, error) {
+	trackFormat := source.Id() + "?track=%d"
+	return NewTransStream(net.IPAddr{
+		IP:   net.ParseIP(stream.AppConfig.PublicIP),
+		Zone: "",
+	}, trackFormat), nil
 }

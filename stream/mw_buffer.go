@@ -17,7 +17,7 @@ type MergeWritingBuffer interface {
 
 	IsFull(ts int64) bool
 
-	IsCompeted() bool
+	IsCompleted() bool
 
 	IsEmpty() bool
 
@@ -72,7 +72,7 @@ func (m *mergeWritingBuffer) IsFull(ts int64) bool {
 	return int(ts-m.prePacketTS) >= AppConfig.MergeWriteLatency
 }
 
-func (m *mergeWritingBuffer) IsCompeted() bool {
+func (m *mergeWritingBuffer) IsCompleted() bool {
 	data, _ := m.transStreamBuffer.Data()
 	return m.segmentOffset == len(data)
 }

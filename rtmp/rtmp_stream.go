@@ -7,7 +7,7 @@ import (
 	"github.com/yangjiechina/lkm/stream"
 )
 
-type TransStream struct {
+type transStream struct {
 	stream.BaseTransStream
 
 	chunkSize int
@@ -21,7 +21,7 @@ type TransStream struct {
 	mwBuffer   stream.MergeWritingBuffer
 }
 
-func (t *TransStream) Input(packet utils.AVPacket) error {
+func (t *transStream) Input(packet utils.AVPacket) error {
 	utils.Assert(t.BaseTransStream.Completed)
 
 	var data []byte
@@ -96,7 +96,7 @@ func (t *TransStream) Input(packet utils.AVPacket) error {
 	return nil
 }
 
-func (t *TransStream) AddSink(sink stream.Sink) error {
+func (t *transStream) AddSink(sink stream.Sink) error {
 	utils.Assert(t.headerSize > 0)
 
 	t.BaseTransStream.AddSink(sink)
@@ -113,11 +113,9 @@ func (t *TransStream) AddSink(sink stream.Sink) error {
 	return nil
 }
 
-func (t *TransStream) WriteHeader() error {
+func (t *transStream) WriteHeader() error {
 	utils.Assert(t.Tracks != nil)
 	utils.Assert(!t.BaseTransStream.Completed)
-
-	t.Init()
 
 	var audioStream utils.AVStream
 	var videoStream utils.AVStream
@@ -181,7 +179,7 @@ func (t *TransStream) WriteHeader() error {
 	return nil
 }
 
-func (t *TransStream) Close() error {
+func (t *transStream) Close() error {
 	//发送剩余的流
 	segment := t.mwBuffer.PopSegment()
 	if len(segment) > 0 {
@@ -191,7 +189,7 @@ func (t *TransStream) Close() error {
 }
 
 func NewTransStream(chunkSize int) stream.TransStream {
-	return &TransStream{chunkSize: chunkSize}
+	return &transStream{chunkSize: chunkSize}
 }
 
 func TransStreamFactory(source stream.Source, protocol stream.Protocol, streams []utils.AVStream) (stream.TransStream, error) {

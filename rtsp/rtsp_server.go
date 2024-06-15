@@ -51,21 +51,22 @@ func (s *server) Close() {
 
 }
 
-func (s *server) OnConnected(conn net.Conn) {
+func (s *server) OnConnected(conn net.Conn) []byte {
 	log.Sugar.Debugf("rtsp连接 conn:%s", conn.RemoteAddr().String())
 
 	t := conn.(*transport.Conn)
 	t.Data = NewSession(conn)
+	return nil
 }
 
-func (s *server) OnPacket(conn net.Conn, data []byte) {
+func (s *server) OnPacket(conn net.Conn, data []byte) []byte {
 	t := conn.(*transport.Conn)
 
 	method, url, header, err := parseMessage(data)
 	if err != nil {
 		log.Sugar.Errorf("failed to prase message:%s. err:%s conn:%s", string(data), err.Error(), conn.RemoteAddr().String())
 		_ = conn.Close()
-		return
+		return nil
 	}
 
 	err = s.handler.Process(t.Data.(*session), method, url, header)
@@ -73,6 +74,9 @@ func (s *server) OnPacket(conn net.Conn, data []byte) {
 		log.Sugar.Errorf("failed to process message of RTSP. err:%s conn:%s msg:%s", err.Error(), conn.RemoteAddr().String(), string(data))
 		_ = conn.Close()
 	}
+
+	//后续实现rtsp推流, 需要返回收流buffer
+	return nil
 }
 
 func (s *server) OnDisConnected(conn net.Conn, err error) {

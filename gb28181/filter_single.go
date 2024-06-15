@@ -1,42 +1,21 @@
 package gb28181
 
-import (
-	"github.com/yangjiechina/lkm/stream"
-	"net"
-)
-
-type SingleFilter struct {
-	BaseFilter
-
+type singleFilter struct {
 	source GBSource
 }
 
-func NewSingleFilter(source GBSource) *SingleFilter {
-	return &SingleFilter{source: source}
+func NewSingleFilter(source GBSource) Filter {
+	return &singleFilter{source: source}
 }
 
-func (s *SingleFilter) AddSource(ssrc uint32, source GBSource) bool {
+func (s *singleFilter) AddSource(ssrc uint32, source GBSource) bool {
 	panic("implement me")
 }
 
-func (s *SingleFilter) RemoveSource(ssrc uint32) {
+func (s *singleFilter) RemoveSource(ssrc uint32) {
 	panic("implement me")
 }
 
-func (s *SingleFilter) Input(conn net.Conn, data []byte) GBSource {
-	packet, err := s.ParseRtpPacket(conn, data)
-	if err != nil {
-		return nil
-	}
-
-	if s.source == nil {
-		return nil
-	}
-
-	if stream.SessionStateHandshakeDone == s.source.State() {
-		s.PreparePublishSource(conn, packet.SSRC, s.source)
-	}
-
-	s.source.InputRtp(packet)
+func (s *singleFilter) FindSource(ssrc uint32) GBSource {
 	return s.source
 }

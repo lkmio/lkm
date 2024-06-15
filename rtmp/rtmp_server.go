@@ -41,16 +41,20 @@ func (s *server) Close() {
 	panic("implement me")
 }
 
-func (s *server) OnConnected(conn net.Conn) {
+func (s *server) OnConnected(conn net.Conn) []byte {
 	log.Sugar.Debugf("rtmp连接 conn:%s", conn.RemoteAddr().String())
 
 	t := conn.(*transport.Conn)
 	t.Data = NewSession(conn)
+	return nil
 }
 
-func (s *server) OnPacket(conn net.Conn, data []byte) {
+func (s *server) OnPacket(conn net.Conn, data []byte) []byte {
+	log.Sugar.Infof("rtmp包大小:%d", len(data))
+
 	t := conn.(*transport.Conn)
-	err := t.Data.(*Session).Input(conn, data)
+	session := t.Data.(*Session)
+	err := session.Input(conn, data)
 
 	if err != nil {
 		log.Sugar.Errorf("处理rtmp包失败 err:%s conn:%s", err.Error(), conn.RemoteAddr().String())
@@ -59,6 +63,12 @@ func (s *server) OnPacket(conn net.Conn, data []byte) {
 		t.Data.(*Session).Close()
 		t.Data = nil
 	}
+
+	if session.isPublisher {
+		return session.receiveBuffer.GetBlock()
+	}
+
+	return nil
 }
 
 func (s *server) OnDisConnected(conn net.Conn, err error) {

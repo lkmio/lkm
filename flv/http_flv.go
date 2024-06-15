@@ -73,7 +73,7 @@ func (t *httpTransStream) Input(packet utils.AVPacket) error {
 	var separatorSize int
 
 	//新的合并写切片, 预留包长字节
-	if t.mwBuffer.IsCompeted() {
+	if t.mwBuffer.IsCompleted() {
 		separatorSize = HttpFlvBlockLengthSize
 		//10字节描述flv包长, 前2个字节描述无效字节长度
 		n = HttpFlvBlockLengthSize
@@ -186,8 +186,6 @@ func (t *httpTransStream) writeSeparator(dst []byte) {
 }
 
 func (t *httpTransStream) WriteHeader() error {
-	t.Init()
-
 	t.headerSize += t.muxer.WriteHeader(t.header[HttpFlvBlockLengthSize:])
 
 	for _, track := range t.BaseTransStream.Tracks {

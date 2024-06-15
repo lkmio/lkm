@@ -108,7 +108,7 @@ type Source interface {
 	// OnDeMuxDone 所有流解析完毕回调
 	OnDeMuxDone()
 
-	Init(inputCB func(data []byte) error, closeCB func())
+	Init(inputCB func(data []byte) error, closeCB func(), receiveQueueSize int)
 
 	LoopEvent()
 
@@ -123,6 +123,8 @@ type Source interface {
 	StartIdleTimer()
 
 	State() SessionState
+
+	SetInputCb(func(data []byte) error)
 }
 
 type PublishSource struct {
@@ -154,7 +156,6 @@ type PublishSource struct {
 	//sink的拉流和断开拉流事件，都通过管道交给Source处理. 意味着Source内部解析流、封装流、传输流都可以做到无锁操作
 	//golang的管道是有锁的(https://github.com/golang/go/blob/d38f1d13fa413436d38d86fe86d6a146be44bb84/src/runtime/chan.go#L202), 后面使用cas队列传输事件, 并且可以做到一次读取多个事件
 	inputDataEvent        chan []byte
-	dataConsumedEvent     chan byte //解析完input的数据后，才能继续从网络io中读取流
 	closedEvent           chan byte
 	playingEventQueue     chan Sink
 	playingDoneEventQueue chan Sink
@@ -172,15 +173,15 @@ func (s *PublishSource) Id() string {
 	return s.Id_
 }
 
-func (s *PublishSource) Init(inputCB func(data []byte) error, closeCB func()) {
+func (s *PublishSource) Init(inputCB func(data []byte) error, closeCB func(), receiveQueueSize int) {
 	s.inputCB = inputCB
 	s.closeCB = closeCB
 
 	s.SetState(SessionStateHandshakeDone)
 	//初始化事件接收缓冲区
 	//收流和网络断开的chan都阻塞执行
-	s.inputDataEvent = make(chan []byte)
-	s.dataConsumedEvent = make(chan byte)
+	//-1是为了保证从管道取到流, 到解析流是安全的, 不会被覆盖
+	s.inputDataEvent = make(chan []byte, receiveQueueSize-1)
 	s.closedEvent = make(chan byte)
 	s.playingEventQueue = make(chan Sink, 128)
 	s.playingDoneEventQueue = make(chan Sink, 128)
@@ -234,22 +235,21 @@ func (s *PublishSource) LoopEvent() {
 		select {
 		case data := <-s.inputDataEvent:
 			if !s.closed {
-				if AppConfig.ReceiveTimeout > 0 {
-					s.lastPacketTime = time.Now()
-				}
-
-				if s.state == SessionStateHandshakeDone {
-					s.state = SessionStateTransferring
-					//不在父类处理hook和prepare事情
-				}
-
-				if err := s.inputCB(data); err != nil {
-					log.Sugar.Errorf("处理输入流失败 释放source:%s err:%s", s.Id_, err.Error())
-					s.Close()
-				}
+				break
 			}
 
-			s.dataConsumedEvent <- 0
+			if AppConfig.ReceiveTimeout > 0 {
+				s.lastPacketTime = time.Now()
+			}
+
+			if s.state == SessionStateHandshakeDone {
+				s.state = SessionStateTransferring
+			}
+
+			if err := s.inputCB(data); err != nil {
+				log.Sugar.Errorf("处理输入流失败 释放source:%s err:%s", s.Id_, err.Error())
+				s.Close()
+			}
 			break
 		case sink := <-s.playingEventQueue:
 			if !s.completed {
@@ -363,6 +363,7 @@ func (s *PublishSource) AddSink(sink Sink) bool {
 			transStream.AddTrack(streams[i])
 		}
 
+		transStream.Init()
 		_ = transStream.WriteHeader()
 	}
 
@@ -413,7 +414,6 @@ func (s *PublishSource) RemoveSink(sink Sink) bool {
 func (s *PublishSource) AddEvent(event SourceEvent, data interface{}) {
 	if SourceEventInput == event {
 		s.inputDataEvent <- data.([]byte)
-		<-s.dataConsumedEvent
 	} else if SourceEventPlay == event {
 		s.playingEventQueue <- data.(Sink)
 	} else if SourceEventPlayDone == event {
@@ -649,4 +649,8 @@ func (s *PublishSource) StartIdleTimer() {
 
 func (s *PublishSource) State() SessionState {
 	return s.state
+}
+
+func (s *PublishSource) SetInputCb(cb func(data []byte) error) {
+	s.inputCB = cb
 }

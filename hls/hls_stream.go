@@ -36,59 +36,6 @@ type transStream struct {
 	m3u8Sinks map[stream.SinkId]stream.Sink
 }
 
-// NewTransStream 创建HLS传输流
-// @url   		url前缀
-// @m3u8Name	m3u8文件名
-// @tsFormat	ts文件格式, 例如: %d.ts
-// @parentDir	保存切片的绝对路径. mu38和ts切片放在同一目录下, 目录地址使用parentDir+urlPrefix
-// @segmentDuration 单个切片时长
-// @playlistLength 缓存多少个切片
-func NewTransStream(url, m3u8Name, tsFormat, dir string, segmentDuration, playlistLength int) (stream.TransStream, error) {
-	//创建文件夹
-	if err := os.MkdirAll(dir, 0666); err != nil {
-		return nil, err
-	}
-
-	//创建m3u8文件
-	m3u8Path := fmt.Sprintf("%s/%s", dir, m3u8Name)
-	file, err := os.OpenFile(m3u8Path, os.O_CREATE|os.O_RDWR, 0666)
-	if err != nil {
-		return nil, err
-	}
-
-	stream_ := &transStream{
-		url:            url,
-		m3u8Name:       m3u8Name,
-		tsFormat:       tsFormat,
-		dir:            dir,
-		duration:       segmentDuration,
-		playlistLength: playlistLength,
-	}
-
-	//创建TS封装器
-	muxer := libmpeg.NewTSMuxer()
-	muxer.SetWriteHandler(stream_.onTSWrite)
-	muxer.SetAllocHandler(stream_.onTSAlloc)
-
-	stream_.context = &tsContext{
-		segmentSeq:      0,
-		writeBuffer:     make([]byte, 1024*1024),
-		writeBufferSize: 0,
-	}
-
-	stream_.muxer = muxer
-	stream_.m3u8 = NewM3U8Writer(playlistLength)
-	stream_.m3u8File = file
-
-	stream_.m3u8Sinks = make(map[stream.SinkId]stream.Sink, 24)
-	return stream_, nil
-}
-
-func TransStreamFactory(source stream.Source, protocol stream.Protocol, streams []utils.AVStream) (stream.TransStream, error) {
-	id := source.Id()
-	return NewTransStream("", stream.AppConfig.Hls.M3U8Format(id), stream.AppConfig.Hls.TSFormat(id, "%d"), stream.AppConfig.Hls.Dir, stream.AppConfig.Hls.Duration, stream.AppConfig.Hls.PlaylistLength)
-}
-
 func (t *transStream) Input(packet utils.AVPacket) error {
 	if packet.Index() >= t.muxer.TrackCount() {
 		return fmt.Errorf("track not available")
@@ -137,8 +84,6 @@ func (t *transStream) AddTrack(stream utils.AVStream) error {
 }
 
 func (t *transStream) WriteHeader() error {
-	t.Init()
-
 	return t.createSegment()
 }
 
@@ -245,4 +190,57 @@ func (t *transStream) Close() error {
 	}
 
 	return err
+}
+
+// NewTransStream 创建HLS传输流
+// @url   		url前缀
+// @m3u8Name	m3u8文件名
+// @tsFormat	ts文件格式, 例如: %d.ts
+// @parentDir	保存切片的绝对路径. mu38和ts切片放在同一目录下, 目录地址使用parentDir+urlPrefix
+// @segmentDuration 单个切片时长
+// @playlistLength 缓存多少个切片
+func NewTransStream(url, m3u8Name, tsFormat, dir string, segmentDuration, playlistLength int) (stream.TransStream, error) {
+	//创建文件夹
+	if err := os.MkdirAll(dir, 0666); err != nil {
+		return nil, err
+	}
+
+	//创建m3u8文件
+	m3u8Path := fmt.Sprintf("%s/%s", dir, m3u8Name)
+	file, err := os.OpenFile(m3u8Path, os.O_CREATE|os.O_RDWR, 0666)
+	if err != nil {
+		return nil, err
+	}
+
+	stream_ := &transStream{
+		url:            url,
+		m3u8Name:       m3u8Name,
+		tsFormat:       tsFormat,
+		dir:            dir,
+		duration:       segmentDuration,
+		playlistLength: playlistLength,
+	}
+
+	//创建TS封装器
+	muxer := libmpeg.NewTSMuxer()
+	muxer.SetWriteHandler(stream_.onTSWrite)
+	muxer.SetAllocHandler(stream_.onTSAlloc)
+
+	stream_.context = &tsContext{
+		segmentSeq:      0,
+		writeBuffer:     make([]byte, 1024*1024),
+		writeBufferSize: 0,
+	}
+
+	stream_.muxer = muxer
+	stream_.m3u8 = NewM3U8Writer(playlistLength)
+	stream_.m3u8File = file
+
+	stream_.m3u8Sinks = make(map[stream.SinkId]stream.Sink, 24)
+	return stream_, nil
+}
+
+func TransStreamFactory(source stream.Source, protocol stream.Protocol, streams []utils.AVStream) (stream.TransStream, error) {
+	id := source.Id()
+	return NewTransStream("", stream.AppConfig.Hls.M3U8Format(id), stream.AppConfig.Hls.TSFormat(id, "%d"), stream.AppConfig.Hls.Dir, stream.AppConfig.Hls.Duration, stream.AppConfig.Hls.PlaylistLength)
 }

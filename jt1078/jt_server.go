@@ -21,15 +21,18 @@ func NewServer() Server {
 	return &jtServer{}
 }
 
-func (s jtServer) OnConnected(conn net.Conn) {
+func (s jtServer) OnConnected(conn net.Conn) []byte {
 	log.Sugar.Debugf("jtserver连接 conn:%s", conn.RemoteAddr().String())
 
 	t := conn.(*transport.Conn)
 	t.Data = NewSession(conn)
+
+	return t.Data.(*Session).receiveBuffer.GetBlock()
 }
 
-func (s jtServer) OnPacket(conn net.Conn, data []byte) {
-	conn.(*transport.Conn).Data.(*Session).Input(data)
+func (s jtServer) OnPacket(conn net.Conn, data []byte) []byte {
+	conn.(*transport.Conn).Data.(*Session).PublishSource.Input(data)
+	return conn.(*transport.Conn).Data.(*Session).receiveBuffer.GetBlock()
 }
 
 func (s jtServer) OnDisConnected(conn net.Conn, err error) {

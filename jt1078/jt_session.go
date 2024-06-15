@@ -37,13 +37,14 @@ type Session struct {
 	phone   string
 	decoder *transport.DelimiterFrameDecoder
 
-	audioIndex  int
-	videoIndex  int
-	audioStream utils.AVStream
-	videoStream utils.AVStream
-	audioBuffer stream.MemoryPool
-	videoBuffer stream.MemoryPool
-	rtpPacket   *RtpPacket
+	audioIndex    int
+	videoIndex    int
+	audioStream   utils.AVStream
+	videoStream   utils.AVStream
+	audioBuffer   stream.MemoryPool
+	videoBuffer   stream.MemoryPool
+	rtpPacket     *RtpPacket
+	receiveBuffer *stream.ReceiveBuffer
 }
 
 type RtpPacket struct {
@@ -298,8 +299,9 @@ func NewSession(conn net.Conn) *Session {
 	}
 	delimiter := [4]byte{0x30, 0x31, 0x63, 0x64}
 	session.decoder = transport.NewDelimiterFrameDecoder(1024*1024*2, delimiter[:], session.OnJtPTPPacket)
+	session.receiveBuffer = stream.NewTCPReceiveBuffer()
 
-	session.Init(session.Input, session.Close)
+	session.Init(session.Input, session.Close, stream.ReceiveBufferTCPBlockCount)
 	go session.LoopEvent()
 	return &session
 }

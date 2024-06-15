@@ -12,7 +12,6 @@ type transStream struct {
 
 func NewTransStream() stream.TransStream {
 	t := &transStream{}
-	t.Init()
 	return t
 }
 
