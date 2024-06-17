@@ -160,6 +160,10 @@ func (s *sink) Close() {
 	s.BaseSink.Close()
 
 	for _, sender := range s.senders {
+		if sender == nil {
+			continue
+		}
+
 		if sender.Rtp != nil {
 			sender.Rtp.Close()
 		}

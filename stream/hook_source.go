@@ -38,7 +38,7 @@ func HookPublishEvent(source Source) (*http.Response, utils.HookState) {
 	var response *http.Response
 
 	if AppConfig.Hook.EnablePublishEvent() {
-		hook, err := Hook(HookEventPublish, NewHookPublishEventInfo(source))
+		hook, err := Hook(HookEventPublish, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
 		if err != nil {
 			log.Sugar.Errorf("通知推流事件失败 source:%s err:%s", source.Id(), err.Error())
 			return hook, utils.HookStateFailure
@@ -52,7 +52,7 @@ func HookPublishEvent(source Source) (*http.Response, utils.HookState) {
 
 func HookPublishDoneEvent(source Source) {
 	if AppConfig.Hook.EnablePublishEvent() {
-		_, err := Hook(HookEventPublishDone, NewHookPublishEventInfo(source))
+		_, err := Hook(HookEventPublishDone, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
 		if err != nil {
 			log.Sugar.Errorf("通知推流结束事件失败 source:%s err:%s", source.Id(), err.Error())
 		}
@@ -63,7 +63,7 @@ func HookReceiveTimeoutEvent(source Source) (*http.Response, utils.HookState) {
 	var response *http.Response
 
 	if AppConfig.Hook.EnableOnReceiveTimeout() {
-		resp, err := Hook(HookEventReceiveTimeout, NewHookPublishEventInfo(source))
+		resp, err := Hook(HookEventReceiveTimeout, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
 		if err != nil {
 			log.Sugar.Errorf("通知收流超时事件失败 source:%s err:%s", source.Id(), err.Error())
 			return resp, utils.HookStateFailure
@@ -79,7 +79,7 @@ func HookIdleTimeoutEvent(source Source) (*http.Response, utils.HookState) {
 	var response *http.Response
 
 	if AppConfig.Hook.EnableOnIdleTimeout() {
-		resp, err := Hook(HookEventIdleTimeout, NewHookPublishEventInfo(source))
+		resp, err := Hook(HookEventIdleTimeout, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
 		if err != nil {
 			log.Sugar.Errorf("通知空闲超时时间失败 source:%s err:%s", source.Id(), err.Error())
 			return resp, utils.HookStateFailure

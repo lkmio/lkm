@@ -33,13 +33,16 @@ func (s *Session) generateSourceId(app, stream_ string) string {
 func (s *Session) OnPublish(app, stream_ string, response chan utils.HookState) {
 	log.Sugar.Infof("rtmp onpublish app:%s stream:%s conn:%s", app, stream_, s.conn.RemoteAddr().String())
 
-	sourceId := s.generateSourceId(app, stream_)
+	streamName, values := stream.ParseUrl(stream_)
+
+	sourceId := s.generateSourceId(app, streamName)
 	source := NewPublisher(sourceId, s.stack, s.conn)
 	//设置推流的音视频回调
 	s.stack.SetOnPublishHandler(source)
 
 	//初始化放在add source前面, 以防add后再init,空窗期拉流队列空指针.
 	source.Init(source.Input, source.Close, stream.ReceiveBufferTCPBlockCount)
+	source.SetUrlValues(values)
 
 	//推流事件Source统一处理, 是否已经存在, Hook回调....
 	_, state := stream.PreparePublishSource(source, true)
@@ -57,9 +60,11 @@ func (s *Session) OnPublish(app, stream_ string, response chan utils.HookState) 
 }
 
 func (s *Session) OnPlay(app, stream_ string, response chan utils.HookState) {
-	sourceId := s.generateSourceId(app, stream_)
-	//拉流事件Sink统一处理
+	streamName, values := stream.ParseUrl(stream_)
+
+	sourceId := s.generateSourceId(app, streamName)
 	sink := NewSink(stream.GenerateSinkId(s.conn.RemoteAddr()), sourceId, s.conn)
+	sink.SetUrlValues(values)
 
 	log.Sugar.Infof("rtmp onplay app:%s stream:%s sink:%v conn:%s", app, stream_, sink.Id(), s.conn.RemoteAddr().String())
 

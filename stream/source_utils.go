@@ -2,6 +2,8 @@ package stream
 
 import (
 	"fmt"
+	"github.com/yangjiechina/lkm/log"
+	"net/url"
 	"strings"
 )
 
@@ -50,4 +52,20 @@ func Path2SourceId(path string, suffix string) (string, error) {
 	}
 
 	return source, nil
+}
+
+// ParseUrl 从推拉流url中解析出流id和url参数
+func ParseUrl(name string) (string, url.Values) {
+	index := strings.Index(name, "?")
+	if index > 0 && index < len(name)-1 {
+		query, err := url.ParseQuery(name[index+1:])
+		if err != nil {
+			log.Sugar.Errorf("解析url参数失败 err:%s url:%s", err.Error(), name)
+			return name, nil
+		}
+
+		return name[:index], query
+	}
+
+	return name, nil
 }

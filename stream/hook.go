@@ -43,12 +43,15 @@ func sendHookEvent(url string, body interface{}) (*http.Response, error) {
 	return client.Do(request)
 }
 
-func Hook(event HookEvent, body interface{}) (*http.Response, error) {
+func Hook(event HookEvent, params string, body interface{}) (*http.Response, error) {
 	url, ok := hookUrls[event]
 	if url == "" || !ok {
 		return nil, fmt.Errorf("the url for this %s event does not exist", event.ToString())
 	}
 
+	if "" != params {
+		url += "?" + params
+	}
 	response, err := sendHookEvent(url, body)
 	if err == nil && http.StatusOK != response.StatusCode {
 		return response, fmt.Errorf("reason %s", response.Status)

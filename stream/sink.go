@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/yangjiechina/avformat/utils"
 	"net"
+	"net/url"
 	"sync"
 )
 
@@ -55,6 +56,10 @@ type Sink interface {
 	Lock()
 
 	UnLock()
+
+	UrlValues() url.Values
+
+	SetUrlValues(values url.Values)
 }
 
 // GenerateSinkId 根据网络地址生成SinkId IPV4使用一个uint64, IPV6使用String
@@ -94,7 +99,8 @@ type BaseSink struct {
 	DesiredAudioCodecId_ utils.AVCodecID
 	DesiredVideoCodecId_ utils.AVCodecID
 
-	Conn net.Conn
+	Conn      net.Conn
+	urlValues url.Values
 }
 
 func (s *BaseSink) Id() SinkId {
@@ -217,4 +223,11 @@ func (s *BaseSink) RemoteAddr() string {
 	}
 
 	return s.Conn.RemoteAddr().String()
+}
+
+func (s *BaseSink) UrlValues() url.Values {
+	return s.urlValues
+}
+func (s *BaseSink) SetUrlValues(values url.Values) {
+	s.urlValues = values
 }

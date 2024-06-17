@@ -285,6 +285,7 @@ func (api *ApiServer) onWSFlv(sourceId string, w http.ResponseWriter, r *http.Re
 	}
 
 	sink := flv.NewFLVSink(api.generateSinkId(r.RemoteAddr), sourceId, flv.NewWSConn(conn))
+	sink.SetUrlValues(r.URL.Query())
 	log.Sugar.Infof("ws-flv 连接 sink:%s", sink.PrintInfo())
 
 	_, state := stream.PreparePlaySink(sink)
@@ -324,6 +325,7 @@ func (api *ApiServer) onHttpFLV(sourceId string, w http.ResponseWriter, r *http.
 	}
 
 	sink := flv.NewFLVSink(api.generateSinkId(r.RemoteAddr), sourceId, conn)
+	sink.SetUrlValues(r.URL.Query())
 	log.Sugar.Infof("http-flv 连接 sink:%s", sink.PrintInfo())
 
 	_, state := stream.PreparePlaySink(sink)
@@ -394,6 +396,7 @@ func (api *ApiServer) onHLS(sourceId string, w http.ResponseWriter, r *http.Requ
 			done <- 0
 		})
 
+		sink.SetUrlValues(r.URL.Query())
 		_, state := stream.PreparePlaySink(sink)
 		if utils.HookStateOK != state {
 			log.Sugar.Warnf("m3u8 请求失败 sink:%s", sink.PrintInfo())
@@ -454,6 +457,7 @@ func (api *ApiServer) onRtc(sourceId string, w http.ResponseWriter, r *http.Requ
 		group.Done()
 	})
 
+	sink.SetUrlValues(r.URL.Query())
 	log.Sugar.Infof("rtc 请求 sink:%s sdp:%v", sink.PrintInfo(), v.SDP)
 
 	_, state := stream.PreparePlaySink(sink)

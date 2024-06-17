@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/yangjiechina/lkm/log"
 	"net"
+	"net/url"
 	"time"
 
 	"github.com/yangjiechina/avformat/stream"
@@ -126,6 +127,10 @@ type Source interface {
 	State() SessionState
 
 	SetInputCb(func(data []byte) error)
+
+	UrlValues() url.Values
+
+	SetUrlValues(values url.Values)
 }
 
 type PublishSource struct {
@@ -168,6 +173,7 @@ type PublishSource struct {
 	idleTimer        *time.Timer
 	sinkCount        int
 	closed           bool
+	urlValues        url.Values
 }
 
 func (s *PublishSource) Id() string {
@@ -655,4 +661,11 @@ func (s *PublishSource) State() SessionState {
 
 func (s *PublishSource) SetInputCb(cb func(data []byte) error) {
 	s.inputCB = cb
+}
+
+func (s *PublishSource) UrlValues() url.Values {
+	return s.urlValues
+}
+func (s *PublishSource) SetUrlValues(values url.Values) {
+	s.urlValues = values
 }

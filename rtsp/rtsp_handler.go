@@ -70,14 +70,7 @@ func (h handler) Process(session *session, method string, url_ *url.URL, headers
 		return fmt.Errorf("please establish a session first")
 	}
 
-	source := strings.TrimSpace(url_.Path)
-	if strings.HasPrefix(source, "/") {
-		source = source[1:]
-	}
-
-	if len(strings.TrimSpace(source)) == 0 {
-		return fmt.Errorf("the request source cannot be empty")
-	}
+	source, _ := stream.Path2SourceId(url_.Path, "")
 
 	//反射调用各个处理函数
 	results := m.Call([]reflect.Value{
@@ -138,6 +131,7 @@ func (h handler) OnDescribe(request Request) (*http.Response, []byte, error) {
 		request.session.response(response, []byte(sdp))
 	})
 
+	sink_.SetUrlValues(request.url.Query())
 	_, code := stream.PreparePlaySink(sink_)
 	if utils.HookStateOK != code {
 		return nil, nil, fmt.Errorf("hook failed. code:%d", code)
@@ -150,7 +144,9 @@ func (h handler) OnDescribe(request Request) (*http.Response, []byte, error) {
 func (h handler) OnSetup(request Request) (*http.Response, []byte, error) {
 	var response *http.Response
 
-	query, err := url.ParseQuery(request.url.RawQuery)
+	//修复rtsp拉流携带参数,参数解析失败.
+	params := strings.ReplaceAll(request.url.RawQuery, "/?", "&")
+	query, err := url.ParseQuery(params)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -267,7 +267,7 @@ func NewTransStream(addr net.IPAddr, urlFormat string) stream.TransStream {
 }
 
 func TransStreamFactory(source stream.Source, protocol stream.Protocol, streams []utils.AVStream) (stream.TransStream, error) {
-	trackFormat := source.Id() + "?track=%d"
+	trackFormat := "?track=%d"
 	return NewTransStream(net.IPAddr{
 		IP:   net.ParseIP(stream.AppConfig.PublicIP),
 		Zone: "",
