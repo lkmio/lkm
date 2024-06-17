@@ -16,8 +16,8 @@ func (t PassiveSource) TransportType() TransportType {
 	return TransportTypeTCPPassive
 }
 
+// InputRtp tcp收流,直接解析ps流.
 func (t PassiveSource) InputRtp(pkt *rtp.Packet) error {
-	//TCP收流, 解析rtp后直接送给ps解析
 	t.Input(pkt.Payload)
 	return nil
 }

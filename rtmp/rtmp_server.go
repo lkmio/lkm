@@ -50,8 +50,6 @@ func (s *server) OnConnected(conn net.Conn) []byte {
 }
 
 func (s *server) OnPacket(conn net.Conn, data []byte) []byte {
-	log.Sugar.Infof("rtmp包大小:%d", len(data))
-
 	t := conn.(*transport.Conn)
 	session := t.Data.(*Session)
 	err := session.Input(conn, data)

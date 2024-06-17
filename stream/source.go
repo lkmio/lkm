@@ -3,7 +3,6 @@ package stream
 import (
 	"fmt"
 	"github.com/yangjiechina/lkm/log"
-	"math"
 	"net"
 	"time"
 
@@ -55,6 +54,8 @@ const (
 type Source interface {
 	// Id Source的唯一ID/**
 	Id() string
+
+	SetId(id string)
 
 	// Input 输入推流数据
 	//@Return bool fatal error.释放Source
@@ -173,6 +174,10 @@ func (s *PublishSource) Id() string {
 	return s.Id_
 }
 
+func (s *PublishSource) SetId(id string) {
+	s.Id_ = id
+}
+
 func (s *PublishSource) Init(inputCB func(data []byte) error, closeCB func(), receiveQueueSize int) {
 	s.inputCB = inputCB
 	s.closeCB = closeCB
@@ -234,16 +239,12 @@ func (s *PublishSource) LoopEvent() {
 	for {
 		select {
 		case data := <-s.inputDataEvent:
-			if !s.closed {
+			if s.closed {
 				break
 			}
 
 			if AppConfig.ReceiveTimeout > 0 {
 				s.lastPacketTime = time.Now()
-			}
-
-			if s.state == SessionStateHandshakeDone {
-				s.state = SessionStateTransferring
 			}
 
 			if err := s.inputCB(data); err != nil {
@@ -622,7 +623,8 @@ func (s *PublishSource) StartReceiveDataTimer() {
 			}
 		}
 
-		s.receiveDataTimer.Reset(time.Duration(math.Abs(float64(time.Duration(AppConfig.ReceiveTimeout) - dis))))
+		//对精度没要求
+		s.receiveDataTimer.Reset(time.Duration(AppConfig.ReceiveTimeout))
 	})
 }
 
@@ -643,7 +645,7 @@ func (s *PublishSource) StartIdleTimer() {
 			}
 		}
 
-		s.idleTimer.Reset(time.Duration(math.Abs(float64(AppConfig.IdleTimeout - int64(dis)))))
+		s.idleTimer.Reset(time.Duration(AppConfig.IdleTimeout))
 	})
 }
 

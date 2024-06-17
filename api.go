@@ -97,10 +97,9 @@ func startApiServer(addr string) {
 func (api *ApiServer) createGBSource(w http.ResponseWriter, r *http.Request) {
 	//请求参数
 	v := &struct {
-		Source    string `json:"source"` //SourceId
-		Transport string `json:"transport,omitempty"`
-		Setup     string `json:"setup"` //active/passive
-		SSRC      uint32 `json:"ssrc,omitempty"`
+		Source string `json:"source"` //SourceId
+		Setup  string `json:"setup"`  //active/passive
+		SSRC   uint32 `json:"ssrc,omitempty"`
 	}{}
 
 	//返回监听的端口
@@ -129,9 +128,17 @@ func (api *ApiServer) createGBSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tcp := strings.Contains(v.Transport, "tcp")
+	tcp := true
 	var active bool
-	if tcp && "active" == v.Setup {
+	if v.Setup == "passive" {
+	} else if v.Setup == "active" {
+		active = true
+	} else {
+		tcp = false
+		//udp收流
+	}
+
+	if tcp && active {
 		if !stream.AppConfig.GB28181.IsMultiPort() {
 			err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "创建GB28181 Source失败, 单端口模式下不能主动拉流"}
 		} else if !tcp {
@@ -143,8 +150,6 @@ func (api *ApiServer) createGBSource(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
-
-		active = true
 	}
 
 	_, port, err := gb28181.NewGBSource(v.Source, v.SSRC, tcp, active)

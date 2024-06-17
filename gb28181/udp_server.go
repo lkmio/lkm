@@ -13,20 +13,6 @@ type UDPServer struct {
 	filter Filter
 }
 
-func NewUDPServer(addr net.Addr, filter Filter) (*UDPServer, error) {
-	server := &UDPServer{
-		filter: filter,
-	}
-
-	udp, err := transport.NewUDPServer(addr, server)
-	if err != nil {
-		return nil, err
-	}
-
-	server.udp = udp
-	return server, nil
-}
-
 func (U UDPServer) OnConnected(conn net.Conn) []byte {
 	return nil
 }
@@ -34,7 +20,6 @@ func (U UDPServer) OnConnected(conn net.Conn) []byte {
 func (U UDPServer) OnPacket(conn net.Conn, data []byte) []byte {
 	packet := rtp.Packet{}
 	err := packet.Unmarshal(data)
-
 	if err != nil {
 		log.Sugar.Errorf("解析rtp失败 err:%s conn:%s", err.Error(), conn.RemoteAddr().String())
 		return nil
@@ -47,7 +32,7 @@ func (U UDPServer) OnPacket(conn net.Conn, data []byte) []byte {
 	}
 
 	if stream.SessionStateHandshakeDone == source.State() {
-		source.PreparePublishSource(conn, packet.SSRC, source)
+		source.PreparePublish(conn, packet.SSRC, source)
 	}
 
 	source.InputRtp(&packet)
@@ -56,4 +41,18 @@ func (U UDPServer) OnPacket(conn net.Conn, data []byte) []byte {
 
 func (U UDPServer) OnDisConnected(conn net.Conn, err error) {
 
+}
+
+func NewUDPServer(addr net.Addr, filter Filter) (*UDPServer, error) {
+	server := &UDPServer{
+		filter: filter,
+	}
+
+	udp, err := transport.NewUDPServer(addr, server)
+	if err != nil {
+		return nil, err
+	}
+
+	server.udp = udp
+	return server, nil
 }

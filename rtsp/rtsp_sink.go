@@ -66,7 +66,7 @@ func (s *sink) addSender(index int, tcp bool, ssrc uint32) (uint16, uint16, erro
 
 			if err == nil {
 				//创建rtp udp server
-				sender.Rtp = &transport.UDPTransport{}
+				sender.Rtp = &transport.UDPServer{}
 				sender.Rtp.SetHandler2(nil, sender.OnRTPPacket, nil)
 				err = sender.Rtp.Bind(addr)
 			}
@@ -80,7 +80,7 @@ func (s *sink) addSender(index int, tcp bool, ssrc uint32) (uint16, uint16, erro
 
 			if err == nil {
 				//创建rtcp udp server
-				sender.Rtcp = &transport.UDPTransport{}
+				sender.Rtcp = &transport.UDPServer{}
 				sender.Rtcp.SetHandler2(nil, sender.OnRTCPPacket, nil)
 				err = sender.Rtcp.Bind(addr)
 			} else {

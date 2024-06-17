@@ -1,9 +1,9 @@
 package stream
 
 const (
-	ReceiveBufferUdpBlockCount = 200
+	ReceiveBufferUdpBlockCount = 300
 
-	ReceiveBufferTCPBlockCount = 100
+	ReceiveBufferTCPBlockCount = 50
 )
 
 // ReceiveBuffer 收流缓冲区. 网络收流->解析流->封装流->发送流是同步的,从解析到发送可能耗时,从而影响读取网络流. 使用收流缓冲区,可有效降低出现此问题的概率.
@@ -19,7 +19,7 @@ type ReceiveBuffer struct {
 
 func (r *ReceiveBuffer) GetBlock() []byte {
 	bytes := r.data[r.index*r.blockSize:]
-	r.index = r.index + 1%r.blockCount
+	r.index = (r.index + 1) % r.blockCount
 	return bytes[:r.blockSize]
 }
 

@@ -40,9 +40,7 @@ type GBSource interface {
 
 	TransportType() TransportType
 
-	PrepareTransDeMuxer(id string, ssrc uint32)
-
-	PreparePublishSource(conn net.Conn, ssrc uint32, source GBSource)
+	PreparePublish(conn net.Conn, ssrc uint32, source GBSource)
 
 	SetConn(conn net.Conn)
 
@@ -56,108 +54,8 @@ type BaseGBSource struct {
 	audioStream utils.AVStream
 	videoStream utils.AVStream
 
-	ssrc          uint32
-	transport     transport.ITransport
-	receiveBuffer *stream.ReceiveBuffer
-}
-
-func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, uint16, error) {
-	if tcp {
-		utils.Assert(stream.AppConfig.GB28181.EnableTCP())
-	} else {
-		utils.Assert(stream.AppConfig.GB28181.EnableUDP())
-	}
-
-	if active {
-		utils.Assert(tcp && stream.AppConfig.GB28181.EnableTCP() && stream.AppConfig.GB28181.IsMultiPort())
-	}
-
-	var source GBSource
-	var port uint16
-	var err error
-
-	if active {
-		source, port, err = NewActiveSource()
-	} else if tcp {
-		source = NewPassiveSource()
-	} else {
-		source = NewUDPSource()
-	}
-
-	if err != nil {
-		return nil, 0, err
-	}
-
-	//单端口模式，绑定ssrc
-	if !stream.AppConfig.GB28181.IsMultiPort() {
-		var success bool
-		if tcp {
-			success = SharedTCPServer.filter.AddSource(ssrc, source)
-		} else {
-			success = SharedUDPServer.filter.AddSource(ssrc, source)
-		}
-
-		if !success {
-			return nil, 0, fmt.Errorf("ssrc conflict")
-		}
-
-		port = stream.AppConfig.GB28181.Port[0]
-	} else if !active {
-		if tcp {
-			err := TransportManger.AllocTransport(true, func(port_ uint16) error {
-
-				addr, _ := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", stream.AppConfig.GB28181.Addr, port_))
-				server, err := NewTCPServer(addr, NewSingleFilter(source))
-				if err != nil {
-
-					return err
-				}
-
-				source.(*PassiveSource).transport = server.tcp
-				port = port_
-				return nil
-			})
-
-			if err != nil {
-				return nil, 0, err
-			}
-		} else {
-			err := TransportManger.AllocTransport(false, func(port_ uint16) error {
-
-				addr, _ := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", stream.AppConfig.GB28181.Addr, port_))
-				server, err := NewUDPServer(addr, NewSingleFilter(source))
-				if err != nil {
-					return err
-				}
-
-				source.(*UDPSource).transport = server.udp
-				port = port_
-				return nil
-			})
-
-			if err != nil {
-				return nil, 0, err
-			}
-		}
-	}
-
-	source.PrepareTransDeMuxer(id, ssrc)
-	_, state := stream.PreparePublishSource(source, false)
-	if utils.HookStateOK != state {
-		return nil, 0, fmt.Errorf("error code %d", state)
-	}
-
-	var bufferBlockCount int
-	if active || tcp {
-		bufferBlockCount = stream.ReceiveBufferTCPBlockCount
-	} else {
-		bufferBlockCount = stream.ReceiveBufferUdpBlockCount
-	}
-
-	source.SetType(stream.SourceType28181)
-	source.Init(source.Input, source.Close, bufferBlockCount)
-	go source.LoopEvent()
-	return source, port, err
+	ssrc      uint32
+	transport transport.ITransport
 }
 
 func (source *BaseGBSource) InputRtp(pkt *rtp.Packet) error {
@@ -168,14 +66,14 @@ func (source *BaseGBSource) Transport() TransportType {
 	panic("implement me")
 }
 
-func (source *BaseGBSource) PrepareTransDeMuxer(id string, ssrc uint32) {
-	source.Id_ = id
-	source.ssrc = ssrc
+func (source *BaseGBSource) Init(inputCB func(data []byte) error, closeCB func(), receiveQueueSize int) {
 	source.deMuxerCtx = libmpeg.NewPSDeMuxerContext(make([]byte, PsProbeBufferSize))
 	source.deMuxerCtx.SetHandler(source)
+	source.SetType(stream.SourceType28181)
+	source.PublishSource.Init(inputCB, closeCB, receiveQueueSize)
 }
 
-// Input 输入PS流
+// Input 解析PS流, 确保在loop event协程调用此函数
 func (source *BaseGBSource) Input(data []byte) error {
 	return source.deMuxerCtx.Input(data)
 }
@@ -345,18 +243,9 @@ func (source *BaseGBSource) SetSSRC(ssrc uint32) {
 	source.ssrc = ssrc
 }
 
-func (source *BaseGBSource) SetReceiveBuffer(buffer *stream.ReceiveBuffer) {
-	source.receiveBuffer = buffer
-}
-
-func (source *BaseGBSource) ReceiveBuffer() *stream.ReceiveBuffer {
-	return source.receiveBuffer
-}
-
-func (source *BaseGBSource) PreparePublishSource(conn net.Conn, ssrc uint32, source_ GBSource) {
+func (source *BaseGBSource) PreparePublish(conn net.Conn, ssrc uint32, source_ GBSource) {
 	source.SetConn(conn)
 	source.SetSSRC(ssrc)
-
 	source.SetState(stream.SessionStateTransferring)
 
 	if stream.AppConfig.Hook.EnablePublishEvent() {
@@ -371,4 +260,103 @@ func (source *BaseGBSource) PreparePublishSource(conn net.Conn, ssrc uint32, sou
 			}
 		}()
 	}
+}
+
+// NewGBSource 创建gb源,返回监听的收流端口
+func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, uint16, error) {
+	if tcp {
+		utils.Assert(stream.AppConfig.GB28181.EnableTCP())
+	} else {
+		utils.Assert(stream.AppConfig.GB28181.EnableUDP())
+	}
+
+	if active {
+		utils.Assert(tcp && stream.AppConfig.GB28181.EnableTCP() && stream.AppConfig.GB28181.IsMultiPort())
+	}
+
+	var source GBSource
+	var port uint16
+	var err error
+
+	if active {
+		source, port, err = NewActiveSource()
+	} else if tcp {
+		source = NewPassiveSource()
+	} else {
+		source = NewUDPSource()
+	}
+
+	if err != nil {
+		return nil, 0, err
+	}
+
+	//单端口模式，绑定ssrc
+	if !stream.AppConfig.GB28181.IsMultiPort() {
+		var success bool
+		if tcp {
+			success = SharedTCPServer.filter.AddSource(ssrc, source)
+		} else {
+			success = SharedUDPServer.filter.AddSource(ssrc, source)
+		}
+
+		if !success {
+			return nil, 0, fmt.Errorf("ssrc conflict")
+		}
+
+		port = stream.AppConfig.GB28181.Port[0]
+	} else if !active {
+		if tcp {
+			err := TransportManger.AllocTransport(true, func(port_ uint16) error {
+
+				addr, _ := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", stream.AppConfig.GB28181.Addr, port_))
+				server, err := NewTCPServer(addr, NewSingleFilter(source))
+				if err != nil {
+
+					return err
+				}
+
+				source.(*PassiveSource).transport = server.tcp
+				port = port_
+				return nil
+			})
+
+			if err != nil {
+				return nil, 0, err
+			}
+		} else {
+			err := TransportManger.AllocTransport(false, func(port_ uint16) error {
+
+				addr, _ := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", stream.AppConfig.GB28181.Addr, port_))
+				server, err := NewUDPServer(addr, NewSingleFilter(source))
+				if err != nil {
+					return err
+				}
+
+				source.(*UDPSource).transport = server.udp
+				port = port_
+				return nil
+			})
+
+			if err != nil {
+				return nil, 0, err
+			}
+		}
+	}
+
+	var bufferBlockCount int
+	if active || tcp {
+		bufferBlockCount = stream.ReceiveBufferTCPBlockCount
+	} else {
+		bufferBlockCount = stream.ReceiveBufferUdpBlockCount
+	}
+
+	source.SetId(id)
+	source.SetSSRC(ssrc)
+	source.Init(source.Input, source.Close, bufferBlockCount)
+	if _, state := stream.PreparePublishSource(source, false); utils.HookStateOK != state {
+		return nil, 0, fmt.Errorf("error code %d", state)
+	}
+
+	go source.LoopEvent()
+	return source, port, err
 }

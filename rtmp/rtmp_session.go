@@ -38,7 +38,7 @@ func (s *Session) OnPublish(app, stream_ string, response chan utils.HookState) 
 	//设置推流的音视频回调
 	s.stack.SetOnPublishHandler(source)
 
-	//初始化放在add source前面, 以防add-init空窗期, 拉流队列空指针.
+	//初始化放在add source前面, 以防add后再init,空窗期拉流队列空指针.
 	source.Init(source.Input, source.Close, stream.ReceiveBufferTCPBlockCount)
 
 	//推流事件Source统一处理, 是否已经存在, Hook回调....

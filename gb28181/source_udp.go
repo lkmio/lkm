@@ -25,7 +25,7 @@ func (u UDPSource) TransportType() TransportType {
 	return TransportTypeUDP
 }
 
-// InputRtp UDP收流会先拷贝rtp包,交给jitter buffer处理后再发给source
+// InputRtp udp收流会先拷贝rtp包,交给jitter buffer处理后再发给source
 func (u UDPSource) InputRtp(pkt *rtp.Packet) error {
 	block := u.receiveBuffer.GetBlock()
 
@@ -33,12 +33,9 @@ func (u UDPSource) InputRtp(pkt *rtp.Packet) error {
 	pkt.Payload = block[:len(pkt.Payload)]
 	u.jitterBuffer.Push(pkt)
 
-	for {
-		pkt, _ := u.jitterBuffer.Pop()
-		if pkt == nil {
-			return nil
-		}
-
-		u.PublishSource.Input(pkt.Payload)
+	for rtp, _ := u.jitterBuffer.Pop(); rtp != nil; rtp, _ = u.jitterBuffer.Pop() {
+		u.PublishSource.Input(rtp.Payload)
 	}
+
+	return nil
 }
