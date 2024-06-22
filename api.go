@@ -69,10 +69,10 @@ func startApiServer(addr string) {
 	apiServer.router.HandleFunc("/{source}.rtc", withCheckParams(apiServer.onRtc, ".rtc"))
 	apiServer.router.HandleFunc("/{source}/{stream}.rtc", withCheckParams(apiServer.onRtc, ".rtc"))
 
-	apiServer.router.HandleFunc("/v1/gb28181/source/create", apiServer.createGBSource)
+	apiServer.router.HandleFunc("/api/v1/gb28181/source/create", apiServer.createGBSource)
 	//TCP主动,设置连接地址
-	apiServer.router.HandleFunc("/v1/gb28181/source/connect", apiServer.connectGBSource)
-	apiServer.router.HandleFunc("/v1/gb28181/source/close", apiServer.closeGBSource)
+	apiServer.router.HandleFunc("/api/v1/gb28181/source/connect", apiServer.connectGBSource)
+	apiServer.router.HandleFunc("/api/v1/gb28181/source/close", apiServer.closeGBSource)
 
 	apiServer.router.HandleFunc("/rtc.html", func(writer http.ResponseWriter, request *http.Request) {
 		http.ServeFile(writer, request, "./rtc.html")
