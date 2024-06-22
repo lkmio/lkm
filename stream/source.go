@@ -255,7 +255,7 @@ func (s *PublishSource) LoopEvent() {
 
 			if err := s.inputCB(data); err != nil {
 				log.Sugar.Errorf("处理输入流失败 释放source:%s err:%s", s.Id_, err.Error())
-				s.Close()
+				s.doClose()
 			}
 			break
 		case sink := <-s.playingEventQueue:
@@ -437,6 +437,10 @@ func (s *PublishSource) SetState(state SessionState) {
 func (s *PublishSource) doClose() {
 	if s.closed {
 		return
+	}
+
+	if s.Conn != nil {
+		s.Conn.Close()
 	}
 
 	//清空未写完的buffer
