@@ -44,14 +44,8 @@ func (t *httpTransStream) Input(packet utils.AVPacket) error {
 	var dts int64
 	var pts int64
 
-	if utils.AVCodecIdAAC == packet.CodecId() {
-		dts = packet.ConvertDts(1024)
-		pts = packet.ConvertPts(1024)
-	} else {
-		dts = packet.ConvertDts(1000)
-		pts = packet.ConvertPts(1000)
-	}
-
+	dts = packet.ConvertDts(1000)
+	pts = packet.ConvertPts(1000)
 	if utils.AVMediaTypeAudio == packet.MediaType() {
 		flvSize = 17 + len(packet.Data())
 		data = packet.Data()

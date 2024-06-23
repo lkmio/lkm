@@ -16,7 +16,7 @@ type Publisher struct {
 }
 
 func NewPublisher(sourceId string, stack *librtmp.Stack, conn net.Conn) *Publisher {
-	deMuxer := libflv.NewDeMuxer(libflv.TSModeRelative)
+	deMuxer := libflv.NewDeMuxer()
 	publisher_ := &Publisher{PublishSource: stream.PublishSource{Id_: sourceId, Type_: stream.SourceTypeRtmp, TransDeMuxer: deMuxer, Conn: conn}, stack: stack}
 	//设置回调，从flv解析出来的Stream和AVPacket都将统一回调到stream.PublishSource
 	deMuxer.SetHandler(publisher_)
