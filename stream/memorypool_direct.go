@@ -14,7 +14,7 @@ func NewDirectMemoryPool(capacity int) MemoryPool {
 	pool.memoryPool = &memoryPool{
 		data:       make([]byte, capacity),
 		capacity:   capacity,
-		blockQueue: NewQueue(capacity),
+		blockQueue: NewQueue(2048),
 		recopy:     true,
 		isFull:     pool.isFull,
 	}

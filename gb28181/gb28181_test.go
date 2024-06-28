@@ -80,17 +80,15 @@ func connectSource(source string, addr string) {
 	}
 }
 
-func createSource(source, transport, setup string, ssrc uint32) int {
+func createSource(source, setup string, ssrc uint32) (string, uint16) {
 	v := struct {
-		Source    string `json:"source"` //SourceId
-		Transport string `json:"transport,omitempty"`
-		Setup     string `json:"setup"` //active/passive
-		SSRC      uint32 `json:"ssrc,omitempty"`
+		Source string `json:"source"` //SourceId
+		Setup  string `json:"setup"`  //active/passive
+		SSRC   uint32 `json:"ssrc,omitempty"`
 	}{
-		Source:    source,
-		Transport: transport,
-		Setup:     setup,
-		SSRC:      ssrc,
+		Source: source,
+		Setup:  setup,
+		SSRC:   ssrc,
 	}
 
 	marshal, err := json.Marshal(v)
@@ -98,7 +96,7 @@ func createSource(source, transport, setup string, ssrc uint32) int {
 		panic(err)
 	}
 
-	request, err := http.NewRequest("POST", "http://localhost:8080/v1/gb28181/source/create", bytes.NewBuffer(marshal))
+	request, err := http.NewRequest("POST", "http://localhost:8080/api/v1/gb28181/source/create", bytes.NewBuffer(marshal))
 	if err != nil {
 		panic(err)
 	}
@@ -108,46 +106,46 @@ func createSource(source, transport, setup string, ssrc uint32) int {
 	if err != nil {
 		panic(err)
 	}
+	if response.StatusCode != http.StatusOK {
+		panic("")
+	}
 
 	all, err := io.ReadAll(response.Body)
 	if err != nil {
 		panic(err)
 	}
 
-	resposne := &struct {
+	connectInfo := &struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 		Data struct {
-			Port int `json:"port"`
-		} `json:"data"`
+			IP   string `json:"ip"`
+			Port uint16 `json:"port,omitempty"`
+		}
 	}{}
 
-	err = json.Unmarshal(all, resposne)
+	err = json.Unmarshal(all, connectInfo)
 	if err != nil {
 		panic(err)
 	}
 
-	if resposne.Code != http.StatusOK {
-		panic("")
-	}
-
-	return resposne.Data.Port
+	return connectInfo.Data.IP, connectInfo.Data.Port
 }
 
+// 使用wireshark直接导出udp流
+// 根据ssrc来查找每个rtp包, rtp不要带扩展字段
 func TestUDPRecv(t *testing.T) {
-	path := "D:\\GOProjects\\avformat\\gb28181_h264.rtp"
-	ssrc := 0xBEBC201
-	ip := "192.168.2.148"
+	path := "D:\\GOProjects\\avformat\\gb28181_h265.rtp"
+	ssrc := 0xBEBC202
 	localAddr := "0.0.0.0:20001"
-	network := "tcp"
-	setup := "passive"
+	setup := "udp" //udp/passive/active
 	id := "hls_mystream"
 
-	port := createSource(id, network, setup, uint32(ssrc))
+	ip, port := createSource(id, setup, uint32(ssrc))
 
-	if network == "udp" {
-		addr, _ := net.ResolveUDPAddr(network, localAddr)
-		remoteAddr, _ := net.ResolveUDPAddr(network, fmt.Sprintf("%s:%d", ip, port))
+	if setup == "udp" {
+		addr, _ := net.ResolveUDPAddr("udp", localAddr)
+		remoteAddr, _ := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", ip, port))
 
 		client := &transport.UDPClient{}
 		err := client.Connect(addr, remoteAddr)
@@ -160,8 +158,8 @@ func TestUDPRecv(t *testing.T) {
 			time.Sleep(1 * time.Millisecond)
 		})
 	} else if !(setup == "active") {
-		addr, _ := net.ResolveTCPAddr(network, localAddr)
-		remoteAddr, _ := net.ResolveTCPAddr(network, fmt.Sprintf("%s:%d", ip, port))
+		addr, _ := net.ResolveTCPAddr("tcp", localAddr)
+		remoteAddr, _ := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", ip, port))
 
 		client := transport.TCPClient{}
 		err := client.Connect(addr, remoteAddr)
@@ -175,14 +173,16 @@ func TestUDPRecv(t *testing.T) {
 			time.Sleep(1 * time.Millisecond)
 		})
 	} else {
-		addr, _ := net.ResolveTCPAddr(network, localAddr)
+		addr, _ := net.ResolveTCPAddr("tcp", localAddr)
 		server := transport.TCPServer{}
 
-		server.SetHandler2(func(conn net.Conn) {
+		server.SetHandler2(func(conn net.Conn) []byte {
 			readRtp(path, uint32(ssrc), true, func(data []byte) {
 				conn.Write(data)
 				time.Sleep(1 * time.Millisecond)
 			})
+
+			return nil
 		}, nil, nil)
 
 		err := server.Bind(addr)
@@ -190,8 +190,7 @@ func TestUDPRecv(t *testing.T) {
 			panic(err)
 		}
 
-		connectSource(id, "192.168.2.148:20001")
-		//
+		connectSource(id, fmt.Sprintf("%s:%d", ip, port))
 	}
 
 	select {}

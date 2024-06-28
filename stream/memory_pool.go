@@ -25,41 +25,36 @@ type MemoryPool interface {
 	// Fetch 获取当前内存块，必须先调用Mark函数
 	Fetch() []byte
 
-	// Reset 清空本次写入的数据，本次缓存的数据无效
+	// Reset 清空本次流程写入的还未生效内存块
 	Reset()
 
-	// Reserve 预留指定大小的内存空间
+	// Reserve 预留指定大小的内存块
 	//主要是为了和实现和Write相似功能，但是不拷贝, 所以使用流程和Write一样.
 	Reserve(size int)
 
-	// FreeHead 从头部释放一块内存
+	// FreeHead 释放头部一块内存
 	FreeHead()
 
-	// FreeTail 从尾部释放一块内存
+	// FreeTail 释放尾部一块内存
 	FreeTail()
 
+	// Data 返回头尾已使用的内存块
 	Data() ([]byte, []byte)
 
 	// Clear 清空所有内存块
 	Clear()
-
-	Empty() bool
-
-	Capacity() int
-
-	Size() int
 }
 
 type memoryPool struct {
 	data     []byte
 	capacity int //实际的可用容量，当尾部剩余内存不足以此次Write, 并且头部有足够的空闲内存, 则尾部剩余的内存将不可用.
-	head     int
-	tail     int
+	head     int //起始索引
+	tail     int //末尾索引, 当形成回环时, 会小于起始索引
 
-	markIndex         int //保存开始索引
+	markIndex         int //分配内存块的起始索引, 一定小于末尾索引, data[markIndex:tail]此次分配的内存块
 	marked            bool
 	blockQueue        *Queue
-	discardBlockCount int
+	discardBlockCount int  //扩容时, 丢弃之前的内存块数量
 	recopy            bool //扩容时，是否拷贝旧数据. 缓存AVPacket时, 内存已经被Data引用，所以不需要再拷贝旧数据. 用作合并写缓存时, 流还没有发送使用, 需要拷贝旧数据.
 	isFull            func(int) bool
 }
@@ -144,11 +139,19 @@ func (m *memoryPool) Reset() {
 	m.tail = m.markIndex
 }
 
-func (m *memoryPool) FreeHead() {
+func (m *memoryPool) freeOldBlocks() bool {
 	utils.Assert(!m.marked)
 
 	if m.discardBlockCount > 0 {
 		m.discardBlockCount--
+		return true
+	}
+
+	return false
+}
+
+func (m *memoryPool) FreeHead() {
+	if m.freeOldBlocks() {
 		return
 	}
 
@@ -156,35 +159,29 @@ func (m *memoryPool) FreeHead() {
 	size := m.blockQueue.Pop().(int)
 	m.head += size
 
-	if m.head == m.tail {
-		m.head = 0
-		m.tail = 0
-	} else if m.head >= m.capacity {
-		m.head = 0
-	}
-
 	if m.blockQueue.IsEmpty() {
-		m.markIndex = 0
+		m.Clear()
+	} else if m.head >= m.capacity {
+		//清空末尾, 从头开始
+		m.head = 0
 	}
 }
 
 func (m *memoryPool) FreeTail() {
-	utils.Assert(!m.marked)
-
-	if m.discardBlockCount > 0 {
-		m.discardBlockCount--
+	if m.freeOldBlocks() {
 		return
 	}
 
 	utils.Assert(!m.blockQueue.IsEmpty())
 	size := m.blockQueue.PopBack().(int)
 	m.tail -= size
-	if m.tail == 0 && !m.blockQueue.IsEmpty() {
-		m.tail = m.capacity
-	}
 
 	if m.blockQueue.IsEmpty() {
-		m.markIndex = 0
+		m.Clear()
+	} else if m.tail == 0 {
+		//回环回到线性
+		m.tail = m.capacity
+		m.capacity = cap(m.data)
 	}
 }
 
@@ -206,18 +203,4 @@ func (m *memoryPool) Clear() {
 
 	m.blockQueue.Clear()
 	m.discardBlockCount = 0
-}
-
-func (m *memoryPool) Empty() bool {
-	utils.Assert(!m.marked)
-	return m.blockQueue.Size() < 1
-}
-
-func (m *memoryPool) Capacity() int {
-	return m.capacity
-}
-
-func (m *memoryPool) Size() int {
-	head, tail := m.Data()
-	return len(head) + len(tail)
 }

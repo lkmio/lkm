@@ -75,7 +75,7 @@ func (t *transStream) AddTrack(stream utils.AVStream) error {
 	}
 
 	if stream.CodecId() == utils.AVCodecIdH264 {
-		data := stream.CodecParameters().DecoderConfRecord().ToAnnexB()
+		data := stream.CodecParameters().AnnexBExtraData()
 		_, err = t.muxer.AddTrack(stream.Type(), stream.CodecId(), data)
 	} else {
 		_, err = t.muxer.AddTrack(stream.Type(), stream.CodecId(), stream.Extra())
@@ -177,6 +177,11 @@ func (t *transStream) createSegment() error {
 
 func (t *transStream) Close() error {
 	var err error
+
+	if t.muxer != nil {
+		t.muxer.Close()
+		t.muxer = nil
+	}
 
 	if t.context.file != nil {
 		err = t.flushSegment()

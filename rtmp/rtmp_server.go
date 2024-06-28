@@ -56,10 +56,7 @@ func (s *server) OnPacket(conn net.Conn, data []byte) []byte {
 
 	if err != nil {
 		log.Sugar.Errorf("处理rtmp包失败 err:%s conn:%s", err.Error(), conn.RemoteAddr().String())
-
 		_ = conn.Close()
-		t.Data.(*Session).Close()
-		t.Data = nil
 	}
 
 	if session.isPublisher {

@@ -79,7 +79,7 @@ func NewDefaultAppConfig() stream.AppConfig_ {
 		},
 
 		Hook: stream.HookConfig{
-			Enable:              true,
+			Enable:              false,
 			Timeout:             int64(60 * time.Second),
 			OnPublishUrl:        "http://localhost:9000/api/v1/hook/on_publish",
 			OnPublishDoneUrl:    "http://localhost:9000/api/v1/hook/on_publish_done",

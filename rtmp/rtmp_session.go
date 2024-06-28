@@ -10,10 +10,8 @@ import (
 
 // Session 负责除连接和断开以外的所有RTMP生命周期处理
 type Session struct {
-	//解析rtmp协议栈
-	stack *librtmp.Stack
-	//Publisher/sink, 在publish或play成功后赋值
-	handle      interface{}
+	stack       *librtmp.Stack //rtmp协议栈
+	handle      interface{}    //Publisher/sink, 在publish或play成功后赋值
 	isPublisher bool
 
 	conn          net.Conn
@@ -89,9 +87,12 @@ func (s *Session) Input(conn net.Conn, data []byte) error {
 }
 
 func (s *Session) Close() {
+	//session/conn/stack相关引用, go释放不了...手动赋值为nil
+	s.conn = nil
 	//释放协议栈
 	if s.stack != nil {
 		s.stack.Close()
+		s.stack = nil
 	}
 
 	//还没到publish/play
@@ -105,6 +106,7 @@ func (s *Session) Close() {
 
 		if s.isPublisher {
 			s.handle.(*Publisher).Close()
+			s.receiveBuffer = nil
 		}
 	} else {
 		sink := s.handle.(stream.Sink)

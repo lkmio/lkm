@@ -441,6 +441,12 @@ func (s *PublishSource) doClose() {
 
 	if s.Conn != nil {
 		s.Conn.Close()
+		s.Conn = nil
+	}
+
+	if s.TransDeMuxer != nil {
+		s.TransDeMuxer.Close()
+		s.TransDeMuxer = nil
 	}
 
 	//清空未写完的buffer
@@ -453,13 +459,18 @@ func (s *PublishSource) doClose() {
 	//释放GOP缓存
 	if s.gopBuffer != nil {
 		s.gopBuffer.Clear()
+		s.gopBuffer.Close()
+		s.gopBuffer = nil
 	}
+
 	if s.probeTimer != nil {
 		s.probeTimer.Stop()
 	}
+
 	if s.receiveDataTimer != nil {
 		s.receiveDataTimer.Stop()
 	}
+
 	if s.idleTimer != nil {
 		s.idleTimer.Stop()
 	}

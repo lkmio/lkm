@@ -31,7 +31,7 @@ func (t *transStream) Input(packet utils.AVPacket) error {
 			}
 
 			if packet.KeyFrame() {
-				extra := t.BaseTransStream.Tracks[packet.Index()].CodecParameters().DecoderConfRecord().ToAnnexB()
+				extra := t.BaseTransStream.Tracks[packet.Index()].CodecParameters().AnnexBExtraData()
 				sink_.input(packet.Index(), extra, 0)
 			}
 

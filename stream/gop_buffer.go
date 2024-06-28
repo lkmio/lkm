@@ -18,6 +18,8 @@ type GOPBuffer interface {
 	Size() int
 
 	Clear()
+
+	Close()
 }
 
 type streamBuffer struct {
@@ -106,4 +108,8 @@ func (s *streamBuffer) Size() int {
 
 func (s *streamBuffer) Clear() {
 	s.discard()
+}
+
+func (s *streamBuffer) Close() {
+	s.discardHandler = nil
 }

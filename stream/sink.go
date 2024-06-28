@@ -213,6 +213,7 @@ func (s *BaseSink) Close() {
 		go HookPlayDoneEvent(s)
 	}
 }
+
 func (s *BaseSink) PrintInfo() string {
 	return fmt.Sprintf("%s-%v source:%s", s.Protocol().ToString(), s.Id_, s.SourceId_)
 }
@@ -228,6 +229,7 @@ func (s *BaseSink) RemoteAddr() string {
 func (s *BaseSink) UrlValues() url.Values {
 	return s.urlValues
 }
+
 func (s *BaseSink) SetUrlValues(values url.Values) {
 	s.urlValues = values
 }

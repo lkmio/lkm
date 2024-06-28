@@ -104,8 +104,8 @@ func (t *httpTransStream) AddTrack(stream utils.AVStream) error {
 	} else if utils.AVMediaTypeVideo == stream.Type() {
 		t.muxer.AddVideoTrack(stream.CodecId())
 
-		t.muxer.AddProperty("width", stream.CodecParameters().SPSInfo().Width())
-		t.muxer.AddProperty("height", stream.CodecParameters().SPSInfo().Height())
+		t.muxer.AddProperty("width", stream.CodecParameters().Width())
+		t.muxer.AddProperty("height", stream.CodecParameters().Height())
 	}
 	return nil
 }
@@ -187,7 +187,7 @@ func (t *httpTransStream) WriteHeader() error {
 		if utils.AVMediaTypeAudio == track.Type() {
 			data = track.Extra()
 		} else if utils.AVMediaTypeVideo == track.Type() {
-			data = track.CodecParameters().DecoderConfRecord().ToMP4VC()
+			data = track.CodecParameters().MP4ExtraData()
 		}
 
 		n := t.muxer.Input(t.header[t.headerSize:], track.Type(), len(data), 0, 0, false, true)

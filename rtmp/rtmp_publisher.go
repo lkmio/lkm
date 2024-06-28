@@ -56,3 +56,8 @@ func (p *Publisher) OnPartPacket(index int, mediaType utils.AVMediaType, data []
 
 	buffer.Write(data)
 }
+
+func (p *Publisher) Close() {
+	p.PublishSource.Close()
+	p.stack = nil
+}

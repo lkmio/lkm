@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/yangjiechina/avformat/libavc"
-	"github.com/yangjiechina/avformat/libhevc"
 	"github.com/yangjiechina/avformat/librtp"
 	"github.com/yangjiechina/avformat/librtsp/sdp"
 	"github.com/yangjiechina/avformat/utils"
@@ -109,12 +108,12 @@ func (t *tranStream) Input(packet utils.AVPacket) error {
 			parameters := t.BaseTransStream.Tracks[packet.Index()].CodecParameters()
 
 			if utils.AVCodecIdH265 == packet.CodecId() {
-				bytes := parameters.DecoderConfRecord().(*libhevc.HEVCDecoderConfRecord).VPS
+				bytes := parameters.(*utils.HEVCCodecData).VPS()
 				stream_.muxer.Input(bytes[0], uint32(packet.ConvertPts(stream_.rate)))
 			}
 
-			spsBytes := parameters.DecoderConfRecord().SPSBytes()
-			ppsBytes := parameters.DecoderConfRecord().PPSBytes()
+			spsBytes := parameters.SPS()
+			ppsBytes := parameters.PPS()
 
 			stream_.muxer.Input(spsBytes[0], uint32(packet.ConvertPts(stream_.rate)))
 			stream_.muxer.Input(ppsBytes[0], uint32(packet.ConvertPts(stream_.rate)))

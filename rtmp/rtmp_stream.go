@@ -158,7 +158,7 @@ func (t *transStream) WriteHeader() error {
 	if videoStream != nil {
 		tmp := n
 		n += t.muxer.WriteVideoData(t.header[n+12:], 0, false, true)
-		extra := videoStream.CodecParameters().DecoderConfRecord().ToMP4VC()
+		extra := videoStream.CodecParameters().MP4ExtraData()
 		copy(t.header[n+12:], extra)
 		n += len(extra)
 
@@ -179,6 +179,7 @@ func (t *transStream) Close() error {
 	if len(segment) > 0 {
 		t.SendPacket(segment)
 	}
+
 	return nil
 }
 

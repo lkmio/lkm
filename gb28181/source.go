@@ -126,7 +126,7 @@ func (source *BaseGBSource) OnCompletePacket(index int, mediaType utils.AVMediaT
 				return err
 			}
 
-			source.videoStream = utils.NewAVStream(utils.AVMediaTypeVideo, 0, codec, codecData.Record(), codecData)
+			source.videoStream = utils.NewAVStream(utils.AVMediaTypeVideo, 0, codec, codecData.AnnexBExtraData(), codecData)
 			stream_ = source.videoStream
 		}
 
@@ -139,13 +139,13 @@ func (source *BaseGBSource) OnCompletePacket(index int, mediaType utils.AVMediaT
 				return err
 			}
 
-			codecData, err := utils.NewHevcCodecData(vps, sps, pps)
+			codecData, err := utils.NewHEVCCodecData(vps, sps, pps)
 			if err != nil {
 				log.Sugar.Errorf("解析sps pps失败 source:%s data:%s vps:%s sps:%s, pps:%s", source.Id_, hex.EncodeToString(data), hex.EncodeToString(vps), hex.EncodeToString(sps), hex.EncodeToString(pps))
 				return err
 			}
 
-			source.videoStream = utils.NewAVStream(utils.AVMediaTypeVideo, 0, codec, codecData.Record(), codecData)
+			source.videoStream = utils.NewAVStream(utils.AVMediaTypeVideo, 0, codec, codecData.AnnexBExtraData(), codecData)
 			stream_ = source.videoStream
 		}
 
