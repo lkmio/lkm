@@ -2,7 +2,6 @@ package gb28181
 
 import (
 	"github.com/pion/rtp"
-	"github.com/yangjiechina/lkm/jitterbuffer"
 	"github.com/yangjiechina/lkm/stream"
 )
 
@@ -10,32 +9,33 @@ import (
 type UDPSource struct {
 	BaseGBSource
 
-	jitterBuffer  *jitterbuffer.JitterBuffer
+	jitterBuffer  *stream.JitterBuffer
 	receiveBuffer *stream.ReceiveBuffer
 }
 
 func NewUDPSource() *UDPSource {
-	return &UDPSource{
-		jitterBuffer:  jitterbuffer.New(),
+	u := &UDPSource{
 		receiveBuffer: stream.NewReceiveBuffer(1500, stream.ReceiveBufferUdpBlockCount+50),
 	}
+
+	u.jitterBuffer = stream.NewJitterBuffer(u.OnOrderedRtp)
+	return u
 }
 
-func (u UDPSource) TransportType() TransportType {
+func (u *UDPSource) TransportType() TransportType {
 	return TransportTypeUDP
 }
 
+func (u *UDPSource) OnOrderedRtp(packet interface{}) {
+	u.PublishSource.Input(packet.(*rtp.Packet).Payload)
+}
+
 // InputRtp udp收流会先拷贝rtp包,交给jitter buffer处理后再发给source
-func (u UDPSource) InputRtp(pkt *rtp.Packet) error {
+func (u *UDPSource) InputRtp(pkt *rtp.Packet) error {
 	block := u.receiveBuffer.GetBlock()
 
 	copy(block, pkt.Payload)
 	pkt.Payload = block[:len(pkt.Payload)]
-	u.jitterBuffer.Push(pkt)
-
-	for rtp, _ := u.jitterBuffer.Pop(); rtp != nil; rtp, _ = u.jitterBuffer.Pop() {
-		u.PublishSource.Input(rtp.Payload)
-	}
-
+	u.jitterBuffer.Push(pkt.SequenceNumber, pkt)
 	return nil
 }
