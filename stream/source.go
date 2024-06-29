@@ -499,6 +499,10 @@ func (s *PublishSource) doClose() {
 					AddSinkToWaitingQueue(s.Id_, sink)
 				}
 			}
+
+			if SessionStateClose != sink.State() {
+				sink.Flush()
+			}
 		})
 	}
 

@@ -60,6 +60,10 @@ type Sink interface {
 	UrlValues() url.Values
 
 	SetUrlValues(values url.Values)
+
+	Start()
+
+	Flush()
 }
 
 // GenerateSinkId 根据网络地址生成SinkId IPV4使用一个uint64, IPV6使用String
@@ -232,4 +236,11 @@ func (s *BaseSink) UrlValues() url.Values {
 
 func (s *BaseSink) SetUrlValues(values url.Values) {
 	s.urlValues = values
+}
+
+func (s *BaseSink) Start() {
+
+}
+
+func (s *BaseSink) Flush() {
 }

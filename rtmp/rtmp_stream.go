@@ -18,7 +18,11 @@ type transStream struct {
 	muxer      libflv.Muxer
 	audioChunk librtmp.Chunk
 	videoChunk librtmp.Chunk
-	mwBuffer   stream.MergeWritingBuffer
+
+	//合并写内存泄露问题: 推流结束后, mwBuffer的data一直释放不掉, 只有拉流全部断开之后, 才会释放该内存.
+	//起初怀疑是代码层哪儿有问题, 但是测试发现如果将合并写切片再拷贝一次发送 给sink, 推流结束后，mwBuffer的data内存块释放没问题, 只有拷贝的内存块未释放. 所以排除了代码层造成内存泄露的可能性.
+	//看来是conn在write后还会持有data. 查阅代码发现, 的确如此. 向fd发送数据前buffer会引用data, 但是后续没有赋值为nil, 取消引用. https://github.com/golang/go/blob/d38f1d13fa413436d38d86fe86d6a146be44bb84/src/internal/poll/fd_windows.go#L694
+	mwBuffer stream.MergeWritingBuffer
 }
 
 func (t *transStream) Input(packet utils.AVPacket) error {
@@ -179,7 +183,6 @@ func (t *transStream) Close() error {
 	if len(segment) > 0 {
 		t.SendPacket(segment)
 	}
-
 	return nil
 }
 

@@ -61,7 +61,7 @@ func (s *Session) OnPlay(app, stream_ string, response chan utils.HookState) {
 	streamName, values := stream.ParseUrl(stream_)
 
 	sourceId := s.generateSourceId(app, streamName)
-	sink := NewSink(stream.GenerateSinkId(s.conn.RemoteAddr()), sourceId, s.conn)
+	sink := NewSink(stream.GenerateSinkId(s.conn.RemoteAddr()), sourceId, s.conn, s.stack)
 	sink.SetUrlValues(values)
 
 	log.Sugar.Infof("rtmp onplay app:%s stream:%s sink:%v conn:%s", app, stream_, sink.Id(), s.conn.RemoteAddr().String())
@@ -109,7 +109,7 @@ func (s *Session) Close() {
 			s.receiveBuffer = nil
 		}
 	} else {
-		sink := s.handle.(stream.Sink)
+		sink := s.handle.(*Sink)
 		log.Sugar.Infof("rtmp拉流结束 %s", sink.PrintInfo())
 		sink.Close()
 	}

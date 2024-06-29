@@ -56,6 +56,7 @@ func (t *BaseTransStream) AddTrack(stream utils.AVStream) error {
 
 func (t *BaseTransStream) AddSink(sink Sink) error {
 	t.Sinks[sink.Id()] = sink
+	sink.Start()
 	return nil
 }
 
