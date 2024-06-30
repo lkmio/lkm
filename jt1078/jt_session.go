@@ -287,6 +287,11 @@ func (s *Session) Close() {
 		s.videoBuffer.Clear()
 	}
 
+	if s.Conn != nil {
+		s.Conn.Close()
+		s.Conn = nil
+	}
+
 	s.PublishSource.Close()
 }
 

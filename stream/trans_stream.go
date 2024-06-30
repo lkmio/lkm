@@ -1,7 +1,6 @@
 package stream
 
 import (
-	"github.com/yangjiechina/avformat/stream"
 	"github.com/yangjiechina/avformat/utils"
 )
 
@@ -31,8 +30,8 @@ type TransStream interface {
 }
 
 type BaseTransStream struct {
-	Sinks      map[SinkId]Sink
-	muxer      stream.Muxer
+	Sinks map[SinkId]Sink
+	//muxer      stream.Muxer
 	Tracks     []utils.AVStream
 	Completed  bool
 	ExistVideo bool

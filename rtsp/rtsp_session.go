@@ -84,6 +84,11 @@ func (s *session) response(response *http.Response, body []byte) error {
 }
 
 func (s *session) close() {
+	if s.conn != nil {
+		s.conn.Close()
+		s.conn = nil
+	}
+
 	if s.sink_ != nil {
 		s.sink_.Close()
 		s.sink_ = nil

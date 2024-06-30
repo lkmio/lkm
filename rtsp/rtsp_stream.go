@@ -166,6 +166,16 @@ func (t *tranStream) AddTrack(stream utils.AVStream) error {
 	return nil
 }
 
+func (t *tranStream) Close() error {
+	for _, track := range t.rtpTracks {
+		if track != nil {
+			track.Close()
+		}
+	}
+
+	return nil
+}
+
 func (t *tranStream) WriteHeader() error {
 	description := sdp.SessionDescription{
 		Version: 0,

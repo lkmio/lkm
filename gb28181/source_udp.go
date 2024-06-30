@@ -39,3 +39,9 @@ func (u *UDPSource) InputRtp(pkt *rtp.Packet) error {
 	u.jitterBuffer.Push(pkt.SequenceNumber, pkt)
 	return nil
 }
+
+func (u *UDPSource) Close() {
+	u.jitterBuffer.Flush()
+	u.jitterBuffer.Close()
+	u.BaseGBSource.Close()
+}
