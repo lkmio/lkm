@@ -75,21 +75,33 @@ func (g TransportConfig) IsMultiPort() bool {
 }
 
 // M3U8Path 根据sourceId返回m3u8的磁盘路径
+// 切片及目录生成规则, 以SourceId为34020000001320000001/34020000001320000001为例:
+// 创建文件夹34020000001320000001, 34020000001320000001.m3u8文件, 文件列表中切片url为34020000001320000001_seq.ts
 func (c HlsConfig) M3U8Path(sourceId string) string {
-	return c.Dir + "/" + c.M3U8Format(sourceId)
+	return c.Dir + "/" + sourceId + ".m3u8"
 }
 
+// M3U8Dir 根据id返回m3u8文件位于磁盘中的绝对目录
+func (c HlsConfig) M3U8Dir(sourceId string) string {
+	split := strings.Split(sourceId, "/")
+	return AppConfig.Hls.Dir + "/" + strings.Join(split[:len(split)-1], "/")
+}
+
+// M3U8Format 根据id返回m3u8文件名
 func (c HlsConfig) M3U8Format(sourceId string) string {
-	return sourceId + ".m3u8"
+	split := strings.Split(sourceId, "/")
+	return split[len(split)-1] + ".m3u8"
 }
 
-// TSPath 根据sourceId和ts文件名返回ts的磁盘路径
+// TSPath 根据sourceId和ts文件名返回ts的磁盘绝对路径
 func (c HlsConfig) TSPath(sourceId string, tsSeq string) string {
-	return c.Dir + "/" + c.TSFormat(sourceId, tsSeq)
+	return c.Dir + "/" + sourceId + "_" + tsSeq + ".ts"
 }
 
-func (c HlsConfig) TSFormat(sourceId string, tsSeq string) string {
-	return sourceId + "_" + tsSeq + ".ts"
+// TSFormat 根据id返回ts文件名
+func (c HlsConfig) TSFormat(sourceId string) string {
+	split := strings.Split(sourceId, "/")
+	return split[len(split)-1] + "_%d.ts"
 }
 
 type HookConfig struct {

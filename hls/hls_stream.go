@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"github.com/yangjiechina/avformat/libmpeg"
 	"github.com/yangjiechina/avformat/utils"
+	"github.com/yangjiechina/lkm/log"
 	"github.com/yangjiechina/lkm/stream"
 	"os"
+	"path/filepath"
+	"strconv"
 )
 
 type tsContext struct {
@@ -13,10 +16,9 @@ type tsContext struct {
 	writeBuffer     []byte //ts流的缓冲区, 由TSMuxer使用. 减少用户态和内核态交互，以及磁盘IO频率
 	writeBufferSize int    //已缓存TS流大小
 
-	url  string //m3u8中的url
-	path string //位于磁盘中的path
-
-	file *os.File
+	url  string   //@See transStream.tsUrl
+	path string   //ts切片位于磁盘中的绝对路径
+	file *os.File //ts切片文件句柄
 }
 
 type transStream struct {
@@ -25,13 +27,13 @@ type transStream struct {
 	context *tsContext
 
 	m3u8           M3U8Writer
-	url            string //m3u8中每个url的前缀
-	m3u8Name       string //m3u8文件名
-	tsFormat       string //ts文件名格式
-	dir            string //m3u8文件父目录
-	duration       int    //切片时长, 单位秒
-	playlistLength int    //最大切片文件个数
-	m3u8File       *os.File
+	m3u8Name       string   //m3u8文件名
+	m3u8File       *os.File //m3u8文件句柄
+	dir            string   //m3u8文件父目录
+	tsUrl          string   //m3u8中每个url的前缀, 默认为空, 为了支持绝对路径访问:http://xxx/xxx/xxx.ts
+	tsFormat       string   //ts文件名格式
+	duration       int      //切片时长, 单位秒
+	playlistLength int      //最大切片文件个数
 
 	m3u8Sinks map[stream.SinkId]stream.Sink
 }
@@ -132,6 +134,7 @@ func (t *transStream) flushSegment() error {
 
 	//更新m3u8
 	duration := float32(t.muxer.Duration()) / 90000
+
 	t.m3u8.AddSegment(duration, t.context.url, t.context.segmentSeq, t.context.path)
 
 	if _, err := t.m3u8File.Seek(0, 0); err != nil {
@@ -161,8 +164,8 @@ func (t *transStream) createSegment() error {
 	tsName := fmt.Sprintf(t.tsFormat, t.context.segmentSeq)
 	//ts文件
 	t.context.path = fmt.Sprintf("%s/%s", t.dir, tsName)
-	//m3u8中的url
-	t.context.url = fmt.Sprintf("%s%s", t.url, tsName)
+	//m3u8列表中切片的url
+	t.context.url = fmt.Sprintf("%s%s", t.tsUrl, tsName)
 
 	file, err := os.OpenFile(t.context.path, os.O_WRONLY|os.O_CREATE, 0666)
 	if err != nil {
@@ -178,15 +181,15 @@ func (t *transStream) createSegment() error {
 func (t *transStream) Close() error {
 	var err error
 
-	if t.muxer != nil {
-		t.muxer.Close()
-		t.muxer = nil
-	}
-
 	if t.context.file != nil {
 		err = t.flushSegment()
 		err = t.context.file.Close()
 		t.context.file = nil
+	}
+
+	if t.muxer != nil {
+		t.muxer.Close()
+		t.muxer = nil
 	}
 
 	if t.m3u8File != nil {
@@ -197,30 +200,50 @@ func (t *transStream) Close() error {
 	return err
 }
 
+func DeleteOldSegments(id string) {
+	var index int
+	//先删除旧的m3u8文件
+	_ = os.Remove(stream.AppConfig.Hls.M3U8Path(id))
+	for ; ; index++ {
+		path := stream.AppConfig.Hls.TSPath(id, strconv.Itoa(index))
+		fileInfo, err := os.Stat(path)
+		if err != nil && os.IsNotExist(err) {
+			break
+		} else if fileInfo.IsDir() {
+			continue
+		}
+
+		_ = os.Remove(path)
+	}
+}
+
 // NewTransStream 创建HLS传输流
-// @url   		url前缀
-// @m3u8Name	m3u8文件名
-// @tsFormat	ts文件格式, 例如: %d.ts
-// @parentDir	保存切片的绝对路径. mu38和ts切片放在同一目录下, 目录地址使用parentDir+urlPrefix
-// @segmentDuration 单个切片时长
-// @playlistLength 缓存多少个切片
-func NewTransStream(url, m3u8Name, tsFormat, dir string, segmentDuration, playlistLength int) (stream.TransStream, error) {
+// @Params dir			m3u8的文件夹目录
+// @Params m3u8Name	m3u8文件名
+// @Params tsFormat	ts文件格式, 例如: %d.ts
+// @Params tsUrl   	m3u8中ts切片的url前缀
+// @Params parentDir	保存切片的绝对路径. mu38和ts切片放在同一目录下, 目录地址使用parentDir+urlPrefix
+// @Params segmentDuration 单个切片时长
+// @Params playlistLength 缓存多少个切片
+func NewTransStream(dir, m3u8Name, tsFormat, tsUrl string, segmentDuration, playlistLength int) (stream.TransStream, error) {
 	//创建文件夹
-	if err := os.MkdirAll(dir, 0666); err != nil {
+	m3u8Path := fmt.Sprintf("%s/%s", dir, m3u8Name)
+	if err := os.MkdirAll(filepath.Dir(m3u8Path), 0666); err != nil {
+		log.Sugar.Errorf("创建目录失败 err:%s path:%s", err.Error(), m3u8Path)
 		return nil, err
 	}
 
 	//创建m3u8文件
-	m3u8Path := fmt.Sprintf("%s/%s", dir, m3u8Name)
 	file, err := os.OpenFile(m3u8Path, os.O_CREATE|os.O_RDWR, 0666)
 	if err != nil {
+		log.Sugar.Errorf("创建m3u8文件失败 err:%s path:%s", err.Error(), m3u8Path)
 		return nil, err
 	}
 
 	stream_ := &transStream{
-		url:            url,
 		m3u8Name:       m3u8Name,
 		tsFormat:       tsFormat,
+		tsUrl:          tsUrl,
 		dir:            dir,
 		duration:       segmentDuration,
 		playlistLength: playlistLength,
@@ -231,6 +254,7 @@ func NewTransStream(url, m3u8Name, tsFormat, dir string, segmentDuration, playli
 	muxer.SetWriteHandler(stream_.onTSWrite)
 	muxer.SetAllocHandler(stream_.onTSAlloc)
 
+	//ts封装上下文对象
 	stream_.context = &tsContext{
 		segmentSeq:      0,
 		writeBuffer:     make([]byte, 1024*1024),
@@ -241,11 +265,14 @@ func NewTransStream(url, m3u8Name, tsFormat, dir string, segmentDuration, playli
 	stream_.m3u8 = NewM3U8Writer(playlistLength)
 	stream_.m3u8File = file
 
+	//等待响应m3u8文件的sink
 	stream_.m3u8Sinks = make(map[stream.SinkId]stream.Sink, 24)
 	return stream_, nil
 }
 
 func TransStreamFactory(source stream.Source, protocol stream.Protocol, streams []utils.AVStream) (stream.TransStream, error) {
 	id := source.Id()
-	return NewTransStream("", stream.AppConfig.Hls.M3U8Format(id), stream.AppConfig.Hls.TSFormat(id, "%d"), stream.AppConfig.Hls.Dir, stream.AppConfig.Hls.Duration, stream.AppConfig.Hls.PlaylistLength)
+	//删除旧的切片文件
+	go DeleteOldSegments(id)
+	return NewTransStream(stream.AppConfig.Hls.M3U8Dir(id), stream.AppConfig.Hls.M3U8Format(id), stream.AppConfig.Hls.TSFormat(id), "", stream.AppConfig.Hls.Duration, stream.AppConfig.Hls.PlaylistLength)
 }

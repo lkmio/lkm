@@ -40,6 +40,11 @@ const (
 //无BOM
 
 type M3U8Writer interface {
+	// AddSegment 添加切片
+	//@Params  duration 切片时长
+	//@Params  url m3u8列表中切片的url
+	//@Params  sequence m3u8列表中的切片序号
+	//@Params  path 切片位于磁盘中的绝对路径
 	AddSegment(duration float32, url string, sequence int, path string)
 
 	ToString() string
