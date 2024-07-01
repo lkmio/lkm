@@ -48,8 +48,7 @@ func (t *transStream) Input(packet utils.AVPacket) error {
 	if (!t.ExistVideo || utils.AVMediaTypeVideo == packet.MediaType() && packet.KeyFrame()) && float32(t.muxer.Duration())/90000 >= float32(t.duration) {
 		//保存当前切片文件
 		if t.context.file != nil {
-			err := t.flushSegment()
-			t.context.segmentSeq++
+			err := t.flushSegment(false)
 			if err != nil {
 				return err
 			}
@@ -116,7 +115,7 @@ func (t *transStream) onTSAlloc(size int) []byte {
 	return t.context.writeBuffer[t.context.writeBufferSize : t.context.writeBufferSize+size]
 }
 
-func (t *transStream) flushSegment() error {
+func (t *transStream) flushSegment(end bool) error {
 	//将剩余数据写入缓冲区
 	if t.context.writeBufferSize > 0 {
 		_, _ = t.context.file.Write(t.context.writeBuffer[:t.context.writeBufferSize])
@@ -145,6 +144,10 @@ func (t *transStream) flushSegment() error {
 	}
 
 	m3u8Txt := t.m3u8.ToString()
+	if end {
+		m3u8Txt += "#EXT-X-ENDLIST"
+	}
+
 	if _, err := t.m3u8File.Write([]byte(m3u8Txt)); err != nil {
 		return err
 	}
@@ -161,20 +164,25 @@ func (t *transStream) flushSegment() error {
 
 // 创建一个新的ts切片
 func (t *transStream) createSegment() error {
+	t.muxer.Reset()
+	defer func() {
+		t.context.segmentSeq++
+	}()
+
 	tsName := fmt.Sprintf(t.tsFormat, t.context.segmentSeq)
 	//ts文件
 	t.context.path = fmt.Sprintf("%s/%s", t.dir, tsName)
 	//m3u8列表中切片的url
 	t.context.url = fmt.Sprintf("%s%s", t.tsUrl, tsName)
 
-	file, err := os.OpenFile(t.context.path, os.O_WRONLY|os.O_CREATE, 0666)
+	file, err := os.OpenFile(t.context.path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
 	if err != nil {
+		log.Sugar.Errorf("创建ts切片文件失败 err:%s path:%s", err.Error(), t.context.path)
 		return err
 	}
-	t.context.file = file
 
-	t.muxer.Reset()
-	err = t.muxer.WriteHeader()
+	t.context.file = file
+	_ = t.muxer.WriteHeader()
 	return err
 }
 
@@ -182,7 +190,7 @@ func (t *transStream) Close() error {
 	var err error
 
 	if t.context.file != nil {
-		err = t.flushSegment()
+		err = t.flushSegment(true)
 		err = t.context.file.Close()
 		t.context.file = nil
 	}
@@ -202,8 +210,6 @@ func (t *transStream) Close() error {
 
 func DeleteOldSegments(id string) {
 	var index int
-	//先删除旧的m3u8文件
-	_ = os.Remove(stream.AppConfig.Hls.M3U8Path(id))
 	for ; ; index++ {
 		path := stream.AppConfig.Hls.TSPath(id, strconv.Itoa(index))
 		fileInfo, err := os.Stat(path)
@@ -272,6 +278,8 @@ func NewTransStream(dir, m3u8Name, tsFormat, tsUrl string, segmentDuration, play
 
 func TransStreamFactory(source stream.Source, protocol stream.Protocol, streams []utils.AVStream) (stream.TransStream, error) {
 	id := source.Id()
+	//先删除旧的m3u8文件
+	_ = os.Remove(stream.AppConfig.Hls.M3U8Path(id))
 	//删除旧的切片文件
 	go DeleteOldSegments(id)
 	return NewTransStream(stream.AppConfig.Hls.M3U8Dir(id), stream.AppConfig.Hls.M3U8Format(id), stream.AppConfig.Hls.TSFormat(id), "", stream.AppConfig.Hls.Duration, stream.AppConfig.Hls.PlaylistLength)

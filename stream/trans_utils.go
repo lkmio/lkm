@@ -2,7 +2,9 @@ package stream
 
 import "github.com/yangjiechina/avformat/utils"
 
-// TransStreamId 每个传输流的唯一Id，由协议+流Id组成
+// TransStreamId 每个传输流的唯一Id，根据输出流协议ID+流包含的音视频编码器ID生成
+// 输出流协议ID占用高8位
+// 每个音视频编译器ID占用8位. 意味着每个输出流至多7路流.
 type TransStreamId uint64
 
 var (
@@ -46,6 +48,7 @@ func init() {
 	return TransStreamId(streamId)
 }*/
 
+// GenerateTransStreamId 根据输出流协议和输出流包含的音视频编码器ID生成流ID
 func GenerateTransStreamId(protocol Protocol, ids ...utils.AVStream) TransStreamId {
 	len_ := len(ids)
 	utils.Assert(len_ > 0 && len_ < 8)

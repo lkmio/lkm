@@ -197,7 +197,9 @@ func (s *PublishSource) Init(inputCB func(data []byte) error, closeCB func(), re
 	s.playingEventQueue = make(chan Sink, 128)
 	s.playingDoneEventQueue = make(chan Sink, 128)
 	s.probeTimoutEvent = make(chan bool)
+}
 
+func (s *PublishSource) CreateDefaultOutStreams() {
 	if s.transStreams == nil {
 		s.transStreams = make(map[TransStreamId]TransStream, 10)
 	}
@@ -209,13 +211,16 @@ func (s *PublishSource) Init(inputCB func(data []byte) error, closeCB func(), re
 
 	//创建HLS输出流
 	if AppConfig.Hls.Enable {
-		hlsStream, err := CreateTransStream(s, ProtocolHls, nil)
+		streams := s.OriginStreams()
+		utils.Assert(len(streams) > 0)
+
+		hlsStream, err := s.CreateTransStream(ProtocolHls, streams)
 		if err != nil {
 			panic(err)
 		}
 
 		s.hlsStream = hlsStream
-		s.transStreams[0x100] = s.hlsStream
+		s.transStreams[GenerateTransStreamId(ProtocolHls, streams...)] = s.hlsStream
 	}
 }
 
@@ -301,6 +306,25 @@ func IsSupportMux(protocol Protocol, audioCodecId, videoCodecId utils.AVCodecID)
 	return true
 }
 
+func (s *PublishSource) CreateTransStream(protocol Protocol, streams []utils.AVStream) (TransStream, error) {
+	log.Sugar.Debugf("创建%s-stream source:%s", protocol.ToString(), s.Id_)
+
+	transStream, err := CreateTransStream(s, protocol, streams)
+	if err != nil {
+		log.Sugar.Errorf("创建传输流失败 err:%s source:%s", err.Error(), s.Id_)
+		return nil, err
+	}
+
+	for _, avStream := range streams {
+		transStream.AddTrack(avStream)
+	}
+
+	transStream.Init()
+	_ = transStream.WriteHeader()
+
+	return transStream, err
+}
+
 func (s *PublishSource) AddSink(sink Sink) bool {
 	// 暂时不考虑多路视频流，意味着只能1路视频流和多路音频流，同理originStreams和allStreams里面的Stream互斥. 同时多路音频流的Codec必须一致
 	audioCodecId, videoCodecId := sink.DesiredAudioCodecId(), sink.DesiredVideoCodecId()
@@ -354,24 +378,15 @@ func (s *PublishSource) AddSink(sink Sink) bool {
 		if s.transStreams == nil {
 			s.transStreams = make(map[TransStreamId]TransStream, 10)
 		}
-		//创建一个新的传输流
-		log.Sugar.Debugf("创建%s-stream source:%s", sink.Protocol().ToString(), s.Id_)
 
 		var err error
-		transStream, err = CreateTransStream(s, sink.Protocol(), streams[:size])
+		transStream, err = s.CreateTransStream(sink.Protocol(), streams[:size])
 		if err != nil {
 			log.Sugar.Errorf("创建传输流失败 err:%s source:%s", err.Error(), s.Id_)
 			return false
 		}
 
 		s.transStreams[transStreamId] = transStream
-
-		for i := 0; i < size; i++ {
-			transStream.AddTrack(streams[i])
-		}
-
-		transStream.Init()
-		_ = transStream.WriteHeader()
 	}
 
 	sink.SetTransStreamId(transStreamId)
@@ -564,19 +579,14 @@ func (s *PublishSource) writeHeader() {
 		s.probeTimer.Stop()
 	}
 
+	//创建录制流和HLS
+	s.CreateDefaultOutStreams()
+
 	sinks := PopWaitingSinks(s.Id_)
 	for _, sink := range sinks {
 		if !s.AddSink(sink) {
 			sink.Close()
 		}
-	}
-
-	if s.hlsStream != nil {
-		for _, stream_ := range s.originStreams.All() {
-			s.hlsStream.AddTrack(stream_)
-		}
-
-		s.hlsStream.WriteHeader()
 	}
 }
 
