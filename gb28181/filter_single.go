@@ -13,7 +13,7 @@ func (s *singleFilter) AddSource(ssrc uint32, source GBSource) bool {
 }
 
 func (s *singleFilter) RemoveSource(ssrc uint32) {
-	panic("implement me")
+	s.source = nil
 }
 
 func (s *singleFilter) FindSource(ssrc uint32) GBSource {

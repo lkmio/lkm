@@ -1,6 +1,11 @@
 package stream
 
 import (
+	"encoding/binary"
+	"fmt"
+	"github.com/yangjiechina/lkm/log"
+	"net"
+	"os"
 	"strings"
 )
 
@@ -144,6 +149,58 @@ func (hook *HookConfig) EnableOnReceiveTimeout() bool {
 	return hook.Enable && hook.OnReceiveTimeoutUrl != ""
 }
 
+func GetStreamPlayUrls(sourceId string) []string {
+	var urls []string
+	if AppConfig.Rtmp.Enable {
+		_, port, _ := net.SplitHostPort(AppConfig.Rtmp.Addr)
+		urls = append(urls, fmt.Sprintf("rtmp://%s:%s/%s", AppConfig.PublicIP, port, sourceId))
+	}
+
+	if AppConfig.Rtsp.Enable {
+		_, port, _ := net.SplitHostPort(AppConfig.Rtsp.Addr)
+		//不拼接userinfo
+		urls = append(urls, fmt.Sprintf("rtsp://%s:%s/%s", AppConfig.PublicIP, port, sourceId))
+	}
+
+	//if AppConfig.Http.Enable {
+	//	return
+	//}
+
+	_, port, _ := net.SplitHostPort(AppConfig.Http.Addr)
+	if AppConfig.Hls.Enable {
+		//不拼接userinfo
+		urls = append(urls, fmt.Sprintf("http://%s:%s/%s.m3u8", AppConfig.PublicIP, port, sourceId))
+	}
+
+	urls = append(urls, fmt.Sprintf("http://%s:%s/%s.flv", AppConfig.PublicIP, port, sourceId))
+	urls = append(urls, fmt.Sprintf("http://%s:%s/%s.rtc", AppConfig.PublicIP, port, sourceId))
+	urls = append(urls, fmt.Sprintf("ws://%s:%s/%s.flv", AppConfig.PublicIP, port, sourceId))
+	return urls
+}
+
+// DumpStream2File 保存推流到文件, 用4字节帧长分割
+func DumpStream2File(sourceType SourceType, conn net.Conn, data []byte) {
+	if err := os.MkdirAll("dump", 0666); err != nil {
+		log.Sugar.Errorf("创建dump文件夹失败 err:%s", err.Error())
+		return
+	}
+
+	path := fmt.Sprintf("dump/%s-%s", sourceType.ToString(), conn.RemoteAddr().String())
+	path = strings.ReplaceAll(path, ":", ".")
+
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
+	if err != nil {
+		log.Sugar.Errorf("打开dump文件夹失败 err:%s path:%s", err.Error(), path)
+		return
+	}
+
+	defer file.Close()
+	bytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(bytes, uint32(len(data)))
+	file.Write(bytes)
+	file.Write(data)
+}
+
 var AppConfig AppConfig_
 
 func init() {
@@ -158,17 +215,19 @@ type AppConfig_ struct {
 	PublicIP       string `json:"public_ip"`
 	IdleTimeout    int64  `json:"idle_timeout"`    //多长时间没有拉流, 单位秒. 如果开启hook通知, 根据hook响应, 决定是否关闭Source(200-不关闭/非200关闭). 否则会直接关闭Source.
 	ReceiveTimeout int64  `json:"receive_timeout"` //多长时间没有收到流, 单位秒. 如果开启hook通知, 根据hook响应, 决定是否关闭Source(200-不关闭/非200关闭). 否则会直接关闭Source.
+	Debug          bool   `json:"debug"`           //debug模式, 开启将保存推流
 
 	//缓存指定时长的包，满了之后才发送给Sink. 可以降低用户态和内核态的交互频率，大幅提升性能.
 	//合并写的大小范围，应当大于一帧的时长，不超过一组GOP的时长，在实际发送流的时候也会遵循此条例.
 	MergeWriteLatency int `json:"mw_latency"`
 	Rtmp              RtmpConfig
 	Rtsp              RtspConfig
-	Hook              HookConfig
-	Record            RecordConfig
 	Hls               HlsConfig
-	Log               LogConfig
-	Http              HttpConfig
 	GB28181           GB28181Config
 	JT1078            JT1078Config
+
+	Hook   HookConfig
+	Record RecordConfig
+	Log    LogConfig
+	Http   HttpConfig
 }

@@ -28,9 +28,10 @@ func NewDefaultAppConfig() stream.AppConfig_ {
 		PublicIP:          "192.168.2.148",
 		IdleTimeout:       int64(60 * time.Second),
 		ReceiveTimeout:    int64(10 * time.Second),
+		Debug:             true,
 
 		Hls: stream.HlsConfig{
-			Enable:         false,
+			Enable:         true,
 			Dir:            "../tmp",
 			Duration:       2,
 			PlaylistLength: 0xFFFF,
@@ -79,7 +80,7 @@ func NewDefaultAppConfig() stream.AppConfig_ {
 		},
 
 		Hook: stream.HookConfig{
-			Enable:              false,
+			Enable:              true,
 			Timeout:             int64(60 * time.Second),
 			OnPublishUrl:        "http://localhost:9000/api/v1/hook/on_publish",
 			OnPublishDoneUrl:    "http://localhost:9000/api/v1/hook/on_publish_done",

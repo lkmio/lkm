@@ -2,6 +2,7 @@ package rtmp
 
 import (
 	"github.com/yangjiechina/lkm/log"
+	"github.com/yangjiechina/lkm/stream"
 	"net"
 
 	"github.com/yangjiechina/avformat/transport"
@@ -14,11 +15,9 @@ type Server interface {
 	Close()
 }
 
-func NewServer() Server {
-	return &server{}
-}
-
 type server struct {
+	stream.StreamServer[*Session]
+
 	tcp *transport.TCPServer
 }
 
@@ -27,9 +26,7 @@ func (s *server) Start(addr net.Addr) error {
 
 	tcp := &transport.TCPServer{}
 	tcp.SetHandler(s)
-	err := tcp.Bind(addr)
-
-	if err != nil {
+	if err := tcp.Bind(addr); err != nil {
 		return err
 	}
 
@@ -41,17 +38,18 @@ func (s *server) Close() {
 	panic("implement me")
 }
 
-func (s *server) OnConnected(conn net.Conn) []byte {
-	log.Sugar.Debugf("rtmp连接 conn:%s", conn.RemoteAddr().String())
+func (s *server) OnNewSession(conn net.Conn) *Session {
+	return NewSession(conn)
+}
 
-	t := conn.(*transport.Conn)
-	t.Data = NewSession(conn)
-	return nil
+func (s *server) OnCloseSession(session *Session) {
+	session.Close()
 }
 
 func (s *server) OnPacket(conn net.Conn, data []byte) []byte {
-	t := conn.(*transport.Conn)
-	session := t.Data.(*Session)
+	s.StreamServer.OnPacket(conn, data)
+
+	session := conn.(*transport.Conn).Data.(*Session)
 	err := session.Input(conn, data)
 
 	if err != nil {
@@ -66,12 +64,11 @@ func (s *server) OnPacket(conn net.Conn, data []byte) []byte {
 	return nil
 }
 
-func (s *server) OnDisConnected(conn net.Conn, err error) {
-	log.Sugar.Debugf("rtmp断开连接 conn:%s", conn.RemoteAddr().String())
-
-	t := conn.(*transport.Conn)
-	if t.Data != nil {
-		t.Data.(*Session).Close()
-		t.Data = nil
+func NewServer() Server {
+	s := &server{}
+	s.StreamServer = stream.StreamServer[*Session]{
+		SourceType: stream.SourceTypeRtmp,
+		Handler:    s,
 	}
+	return s
 }

@@ -3,7 +3,7 @@ package jt1078
 import (
 	"github.com/yangjiechina/avformat/transport"
 	"github.com/yangjiechina/avformat/utils"
-	"github.com/yangjiechina/lkm/log"
+	"github.com/yangjiechina/lkm/stream"
 	"net"
 )
 
@@ -14,44 +14,31 @@ type Server interface {
 }
 
 type jtServer struct {
+	stream.StreamServer[*Session]
 	tcp *transport.TCPServer
 }
 
-func NewServer() Server {
-	return &jtServer{}
+func (s *jtServer) OnNewSession(conn net.Conn) *Session {
+	return NewSession(conn)
 }
 
-func (s jtServer) OnConnected(conn net.Conn) []byte {
-	log.Sugar.Debugf("jtserver连接 conn:%s", conn.RemoteAddr().String())
-
-	t := conn.(*transport.Conn)
-	t.Data = NewSession(conn)
-
-	return t.Data.(*Session).receiveBuffer.GetBlock()
+func (s *jtServer) OnCloseSession(session *Session) {
+	session.Close()
 }
 
-func (s jtServer) OnPacket(conn net.Conn, data []byte) []byte {
-	conn.(*transport.Conn).Data.(*Session).PublishSource.Input(data)
-	return conn.(*transport.Conn).Data.(*Session).receiveBuffer.GetBlock()
+func (s *jtServer) OnPacket(conn net.Conn, data []byte) []byte {
+	s.StreamServer.OnPacket(conn, data)
+	session := conn.(*transport.Conn).Data.(*Session)
+	session.PublishSource.Input(data)
+	return session.receiveBuffer.GetBlock()
 }
 
-func (s jtServer) OnDisConnected(conn net.Conn, err error) {
-	log.Sugar.Debugf("jtserver断开连接 conn:%s", conn.RemoteAddr().String())
-
-	t := conn.(*transport.Conn)
-	utils.Assert(t.Data != nil)
-	t.Data.(*Session).Close()
-	t.Data = nil
-}
-
-func (s jtServer) Start(addr net.Addr) error {
+func (s *jtServer) Start(addr net.Addr) error {
 	utils.Assert(s.tcp == nil)
 
 	server := &transport.TCPServer{}
 	server.SetHandler(s)
-	err := server.Bind(addr)
-
-	if err != nil {
+	if err := server.Bind(addr); err != nil {
 		return err
 	}
 
@@ -59,6 +46,16 @@ func (s jtServer) Start(addr net.Addr) error {
 	return nil
 }
 
-func (s jtServer) Close() {
+func (s *jtServer) Close() {
 	panic("implement me")
+}
+
+func NewServer() Server {
+	j := &jtServer{}
+	j.StreamServer = stream.StreamServer[*Session]{
+		SourceType: stream.SourceType1078,
+		Handler:    j,
+	}
+
+	return j
 }

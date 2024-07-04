@@ -17,7 +17,7 @@ func CreateTransStream(source stream.Source, protocol stream.Protocol, streams [
 }
 
 func init() {
-	stream.TransStreamFactory = CreateTransStream
+	//stream.TransStreamFactory = CreateTransStream
 }
 
 func TestServer(t *testing.T) {

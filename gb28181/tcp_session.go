@@ -33,6 +33,19 @@ func (t *TCPSession) Init(source GBSource) {
 	t.receiveBuffer = stream.NewTCPReceiveBuffer()
 }
 
+func (t *TCPSession) Close() {
+	t.conn = nil
+	if t.source != nil {
+		t.source.Close()
+		t.source = nil
+	}
+
+	if t.decoder != nil {
+		t.decoder.Close()
+		t.decoder = nil
+	}
+}
+
 func NewTCPSession(conn net.Conn, filter Filter) *TCPSession {
 	session := &TCPSession{
 		conn: conn,

@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/yangjiechina/lkm/log"
 	"net"
@@ -173,6 +174,7 @@ type PublishSource struct {
 	idleTimer        *time.Timer
 	sinkCount        int
 	closed           bool
+	firstPacket      bool
 	urlValues        url.Values
 }
 
@@ -252,6 +254,13 @@ func (s *PublishSource) LoopEvent() {
 		case data := <-s.inputDataEvent:
 			if s.closed {
 				break
+			}
+
+			if !s.firstPacket {
+				urls := GetStreamPlayUrls(s.Id_)
+				indent, _ := json.MarshalIndent(urls, "", "\t")
+				log.Sugar.Infof("%s 开始推流 source:%s 拉流地址:\r\n%s", s.Type_.ToString(), s.Id_, indent)
+				s.firstPacket = true
 			}
 
 			if AppConfig.ReceiveTimeout > 0 {

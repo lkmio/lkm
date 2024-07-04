@@ -6,6 +6,7 @@
   "public_ip": "192.168.2.148",
   "idle_timeout": 60,
   "receive_timeout":60,
+  "debug": false,
 
   "http": {
     "addr": "0.0.0.0:8080"

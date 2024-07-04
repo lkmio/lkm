@@ -292,6 +292,11 @@ func (s *Session) Close() {
 		s.Conn = nil
 	}
 
+	if s.decoder != nil {
+		s.decoder.Close()
+		s.decoder = nil
+	}
+
 	s.PublishSource.Close()
 }
 

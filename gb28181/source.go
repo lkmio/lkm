@@ -45,6 +45,8 @@ type GBSource interface {
 	SetConn(conn net.Conn)
 
 	SetSSRC(ssrc uint32)
+
+	SSRC() uint32
 }
 
 type BaseGBSource struct {
@@ -241,6 +243,10 @@ func (source *BaseGBSource) SetConn(conn net.Conn) {
 
 func (source *BaseGBSource) SetSSRC(ssrc uint32) {
 	source.ssrc = ssrc
+}
+
+func (source *BaseGBSource) SSRC() uint32 {
+	return source.ssrc
 }
 
 func (source *BaseGBSource) PreparePublish(conn net.Conn, ssrc uint32, source_ GBSource) {

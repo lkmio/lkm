@@ -7,6 +7,7 @@ import (
 	"net"
 )
 
+// TCPClient GB28181TCP主动收流
 type TCPClient struct {
 	TCPServer
 }

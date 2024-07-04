@@ -61,6 +61,7 @@ func startApiServer(addr string) {
 	  http://host:port/xxx_0.ts
 	  ws://host:port/xxx.flv
 	*/
+	//{source}.flv和/{source}/{stream}.flv意味着, 推流id(路径)只能一层
 	apiServer.router.HandleFunc("/{source}.flv", withCheckParams(apiServer.onFlv, ".flv"))
 	apiServer.router.HandleFunc("/{source}/{stream}.flv", withCheckParams(apiServer.onFlv, ".flv"))
 	apiServer.router.HandleFunc("/{source}.m3u8", withCheckParams(apiServer.onHLS, ".m3u8"))
