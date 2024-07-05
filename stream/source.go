@@ -193,8 +193,8 @@ func (s *PublishSource) Init(inputCB func(data []byte) error, closeCB func(), re
 	s.SetState(SessionStateHandshakeDone)
 	//初始化事件接收缓冲区
 	//收流和网络断开的chan都阻塞执行
-	//-1是为了保证从管道取到流, 到解析流是安全的, 不会被覆盖
-	s.inputDataEvent = make(chan []byte, receiveQueueSize-1)
+	//-2是为了保证从管道取到流, 到处理完流.整个过程安全的, 不会被覆盖
+	s.inputDataEvent = make(chan []byte, receiveQueueSize-2)
 	s.closedEvent = make(chan byte)
 	s.playingEventQueue = make(chan Sink, 128)
 	s.playingDoneEventQueue = make(chan Sink, 128)
