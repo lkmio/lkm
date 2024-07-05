@@ -89,11 +89,13 @@ func (s *Session) Input(conn net.Conn, data []byte) error {
 func (s *Session) Close() {
 	//session/conn/stack相关引用, go释放不了...手动赋值为nil
 	s.conn = nil
-	//释放协议栈
-	if s.stack != nil {
-		s.stack.Close()
-		s.stack = nil
-	}
+
+	defer func() {
+		if s.stack != nil {
+			s.stack.Close()
+			s.stack = nil
+		}
+	}()
 
 	//还没到publish/play
 	if s.handle == nil {
