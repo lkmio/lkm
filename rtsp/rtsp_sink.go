@@ -1,7 +1,6 @@
 package rtsp
 
 import (
-	"fmt"
 	"github.com/pion/rtcp"
 	"github.com/yangjiechina/avformat/librtp"
 	"github.com/yangjiechina/avformat/transport"
@@ -13,7 +12,7 @@ import (
 )
 
 var (
-	TransportManger stream.TransportManager
+	TransportManger transport.Manager
 )
 
 // rtsp拉流sink
@@ -59,42 +58,25 @@ func (s *sink) addSender(index int, tcp bool, ssrc uint32) (uint16, uint16, erro
 	if tcp {
 		s.tcp = true
 	} else {
-		err = TransportManger.AllocPairTransport(func(port uint16) error {
-			//rtp port
-			var addr *net.UDPAddr
-			addr, err = net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", "0.0.0.0", port))
+		sender.Rtp, err = TransportManger.NewUDPServer("0.0.0.0")
+		if err != nil {
+			return 0, 0, err
+		}
 
-			if err == nil {
-				//创建rtp udp server
-				sender.Rtp = &transport.UDPServer{}
-				sender.Rtp.SetHandler2(nil, sender.OnRTPPacket, nil)
-				err = sender.Rtp.Bind(addr)
-			}
+		sender.Rtcp, err = TransportManger.NewUDPServer("0.0.0.0")
+		if err != nil {
+			sender.Rtp.Close()
+			sender.Rtp = nil
+			return 0, 0, err
+		}
 
-			rtpPort = port
-			return nil
-		}, func(port uint16) error {
-			//rtcp port
-			var addr *net.UDPAddr
-			addr, err = net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", "0.0.0.0", port))
+		sender.Rtp.SetHandler2(nil, sender.OnRTPPacket, nil)
+		sender.Rtcp.SetHandler2(nil, sender.OnRTCPPacket, nil)
+		sender.Rtp.(*transport.UDPServer).Receive()
+		sender.Rtcp.(*transport.UDPServer).Receive()
 
-			if err == nil {
-				//创建rtcp udp server
-				sender.Rtcp = &transport.UDPServer{}
-				sender.Rtcp.SetHandler2(nil, sender.OnRTCPPacket, nil)
-				err = sender.Rtcp.Bind(addr)
-			} else {
-				sender.Rtp.Close()
-				sender.Rtp = nil
-			}
-
-			rtcpPort = port
-			return nil
-		})
-	}
-
-	if err != nil {
-		return 0, 0, err
+		rtpPort = uint16(sender.Rtp.ListenPort())
+		rtcpPort = uint16(sender.Rtcp.ListenPort())
 	}
 
 	s.senders[index] = &sender

@@ -5,6 +5,7 @@ import (
 	"github.com/yangjiechina/avformat/utils"
 	"github.com/yangjiechina/lkm/stream"
 	"net"
+	"runtime"
 )
 
 type Server interface {
@@ -36,12 +37,18 @@ func (s *jtServer) OnPacket(conn net.Conn, data []byte) []byte {
 func (s *jtServer) Start(addr net.Addr) error {
 	utils.Assert(s.tcp == nil)
 
-	server := &transport.TCPServer{}
-	server.SetHandler(s)
+	server := &transport.TCPServer{
+		ReuseServer: transport.ReuseServer{
+			EnableReuse:      true,
+			ConcurrentNumber: runtime.NumCPU(),
+		},
+	}
 	if err := server.Bind(addr); err != nil {
 		return err
 	}
 
+	server.SetHandler(s)
+	server.Accept()
 	s.tcp = server
 	return nil
 }

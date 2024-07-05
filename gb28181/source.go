@@ -26,7 +26,7 @@ const (
 )
 
 var (
-	TransportManger stream.TransportManager
+	TransportManger transport.Manager
 	SharedUDPServer *UDPServer
 	SharedTCPServer *TCPServer
 )
@@ -312,40 +312,21 @@ func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, uint1
 		port = stream.AppConfig.GB28181.Port[0]
 	} else if !active {
 		if tcp {
-			err := TransportManger.AllocTransport(true, func(port_ uint16) error {
-
-				addr, _ := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", stream.AppConfig.GB28181.Addr, port_))
-				server, err := NewTCPServer(addr, NewSingleFilter(source))
-				if err != nil {
-
-					return err
-				}
-
-				source.(*PassiveSource).transport = server.tcp
-				port = port_
-				return nil
-			})
-
+			tcpServer, err := NewTCPServer(NewSingleFilter(source))
 			if err != nil {
 				return nil, 0, err
 			}
+
+			port = uint16(tcpServer.tcp.ListenPort())
+			source.(*PassiveSource).transport = tcpServer.tcp
 		} else {
-			err := TransportManger.AllocTransport(false, func(port_ uint16) error {
-
-				addr, _ := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", stream.AppConfig.GB28181.Addr, port_))
-				server, err := NewUDPServer(addr, NewSingleFilter(source))
-				if err != nil {
-					return err
-				}
-
-				source.(*UDPSource).transport = server.udp
-				port = port_
-				return nil
-			})
-
+			server, err := NewUDPServer(NewSingleFilter(source))
 			if err != nil {
 				return nil, 0, err
 			}
+
+			port = uint16(server.udp.ListenPort())
+			source.(*UDPSource).transport = server.udp
 		}
 	}
 

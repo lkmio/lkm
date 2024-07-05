@@ -5,6 +5,7 @@ import (
 	"github.com/yangjiechina/avformat/utils"
 	"github.com/yangjiechina/lkm/log"
 	"net"
+	"runtime"
 )
 
 type Server interface {
@@ -28,13 +29,19 @@ func (s *server) Start(addr net.Addr) error {
 	utils.Assert(s.tcp == nil)
 
 	//监听TCP端口
-	tcp := &transport.TCPServer{}
-	tcp.SetHandler(s)
-	err := tcp.Bind(addr)
-	if err != nil {
+	tcp := &transport.TCPServer{
+		ReuseServer: transport.ReuseServer{
+			EnableReuse:      true,
+			ConcurrentNumber: runtime.NumCPU(),
+		},
+	}
+
+	if err := tcp.Bind(addr); err != nil {
 		return err
 	}
 
+	tcp.SetHandler(s)
+	tcp.Accept()
 	s.tcp = tcp
 	return nil
 }

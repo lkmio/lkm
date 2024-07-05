@@ -14,7 +14,7 @@ type ActiveSource struct {
 
 func NewActiveSource() (*ActiveSource, uint16, error) {
 	var port uint16
-	TransportManger.AllocTransport(true, func(port_ uint16) error {
+	TransportManger.AllocPort(true, func(port_ uint16) error {
 		port = port_
 		return nil
 	})

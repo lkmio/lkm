@@ -4,6 +4,7 @@ import (
 	"github.com/yangjiechina/lkm/log"
 	"github.com/yangjiechina/lkm/stream"
 	"net"
+	"runtime"
 
 	"github.com/yangjiechina/avformat/transport"
 	"github.com/yangjiechina/avformat/utils"
@@ -24,12 +25,19 @@ type server struct {
 func (s *server) Start(addr net.Addr) error {
 	utils.Assert(s.tcp == nil)
 
-	tcp := &transport.TCPServer{}
-	tcp.SetHandler(s)
+	tcp := &transport.TCPServer{
+		ReuseServer: transport.ReuseServer{
+			EnableReuse:      true,
+			ConcurrentNumber: runtime.NumCPU(),
+		},
+	}
+
 	if err := tcp.Bind(addr); err != nil {
 		return err
 	}
 
+	tcp.SetHandler(s)
+	tcp.Accept()
 	s.tcp = tcp
 	return nil
 }

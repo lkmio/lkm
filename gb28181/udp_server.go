@@ -1,11 +1,13 @@
 package gb28181
 
 import (
+	"fmt"
 	"github.com/pion/rtp"
 	"github.com/yangjiechina/avformat/transport"
 	"github.com/yangjiechina/lkm/log"
 	"github.com/yangjiechina/lkm/stream"
 	"net"
+	"runtime"
 )
 
 // UDPServer GB28181UDP收流
@@ -54,16 +56,40 @@ func (U *UDPServer) OnPacket(conn net.Conn, data []byte) []byte {
 	return nil
 }
 
-func NewUDPServer(addr net.Addr, filter Filter) (*UDPServer, error) {
+func NewUDPServer(filter Filter) (*UDPServer, error) {
 	server := &UDPServer{
 		filter: filter,
 	}
 
-	udp, err := transport.NewUDPServer(addr, server)
-	if err != nil {
-		return nil, err
+	var udp *transport.UDPServer
+	var err error
+	if stream.AppConfig.GB28181.IsMultiPort() {
+		udp, err = TransportManger.NewUDPServer(stream.AppConfig.GB28181.Addr)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		udp = &transport.UDPServer{
+			ReuseServer: transport.ReuseServer{
+				EnableReuse:      true,
+				ConcurrentNumber: runtime.NumCPU(),
+			},
+		}
+
+		var gbAddr *net.UDPAddr
+		addr := fmt.Sprintf("%s:%d", stream.AppConfig.GB28181.Addr, stream.AppConfig.GB28181.Port[0])
+		gbAddr, err = net.ResolveUDPAddr("udp", addr)
+		if err != nil {
+			return nil, err
+		}
+
+		if err = udp.Bind(gbAddr); err != nil {
+			return server, err
+		}
 	}
 
+	udp.SetHandler(server)
+	udp.Receive()
 	server.udp = udp
 	server.StreamServer = stream.StreamServer[*UDPSource]{
 		SourceType: stream.SourceType28181,

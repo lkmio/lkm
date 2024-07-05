@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/yangjiechina/avformat/transport"
 	"github.com/yangjiechina/lkm/flv"
 	"github.com/yangjiechina/lkm/gb28181"
 	"github.com/yangjiechina/lkm/hls"
@@ -107,12 +109,15 @@ func init() {
 	log.InitLogger(zapcore.Level(stream.AppConfig.Log.Level), stream.AppConfig.Log.Name, stream.AppConfig.Log.MaxSize, stream.AppConfig.Log.MaxBackup, stream.AppConfig.Log.MaxAge, stream.AppConfig.Log.Compress)
 
 	if stream.AppConfig.GB28181.IsMultiPort() {
-		gb28181.TransportManger = stream.NewTransportManager(stream.AppConfig.GB28181.Port[0], stream.AppConfig.GB28181.Port[1])
+		gb28181.TransportManger = transport.NewTransportManager(stream.AppConfig.GB28181.Port[0], stream.AppConfig.GB28181.Port[1])
 	}
 
 	if stream.AppConfig.Rtsp.IsMultiPort() {
-		rtsp.TransportManger = stream.NewTransportManager(stream.AppConfig.Rtsp.Port[0], stream.AppConfig.Rtsp.Port[1])
+		rtsp.TransportManger = transport.NewTransportManager(stream.AppConfig.Rtsp.Port[0], stream.AppConfig.Rtsp.Port[1])
 	}
+
+	indent, _ := json.MarshalIndent(stream.AppConfig, "", "\t")
+	log.Sugar.Infof("server config:%s", indent)
 }
 
 func main() {
@@ -156,35 +161,23 @@ func main() {
 	//多端口模式下, 创建GBSource时才创建收流端口
 	if !stream.AppConfig.GB28181.IsMultiPort() {
 		if stream.AppConfig.GB28181.EnableUDP() {
-			addr := fmt.Sprintf("%s:%d", stream.AppConfig.GB28181.Addr, stream.AppConfig.GB28181.Port[0])
-			gbAddr, err := net.ResolveUDPAddr("udp", addr)
-			if err != nil {
-				panic(err)
-			}
-
-			server, err := gb28181.NewUDPServer(gbAddr, gb28181.NewSharedFilter(128))
+			server, err := gb28181.NewUDPServer(gb28181.NewSharedFilter(128))
 			if err != nil {
 				panic(err)
 			}
 
 			gb28181.SharedUDPServer = server
-			log.Sugar.Info("启动GB28181 UDP收流端口成功:" + gbAddr.String())
+			log.Sugar.Info("启动GB28181 UDP收流端口成功:" + fmt.Sprintf("%s:%d", stream.AppConfig.GB28181.Addr, stream.AppConfig.GB28181.Port[0]))
 		}
 
 		if stream.AppConfig.GB28181.EnableTCP() {
-			addr := fmt.Sprintf("%s:%d", stream.AppConfig.GB28181.Addr, stream.AppConfig.GB28181.Port[0])
-			gbAddr, err := net.ResolveTCPAddr("tcp", addr)
-			if err != nil {
-				panic(err)
-			}
-
-			server, err := gb28181.NewTCPServer(gbAddr, gb28181.NewSharedFilter(128))
+			server, err := gb28181.NewTCPServer(gb28181.NewSharedFilter(128))
 			if err != nil {
 				panic(err)
 			}
 
 			gb28181.SharedTCPServer = server
-			log.Sugar.Info("启动GB28181 TCP收流端口成功:" + gbAddr.String())
+			log.Sugar.Info("启动GB28181 TCP收流端口成功:" + fmt.Sprintf("%s:%d", stream.AppConfig.GB28181.Addr, stream.AppConfig.GB28181.Port[0]))
 		}
 	}
 

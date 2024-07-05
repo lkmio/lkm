@@ -1,9 +1,11 @@
 package gb28181
 
 import (
+	"fmt"
 	"github.com/yangjiechina/avformat/transport"
 	"github.com/yangjiechina/lkm/stream"
 	"net"
+	"runtime"
 )
 
 // TCPServer GB28181TCP被动收流
@@ -60,22 +62,46 @@ func (T *TCPServer) OnPacket(conn net.Conn, data []byte) []byte {
 	return nil
 }
 
-func NewTCPServer(addr net.Addr, filter Filter) (*TCPServer, error) {
+func NewTCPServer(filter Filter) (*TCPServer, error) {
 	server := &TCPServer{
 		filter: filter,
 	}
 
+	var tcp *transport.TCPServer
+	var err error
+	if stream.AppConfig.GB28181.IsMultiPort() {
+		tcp = &transport.TCPServer{}
+		tcp, err = TransportManger.NewTCPServer(stream.AppConfig.GB28181.Addr)
+		if err != nil {
+			return nil, err
+		}
+
+	} else {
+		tcp = &transport.TCPServer{
+			ReuseServer: transport.ReuseServer{
+				EnableReuse:      true,
+				ConcurrentNumber: runtime.NumCPU(),
+			},
+		}
+
+		var gbAddr *net.TCPAddr
+		addr := fmt.Sprintf("%s:%d", stream.AppConfig.GB28181.Addr, stream.AppConfig.GB28181.Port[0])
+		gbAddr, err = net.ResolveTCPAddr("tcp", addr)
+		if err != nil {
+			return nil, err
+		}
+
+		if err = tcp.Bind(gbAddr); err != nil {
+			return server, err
+		}
+	}
+
+	tcp.SetHandler(server)
+	tcp.Accept()
+	server.tcp = tcp
 	server.StreamServer = stream.StreamServer[*TCPSession]{
 		SourceType: stream.SourceType28181,
 		Handler:    server,
 	}
-
-	tcp := &transport.TCPServer{}
-	tcp.SetHandler(server)
-	if err := tcp.Bind(addr); err != nil {
-		return server, err
-	}
-
-	server.tcp = tcp
 	return server, nil
 }
