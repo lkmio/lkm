@@ -269,7 +269,7 @@ func (source *BaseGBSource) PreparePublish(conn net.Conn, ssrc uint32, source_ G
 }
 
 // NewGBSource 创建gb源,返回监听的收流端口
-func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, uint16, error) {
+func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, int, error) {
 	if tcp {
 		utils.Assert(stream.AppConfig.GB28181.EnableTCP())
 	} else {
@@ -281,7 +281,7 @@ func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, uint1
 	}
 
 	var source GBSource
-	var port uint16
+	var port int
 	var err error
 
 	if active {
@@ -317,7 +317,7 @@ func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, uint1
 				return nil, 0, err
 			}
 
-			port = uint16(tcpServer.tcp.ListenPort())
+			port = tcpServer.tcp.ListenPort()
 			source.(*PassiveSource).transport = tcpServer.tcp
 		} else {
 			server, err := NewUDPServer(NewSingleFilter(source))
@@ -325,7 +325,7 @@ func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, uint1
 				return nil, 0, err
 			}
 
-			port = uint16(server.udp.ListenPort())
+			port = server.udp.ListenPort()
 			source.(*UDPSource).transport = server.udp
 		}
 	}

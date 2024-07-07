@@ -1,7 +1,6 @@
 package gb28181
 
 import (
-	"fmt"
 	"github.com/yangjiechina/avformat/transport"
 	"github.com/yangjiechina/lkm/stream"
 	"net"
@@ -71,7 +70,7 @@ func NewTCPServer(filter Filter) (*TCPServer, error) {
 	var err error
 	if stream.AppConfig.GB28181.IsMultiPort() {
 		tcp = &transport.TCPServer{}
-		tcp, err = TransportManger.NewTCPServer(stream.AppConfig.GB28181.Addr)
+		tcp, err = TransportManger.NewTCPServer(stream.AppConfig.ListenIP)
 		if err != nil {
 			return nil, err
 		}
@@ -85,8 +84,7 @@ func NewTCPServer(filter Filter) (*TCPServer, error) {
 		}
 
 		var gbAddr *net.TCPAddr
-		addr := fmt.Sprintf("%s:%d", stream.AppConfig.GB28181.Addr, stream.AppConfig.GB28181.Port[0])
-		gbAddr, err = net.ResolveTCPAddr("tcp", addr)
+		gbAddr, err = net.ResolveTCPAddr("tcp", stream.ListenAddr(stream.AppConfig.GB28181.Port[0]))
 		if err != nil {
 			return nil, err
 		}

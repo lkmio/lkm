@@ -7,15 +7,15 @@ import (
 type ActiveSource struct {
 	PassiveSource
 
-	port       uint16
+	port       int
 	remoteAddr net.TCPAddr
 	tcp        *TCPClient
 }
 
-func NewActiveSource() (*ActiveSource, uint16, error) {
-	var port uint16
+func NewActiveSource() (*ActiveSource, int, error) {
+	var port int
 	TransportManger.AllocPort(true, func(port_ uint16) error {
-		port = port_
+		port = int(port_)
 		return nil
 	})
 

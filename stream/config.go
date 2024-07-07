@@ -2,10 +2,13 @@ package stream
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"github.com/yangjiechina/lkm/log"
+	"go.uber.org/zap/zapcore"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -14,20 +17,31 @@ const (
 )
 
 type TransportConfig struct {
-	Transport string    //"UDP|TCP"
-	Port      [2]uint16 //单端口-1个元素/多端口-2个元素
+	Transport string `json:"transport"` //"UDP|TCP"
 }
 
 type RtmpConfig struct {
-	Enable bool   `json:"enable"`
-	Addr   string `json:"addr"`
+	Enable bool `json:"enable"`
+	Port   int  `json:"port"`
+}
+
+type HlsConfig struct {
+	Enable         bool   `json:"enable"`
+	Dir            string `json:"dir"`
+	Duration       int    `json:"segment_duration"`
+	PlaylistLength int    `json:"playlist_length"`
+}
+
+type JT1078Config struct {
+	Enable bool `json:"enable"`
+	Port   int  `json:"port"`
 }
 
 type RtspConfig struct {
 	TransportConfig
 
-	Addr     string
 	Enable   bool   `json:"enable"`
+	Port     []int  `json:"port"`
 	Password string `json:"password"`
 }
 
@@ -36,35 +50,22 @@ type RecordConfig struct {
 	Format string `json:"format"`
 }
 
-type HlsConfig struct {
-	Enable         bool   `json:"enable"`
-	Dir            string `json:"dir"`
-	Duration       int    `json:"duration"`
-	PlaylistLength int    `json:"playlist_length"`
-}
-
 type LogConfig struct {
-	Level     int
-	Name      string
-	MaxSize   int
-	MaxBackup int
-	MaxAge    int
-	Compress  bool
+	Level     int    `json:"level"`
+	Name      string `json:"name"`
+	MaxSize   int    `json:"max_size"` //单位M
+	MaxBackup int    `json:"max_backup"`
+	MaxAge    int    `json:"max_age"` //天数
+	Compress  bool   `json:"compress"`
 }
 
 type HttpConfig struct {
-	Enable bool   `json:"enable"`
-	Addr   string `json:"addr"`
+	Port int `json:"port"`
 }
 
 type GB28181Config struct {
 	TransportConfig
-	Addr string `json:"addr"`
-}
-
-type JT1078Config struct {
-	Enable bool   `json:"enable"`
-	Addr   string `json:"addr"`
+	Port []int `json:"port"`
 }
 
 func (g TransportConfig) EnableTCP() bool {
@@ -75,8 +76,12 @@ func (g TransportConfig) EnableUDP() bool {
 	return strings.Contains(g.Transport, "UDP")
 }
 
-func (g TransportConfig) IsMultiPort() bool {
-	return g.Port[1] > 0 && g.Port[1] > g.Port[0]
+func (g GB28181Config) IsMultiPort() bool {
+	return len(g.Port) > 1
+}
+
+func (g RtspConfig) IsMultiPort() bool {
+	return len(g.Port) == 3
 }
 
 // M3U8Path 根据sourceId返回m3u8的磁盘路径
@@ -152,29 +157,26 @@ func (hook *HookConfig) EnableOnReceiveTimeout() bool {
 func GetStreamPlayUrls(sourceId string) []string {
 	var urls []string
 	if AppConfig.Rtmp.Enable {
-		_, port, _ := net.SplitHostPort(AppConfig.Rtmp.Addr)
-		urls = append(urls, fmt.Sprintf("rtmp://%s:%s/%s", AppConfig.PublicIP, port, sourceId))
+		urls = append(urls, fmt.Sprintf("rtmp://%s:%d/%s", AppConfig.PublicIP, AppConfig.Rtmp.Port, sourceId))
 	}
 
 	if AppConfig.Rtsp.Enable {
-		_, port, _ := net.SplitHostPort(AppConfig.Rtsp.Addr)
 		//不拼接userinfo
-		urls = append(urls, fmt.Sprintf("rtsp://%s:%s/%s", AppConfig.PublicIP, port, sourceId))
+		urls = append(urls, fmt.Sprintf("rtsp://%s:%d/%s", AppConfig.PublicIP, AppConfig.Rtsp.Port[0], sourceId))
 	}
 
 	//if AppConfig.Http.Enable {
 	//	return
 	//}
 
-	_, port, _ := net.SplitHostPort(AppConfig.Http.Addr)
 	if AppConfig.Hls.Enable {
 		//不拼接userinfo
-		urls = append(urls, fmt.Sprintf("http://%s:%s/%s.m3u8", AppConfig.PublicIP, port, sourceId))
+		urls = append(urls, fmt.Sprintf("http://%s:%d/%s.m3u8", AppConfig.PublicIP, AppConfig.Http.Port, sourceId))
 	}
 
-	urls = append(urls, fmt.Sprintf("http://%s:%s/%s.flv", AppConfig.PublicIP, port, sourceId))
-	urls = append(urls, fmt.Sprintf("http://%s:%s/%s.rtc", AppConfig.PublicIP, port, sourceId))
-	urls = append(urls, fmt.Sprintf("ws://%s:%s/%s.flv", AppConfig.PublicIP, port, sourceId))
+	urls = append(urls, fmt.Sprintf("http://%s:%d/%s.flv", AppConfig.PublicIP, AppConfig.Http.Port, sourceId))
+	urls = append(urls, fmt.Sprintf("http://%s:%d/%s.rtc", AppConfig.PublicIP, AppConfig.Http.Port, sourceId))
+	urls = append(urls, fmt.Sprintf("ws://%s:%d/%s.flv", AppConfig.PublicIP, AppConfig.Http.Port, sourceId))
 	return urls
 }
 
@@ -201,6 +203,14 @@ func DumpStream2File(sourceType SourceType, conn net.Conn, data []byte) {
 	file.Write(data)
 }
 
+func JoinHostPort(host string, port int) string {
+	return net.JoinHostPort(host, strconv.Itoa(port))
+}
+
+func ListenAddr(port int) string {
+	return JoinHostPort(AppConfig.ListenIP, port)
+}
+
 var AppConfig AppConfig_
 
 func init() {
@@ -213,6 +223,7 @@ type AppConfig_ struct {
 	GOPBufferSize  int    `json:"gop_buffer_size"` //预估GOPBuffer大小, AVPacket缓存池和合并写缓存池都会参考此大小
 	ProbeTimeout   int    `json:"probe_timeout"`
 	PublicIP       string `json:"public_ip"`
+	ListenIP       string `json:"listen_ip"`
 	IdleTimeout    int64  `json:"idle_timeout"`    //多长时间没有拉流, 单位秒. 如果开启hook通知, 根据hook响应, 决定是否关闭Source(200-不关闭/非200关闭). 否则会直接关闭Source.
 	ReceiveTimeout int64  `json:"receive_timeout"` //多长时间没有收到流, 单位秒. 如果开启hook通知, 根据hook响应, 决定是否关闭Source(200-不关闭/非200关闭). 否则会直接关闭Source.
 	Debug          bool   `json:"debug"`           //debug模式, 开启将保存推流
@@ -221,13 +232,62 @@ type AppConfig_ struct {
 	//合并写的大小范围，应当大于一帧的时长，不超过一组GOP的时长，在实际发送流的时候也会遵循此条例.
 	MergeWriteLatency int `json:"mw_latency"`
 	Rtmp              RtmpConfig
-	Rtsp              RtspConfig
 	Hls               HlsConfig
-	GB28181           GB28181Config
 	JT1078            JT1078Config
+	Rtsp              RtspConfig
+	GB28181           GB28181Config
 
 	Hook   HookConfig
 	Record RecordConfig
 	Log    LogConfig
 	Http   HttpConfig
+}
+
+func LoadConfigFile(path string) (*AppConfig_, error) {
+	file, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	config_ := AppConfig_{}
+	if err := json.Unmarshal(file, &config_); err != nil {
+		return nil, err
+	}
+
+	return &config_, err
+}
+
+func SetDefaultConfig(config_ *AppConfig_) {
+	if !config_.GOPCache {
+		config_.GOPCache = true
+		config_.GOPBufferSize = 8196 * 1024
+		config_.MergeWriteLatency = 350
+		log.Sugar.Warnf("强制开启GOP缓存")
+	}
+
+	config_.GOPBufferSize = limitInt(4096*1024/8, 2048*1024*10, config_.GOPBufferSize) //最低4M码率 最高160M码率
+	config_.MergeWriteLatency = limitInt(350, 2000, config_.MergeWriteLatency)         //最低缓存350毫秒数据才发送 最高缓存2秒数据才发送
+	config_.ProbeTimeout = limitInt(2000, 5000, config_.MergeWriteLatency)             //2-5秒内必须解析完AVStream
+
+	config_.Log.Level = limitInt(int(zapcore.DebugLevel), int(zapcore.FatalLevel), config_.Log.Level)
+	config_.Log.MaxSize = limitMin(1, config_.Log.MaxSize)
+	config_.Log.MaxBackup = limitMin(1, config_.Log.MaxBackup)
+	config_.Log.MaxAge = limitMin(1, config_.Log.MaxAge)
+}
+
+func limitMin(min, value int) int {
+	if value < min {
+		return min
+	}
+	return value
+}
+
+func limitInt(min, max, value int) int {
+	if value < min {
+		return min
+	} else if value > max {
+		return max
+	}
+
+	return value
 }

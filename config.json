@@ -3,31 +3,31 @@
   "gop_buffer_size": 8192000,
   "probe_timeout": 2000,
   "mw_latency": 350,
+  "listen_ip" : "0.0.0.0",
   "public_ip": "192.168.2.148",
   "idle_timeout": 60,
   "receive_timeout":60,
   "debug": false,
 
   "http": {
-    "addr": "0.0.0.0:8080"
+    "port": 8080
   },
 
   "rtmp": {
     "enable": true,
-    "addr": "0.0.0.0:1935"
+    "port": 1935
   },
 
   "hls": {
     "enable": false,
     "segment_duration": 2,
     "playlist_length": 10,
-    "path": "../tmp"
+    "dir": "../tmp"
   },
 
   "rtsp": {
     "enable": true,
-    "addr": "0.0.0.0:554",
-    "port": [20000,30000],
+    "port": [554,20000,30000],
     "password": "123456",
     "transport": "UDP|TCP"
   },
@@ -42,8 +42,9 @@
     "transport": "UDP|TCP"
   },
 
-  "1078": {
-    "addr": "0.0.0.0:1078"
+  "jt1078": {
+    "enable": true,
+    "port": 1078
   },
 
   "record": {
@@ -62,5 +63,14 @@
     "on_record": "http://localhost:8081/api/v1/on_reocrd",
     "on_idle_timeout": "http://localhost:8081/api/v1/on_idle_timeout",
     "on_receive_timeout": "http://localhost:8081/api/v1/on_recv_timeout"
+  },
+
+  "log": {
+    "level": -1,
+    "name": "./logs/lkm.log",
+    "max_size":   10,
+    "max_backup": 100,
+    "max_age":    7,
+    "compress":  false
   }
 }

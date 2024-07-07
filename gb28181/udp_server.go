@@ -1,7 +1,6 @@
 package gb28181
 
 import (
-	"fmt"
 	"github.com/pion/rtp"
 	"github.com/yangjiechina/avformat/transport"
 	"github.com/yangjiechina/lkm/log"
@@ -64,7 +63,7 @@ func NewUDPServer(filter Filter) (*UDPServer, error) {
 	var udp *transport.UDPServer
 	var err error
 	if stream.AppConfig.GB28181.IsMultiPort() {
-		udp, err = TransportManger.NewUDPServer(stream.AppConfig.GB28181.Addr)
+		udp, err = TransportManger.NewUDPServer(stream.AppConfig.ListenIP)
 		if err != nil {
 			return nil, err
 		}
@@ -77,8 +76,7 @@ func NewUDPServer(filter Filter) (*UDPServer, error) {
 		}
 
 		var gbAddr *net.UDPAddr
-		addr := fmt.Sprintf("%s:%d", stream.AppConfig.GB28181.Addr, stream.AppConfig.GB28181.Port[0])
-		gbAddr, err = net.ResolveUDPAddr("udp", addr)
+		gbAddr, err = net.ResolveUDPAddr("udp", stream.ListenAddr(stream.AppConfig.GB28181.Port[0]))
 		if err != nil {
 			return nil, err
 		}

@@ -111,7 +111,7 @@ func (api *ApiServer) createGBSource(w http.ResponseWriter, r *http.Request) {
 	//返回监听的端口
 	response := &struct {
 		IP   string `json:"ip"`
-		Port uint16 `json:"port,omitempty"`
+		Port int    `json:"port,omitempty"`
 	}{}
 
 	var err error
