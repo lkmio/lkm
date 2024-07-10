@@ -44,7 +44,7 @@ func init() {
 	}
 
 	if stream.AppConfig.Rtsp.IsMultiPort() {
-		rtsp.TransportManger = transport.NewTransportManager(uint16(stream.AppConfig.Rtsp.Port[0]), uint16(stream.AppConfig.Rtsp.Port[1]))
+		rtsp.TransportManger = transport.NewTransportManager(uint16(stream.AppConfig.Rtsp.Port[1]), uint16(stream.AppConfig.Rtsp.Port[2]))
 	}
 
 	indent, _ := json.MarshalIndent(stream.AppConfig, "", "\t")
@@ -59,8 +59,8 @@ func main() {
 			panic(err)
 		}
 
-		impl := rtmp.NewServer()
-		err = impl.Start(rtmpAddr)
+		server := rtmp.NewServer()
+		err = server.Start(rtmpAddr)
 		if err != nil {
 			panic(err)
 		}
@@ -74,8 +74,8 @@ func main() {
 			panic(rtspAddr)
 		}
 
-		rtspServer := rtsp.NewServer(stream.AppConfig.Rtsp.Password)
-		err = rtspServer.Start(rtspAddr)
+		server := rtsp.NewServer(stream.AppConfig.Rtsp.Password)
+		err = server.Start(rtspAddr)
 		if err != nil {
 			panic(err)
 		}
@@ -125,10 +125,8 @@ func main() {
 		log.Sugar.Info("启动jt1078服务成功 addr:", jtAddr.String())
 	}
 
-	loadConfigError := http.ListenAndServe(":19999", nil)
-	if loadConfigError != nil {
-		panic(loadConfigError)
+	err := http.ListenAndServe(":19999", nil)
+	if err != nil {
+		panic(err)
 	}
-
-	select {}
 }

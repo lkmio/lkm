@@ -2,6 +2,7 @@
   "gop_cache": true,
   "gop_buffer_size": 8192000,
   "probe_timeout": 2000,
+  "write_timeout": 5000,
   "mw_latency": 350,
   "listen_ip" : "0.0.0.0",
   "public_ip": "192.168.2.148",
@@ -55,14 +56,14 @@
   "hook": {
     "enable": true,
     "timeout": 10,
-    "on_publish": "http://localhost:8081/api/v1/on_publish",
-    "on_publish_done": "http://localhost:8081/api/v1/on_publish_done",
-    "on_play" : "http://localhost:8081/api/v1/on_play",
-    "on_play_done" : "http://localhost:8081/api/on_play_done",
+    "on_publish": "http://localhost:9000/api/v1/hook/on_publish",
+    "on_publish_done": "http://localhost:9000/api/v1/hook/on_publish_done",
+    "on_play" : "http://localhost:9000/api/v1/hook/on_play",
+    "on_play_done" : "http://localhost:9000/api/on_play_done",
 
-    "on_record": "http://localhost:8081/api/v1/on_reocrd",
-    "on_idle_timeout": "http://localhost:8081/api/v1/on_idle_timeout",
-    "on_receive_timeout": "http://localhost:8081/api/v1/on_recv_timeout"
+    "on_record": "http://localhost:9000/api/v1/hook/on_reocrd",
+    "on_idle_timeout": "http://localhost:9000/api/v1/hook/on_idle_timeout",
+    "on_receive_timeout": "http://localhost:9000/api/v1/hook/on_recv_timeout"
   },
 
   "log": {

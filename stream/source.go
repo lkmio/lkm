@@ -3,6 +3,7 @@ package stream
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/yangjiechina/lkm/collections"
 	"github.com/yangjiechina/lkm/log"
 	"net"
 	"net/url"
@@ -91,7 +92,7 @@ type Source interface {
 	Close()
 
 	// FindOrCreatePacketBuffer 查找或者创建AVPacket的内存池
-	FindOrCreatePacketBuffer(index int, mediaType utils.AVMediaType) MemoryPool
+	FindOrCreatePacketBuffer(index int, mediaType utils.AVMediaType) collections.MemoryPool
 
 	// OnDiscardPacket GOP缓存溢出回调, 释放AVPacket
 	OnDiscardPacket(pkt utils.AVPacket)
@@ -140,15 +141,15 @@ type PublishSource struct {
 	state SessionState
 	Conn  net.Conn
 
-	TransDeMuxer     stream.DeMuxer         //负责从推流协议中解析出AVStream和AVPacket
-	recordSink       Sink                   //每个Source的录制流
-	hlsStream        TransStream            //如果开开启HLS传输流, 不等拉流时, 创建直接生成
-	audioTranscoders []transcode.Transcoder //音频解码器
-	videoTranscoders []transcode.Transcoder //视频解码器
-	originStreams    StreamManager          //推流的音视频Streams
-	allStreams       StreamManager          //推流Streams+转码器获得的Stream
-	pktBuffers       [8]MemoryPool          //推流每路的AVPacket缓存, AVPacket的data从该内存池中分配. 在GOP缓存溢出时,释放池中内存.
-	gopBuffer        GOPBuffer              //GOP缓存, 音频和视频混合使用, 以视频关键帧为界, 缓存第二个视频关键帧时, 释放前一组gop. 如果不存在视频流, 不缓存音频
+	TransDeMuxer     stream.DeMuxer            //负责从推流协议中解析出AVStream和AVPacket
+	recordSink       Sink                      //每个Source的录制流
+	hlsStream        TransStream               //如果开开启HLS传输流, 不等拉流时, 创建直接生成
+	audioTranscoders []transcode.Transcoder    //音频解码器
+	videoTranscoders []transcode.Transcoder    //视频解码器
+	originStreams    StreamManager             //推流的音视频Streams
+	allStreams       StreamManager             //推流Streams+转码器获得的Stream
+	pktBuffers       [8]collections.MemoryPool //推流每路的AVPacket缓存, AVPacket的data从该内存池中分配. 在GOP缓存溢出时,释放池中内存.
+	gopBuffer        GOPBuffer                 //GOP缓存, 音频和视频混合使用, 以视频关键帧为界, 缓存第二个视频关键帧时, 释放前一组gop. 如果不存在视频流, 不缓存音频
 
 	existVideo bool //是否存在视频
 	completed  bool
@@ -228,21 +229,21 @@ func (s *PublishSource) CreateDefaultOutStreams() {
 }
 
 // FindOrCreatePacketBuffer 查找或者创建AVPacket的内存池
-func (s *PublishSource) FindOrCreatePacketBuffer(index int, mediaType utils.AVMediaType) MemoryPool {
+func (s *PublishSource) FindOrCreatePacketBuffer(index int, mediaType utils.AVMediaType) collections.MemoryPool {
 	if index >= cap(s.pktBuffers) {
 		panic("流路数过多...")
 	}
 
 	if s.pktBuffers[index] == nil {
 		if utils.AVMediaTypeAudio == mediaType {
-			s.pktBuffers[index] = NewRbMemoryPool(48000 * 64)
+			s.pktBuffers[index] = collections.NewRbMemoryPool(48000 * 64)
 		} else if AppConfig.GOPCache {
 			//开启GOP缓存
-			s.pktBuffers[index] = NewRbMemoryPool(AppConfig.GOPBufferSize)
+			s.pktBuffers[index] = collections.NewRbMemoryPool(AppConfig.GOPBufferSize)
 		} else {
 			//未开启GOP缓存
 			//1M缓存大小, 单帧绰绰有余
-			s.pktBuffers[index] = NewRbMemoryPool(1024 * 1000)
+			s.pktBuffers[index] = collections.NewRbMemoryPool(1024 * 1000)
 		}
 	}
 

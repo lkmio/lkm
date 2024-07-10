@@ -64,6 +64,8 @@ type Sink interface {
 	Start()
 
 	Flush()
+
+	GetConn() net.Conn
 }
 
 // GenerateSinkId 根据网络地址生成SinkId IPV4使用一个uint64, IPV6使用String
@@ -243,4 +245,8 @@ func (s *BaseSink) Start() {
 }
 
 func (s *BaseSink) Flush() {
+}
+
+func (s *BaseSink) GetConn() net.Conn {
+	return s.Conn
 }

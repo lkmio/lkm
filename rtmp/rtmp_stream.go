@@ -8,7 +8,7 @@ import (
 )
 
 type transStream struct {
-	stream.BaseTransStream
+	stream.TCPTransStream
 
 	chunkSize int
 
@@ -22,7 +22,7 @@ type transStream struct {
 	//合并写内存泄露问题: 推流结束后, mwBuffer的data一直释放不掉, 只有拉流全部断开之后, 才会释放该内存.
 	//起初怀疑是代码层哪儿有问题, 但是测试发现如果将合并写切片再拷贝一次发送 给sink, 推流结束后，mwBuffer的data内存块释放没问题, 只有拷贝的内存块未释放. 所以排除了代码层造成内存泄露的可能性.
 	//看来是conn在write后还会持有data. 查阅代码发现, 的确如此. 向fd发送数据前buffer会引用data, 但是后续没有赋值为nil, 取消引用. https://github.com/golang/go/blob/d38f1d13fa413436d38d86fe86d6a146be44bb84/src/internal/poll/fd_windows.go#L694
-	mwBuffer stream.MergeWritingBuffer
+	mwBuffer stream.MergeWritingBuffer //合并写同时作为, 用户态的发送缓冲区
 }
 
 func (t *transStream) Input(packet utils.AVPacket) error {
@@ -62,16 +62,15 @@ func (t *transStream) Input(packet utils.AVPacket) error {
 		payloadSize += chunkPayloadOffset + len(data)
 	}
 
-	//遇到视频关键帧, 发送剩余的流
+	//遇到视频关键帧, 发送剩余的流, 创建新切片
 	if videoKey {
-		segment := t.mwBuffer.PopSegment()
-		if len(segment) > 0 {
+		if segment := t.mwBuffer.FlushSegment(); len(segment) > 0 {
 			t.SendPacket(segment)
 		}
 	}
 
 	//分配内存
-	allocate := t.mwBuffer.Allocate(chunkHeaderSize + payloadSize + ((payloadSize - 1) / t.chunkSize))
+	allocate := t.mwBuffer.Allocate(chunkHeaderSize+payloadSize+((payloadSize-1)/t.chunkSize), dts, videoKey)
 
 	//写rtmp chunk header
 	chunk.Length = payloadSize
@@ -84,11 +83,10 @@ func (t *transStream) Input(packet utils.AVPacket) error {
 	} else {
 		n += t.muxer.WriteAudioData(allocate[chunkHeaderSize:], false)
 	}
-
 	n += chunk.WriteData(allocate[n:], data, t.chunkSize, chunkPayloadOffset)
 
-	segment := t.mwBuffer.PeekCompletedSegment(dts)
-	if len(segment) > 0 {
+	//合并写满了再发
+	if segment := t.mwBuffer.PeekCompletedSegment(); len(segment) > 0 {
 		t.SendPacket(segment)
 	}
 	return nil
@@ -97,17 +95,14 @@ func (t *transStream) Input(packet utils.AVPacket) error {
 func (t *transStream) AddSink(sink stream.Sink) error {
 	utils.Assert(t.headerSize > 0)
 
-	t.BaseTransStream.AddSink(sink)
+	t.TCPTransStream.AddSink(sink)
 	//发送sequence header
 	sink.Input(t.header[:t.headerSize])
 
 	//发送当前内存池已有的合并写切片
-	segmentList := t.mwBuffer.SegmentList()
-	if len(segmentList) > 0 {
-		sink.Input(segmentList)
-		return nil
-	}
-
+	t.mwBuffer.ReadSegmentsFromKeyFrameIndex(func(bytes []byte) {
+		sink.Input(bytes)
+	})
 	return nil
 }
 
@@ -179,8 +174,7 @@ func (t *transStream) WriteHeader() error {
 
 func (t *transStream) Close() error {
 	//发送剩余的流
-	segment := t.mwBuffer.PopSegment()
-	if len(segment) > 0 {
+	if segment := t.mwBuffer.FlushSegment(); len(segment) > 0 {
 		t.SendPacket(segment)
 	}
 	return nil

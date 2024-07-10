@@ -75,7 +75,7 @@ func startApiServer(addr string) {
 	//TCP主动,设置连接地址
 	apiServer.router.HandleFunc("/api/v1/gb28181/source/connect", apiServer.connectGBSource)
 	apiServer.router.HandleFunc("/api/v1/gb28181/source/close", apiServer.closeGBSource)
-	apiServer.router.HandleFunc("/api/v1/gb28181/gc/force", func(writer http.ResponseWriter, request *http.Request) {
+	apiServer.router.HandleFunc("/api/v1/gc/force", func(writer http.ResponseWriter, request *http.Request) {
 		runtime.GC()
 		writer.WriteHeader(http.StatusOK)
 	})

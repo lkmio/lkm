@@ -2,6 +2,7 @@ package flv
 
 import (
 	"github.com/gorilla/websocket"
+	"github.com/yangjiechina/avformat/transport"
 	"net"
 	"time"
 )
@@ -15,6 +16,8 @@ func (w WSConn) Read(b []byte) (n int, err error) {
 }
 
 func (w WSConn) Write(b []byte) (n int, err error) {
+	//输入http-flv数据
+	//去掉不需要的换行符
 	var offset int
 	for i := 2; i < len(b); i++ {
 		if b[i-2] == 0x0D && b[i-1] == 0x0A {
@@ -31,5 +34,5 @@ func (w WSConn) SetDeadline(t time.Time) error {
 }
 
 func NewWSConn(conn *websocket.Conn) net.Conn {
-	return &WSConn{conn}
+	return transport.NewConn(&WSConn{conn})
 }

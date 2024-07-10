@@ -14,21 +14,8 @@ const (
 	HttpFlvBlockLengthSize = 20
 )
 
-type HttpFlvBlock struct {
-	pktSize   uint32
-	skipCount uint16
-}
-
-var separator []byte
-
-func init() {
-	separator = make([]byte, 2)
-	separator[0] = 0x0D
-	separator[1] = 0x0A
-}
-
 type httpTransStream struct {
-	stream.BaseTransStream
+	stream.TCPTransStream
 
 	muxer         libflv.Muxer
 	mwBuffer      stream.MergeWritingBuffer
@@ -57,9 +44,9 @@ func (t *httpTransStream) Input(packet utils.AVPacket) error {
 	}
 
 	//发送剩余数据
-	if videoKey && !t.mwBuffer.IsEmpty() {
+	if videoKey && !t.mwBuffer.IsNewSegment() {
 		t.mwBuffer.Reserve(2)
-		segment := t.mwBuffer.PopSegment()
+		segment := t.mwBuffer.FlushSegment()
 		t.sendUnpackedSegment(segment)
 	}
 
@@ -67,7 +54,7 @@ func (t *httpTransStream) Input(packet utils.AVPacket) error {
 	var separatorSize int
 
 	//新的合并写切片, 预留包长字节
-	if t.mwBuffer.IsCompleted() {
+	if t.mwBuffer.IsNewSegment() {
 		separatorSize = HttpFlvBlockLengthSize
 		//10字节描述flv包长, 前2个字节描述无效字节长度
 		n = HttpFlvBlockLengthSize
@@ -79,7 +66,7 @@ func (t *httpTransStream) Input(packet utils.AVPacket) error {
 	}
 
 	//分配flv block
-	bytes := t.mwBuffer.Allocate(separatorSize + flvSize)
+	bytes := t.mwBuffer.Allocate(separatorSize+flvSize, dts, videoKey)
 	n += t.muxer.Input(bytes[n:], packet.MediaType(), len(data), dts, pts, packet.KeyFrame(), false)
 	copy(bytes[n:], data)
 
@@ -87,8 +74,7 @@ func (t *httpTransStream) Input(packet utils.AVPacket) error {
 	//每一个合并写切片开始和预留长度所需的字节数
 	//合并写切片末尾加上换行符
 	//长度是16进制字符串
-	segment := t.mwBuffer.PeekCompletedSegment(dts)
-	if len(segment) > 0 {
+	if segment := t.mwBuffer.PeekCompletedSegment(); len(segment) > 0 {
 		t.sendUnpackedSegment(segment)
 	}
 	return nil
@@ -129,24 +115,27 @@ func (t *httpTransStream) computeSkipCount(data []byte) int {
 func (t *httpTransStream) AddSink(sink stream.Sink) error {
 	utils.Assert(t.headerSize > 0)
 
-	t.BaseTransStream.AddSink(sink)
+	t.TCPTransStream.AddSink(sink)
 	//发送sequence header
 	t.sendSegment(sink, t.header[:t.headerSize])
 
 	//发送当前内存池已有的合并写切片
-	segmentList := t.mwBuffer.SegmentList()
-	if len(segmentList) > 0 {
-		//修改第一个flv tag的pre tag size
-		binary.BigEndian.PutUint32(segmentList[20:], uint32(t.headerTagSize))
+	first := true
+	t.mwBuffer.ReadSegmentsFromKeyFrameIndex(func(bytes []byte) {
+		if first {
+			//修改第一个flv tag的pre tag size
+			binary.BigEndian.PutUint32(bytes[20:], uint32(t.headerTagSize))
+			first = false
+		}
 
 		//遍历发送合并写切片
 		var index int
-		for ; index < len(segmentList); index += 4 {
-			size := binary.BigEndian.Uint32(segmentList[index:])
-			t.sendSegment(sink, segmentList[index:index+4+int(size)])
+		for ; index < len(bytes); index += 4 {
+			size := binary.BigEndian.Uint32(bytes[index:])
+			t.sendSegment(sink, bytes[index:index+4+int(size)])
 			index += int(size)
 		}
-	}
+	})
 
 	return nil
 }
@@ -208,8 +197,7 @@ func (t *httpTransStream) WriteHeader() error {
 
 func (t *httpTransStream) Close() error {
 	//发送剩余的流
-	segment := t.mwBuffer.PopSegment()
-	if len(segment) > 0 {
+	if segment := t.mwBuffer.FlushSegment(); len(segment) > 0 {
 		t.sendUnpackedSegment(segment)
 	}
 	return nil

@@ -1,6 +1,9 @@
 package stream
 
-import "github.com/yangjiechina/avformat/utils"
+import (
+	"github.com/yangjiechina/avformat/utils"
+	"github.com/yangjiechina/lkm/collections"
+)
 
 // GOPBuffer GOP缓存
 type GOPBuffer interface {
@@ -23,13 +26,13 @@ type GOPBuffer interface {
 }
 
 type streamBuffer struct {
-	buffer             RingBuffer
+	buffer             collections.RingBuffer
 	existVideoKeyFrame bool
 	discardHandler     func(packet utils.AVPacket)
 }
 
 func NewStreamBuffer() GOPBuffer {
-	return &streamBuffer{buffer: NewRingBuffer(1000), existVideoKeyFrame: false}
+	return &streamBuffer{buffer: collections.NewRingBuffer(1000), existVideoKeyFrame: false}
 }
 
 func (s *streamBuffer) AddPacket(packet utils.AVPacket) bool {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/yangjiechina/avformat/transport"
 	"github.com/yangjiechina/avformat/utils"
+	"github.com/yangjiechina/lkm/collections"
 	"github.com/yangjiechina/lkm/log"
 	"github.com/yangjiechina/lkm/stream"
 	"net"
@@ -41,8 +42,8 @@ type Session struct {
 	videoIndex    int
 	audioStream   utils.AVStream
 	videoStream   utils.AVStream
-	audioBuffer   stream.MemoryPool
-	videoBuffer   stream.MemoryPool
+	audioBuffer   collections.MemoryPool
+	videoBuffer   collections.MemoryPool
 	rtpPacket     *RtpPacket
 	receiveBuffer *stream.ReceiveBuffer
 }

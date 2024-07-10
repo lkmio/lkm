@@ -2,7 +2,7 @@ package hls
 
 import (
 	"bytes"
-	"github.com/yangjiechina/lkm/stream"
+	"github.com/yangjiechina/lkm/collections"
 	"math"
 	"strconv"
 )
@@ -59,7 +59,7 @@ type M3U8Writer interface {
 func NewM3U8Writer(len int) M3U8Writer {
 	return &m3u8Writer{
 		stringBuffer: bytes.NewBuffer(make([]byte, 0, 1024*10)),
-		playlist:     stream.NewQueue(len),
+		playlist:     collections.NewQueue(len),
 	}
 }
 
@@ -72,7 +72,7 @@ type Segment struct {
 
 type m3u8Writer struct {
 	stringBuffer *bytes.Buffer
-	playlist     *stream.Queue
+	playlist     *collections.Queue
 }
 
 func (m *m3u8Writer) AddSegment(duration float32 /*title string,*/, url string, sequence int, path string) {

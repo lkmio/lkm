@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -219,14 +220,16 @@ func init() {
 
 // AppConfig_ GOP缓存和合并写必须保持一致，同时开启或关闭. 关闭GOP缓存，是为了降低延迟，很难理解又另外开启合并写.
 type AppConfig_ struct {
-	GOPCache       bool   `json:"gop_cache"`       //是否开启GOP缓存，只缓存一组音视频
-	GOPBufferSize  int    `json:"gop_buffer_size"` //预估GOPBuffer大小, AVPacket缓存池和合并写缓存池都会参考此大小
-	ProbeTimeout   int    `json:"probe_timeout"`
-	PublicIP       string `json:"public_ip"`
-	ListenIP       string `json:"listen_ip"`
-	IdleTimeout    int64  `json:"idle_timeout"`    //多长时间没有拉流, 单位秒. 如果开启hook通知, 根据hook响应, 决定是否关闭Source(200-不关闭/非200关闭). 否则会直接关闭Source.
-	ReceiveTimeout int64  `json:"receive_timeout"` //多长时间没有收到流, 单位秒. 如果开启hook通知, 根据hook响应, 决定是否关闭Source(200-不关闭/非200关闭). 否则会直接关闭Source.
-	Debug          bool   `json:"debug"`           //debug模式, 开启将保存推流
+	GOPCache          bool   `json:"gop_cache"`       //是否开启GOP缓存，只缓存一组音视频
+	GOPBufferSize     int    `json:"gop_buffer_size"` //预估GOPBuffer大小, AVPacket缓存池和合并写缓存池都会参考此大小
+	ProbeTimeout      int    `json:"probe_timeout"`   //收流解析AVStream的超时时间
+	WriteTimeout      int    `json:"write_timeout"`   //Server向TCP拉流Conn发包的超时时间, 超过该时间, 直接主动断开Conn. 客户端重新拉流的成本小于服务器缓存成本.
+	WriteBufferNumber int    `json:"-"`
+	PublicIP          string `json:"public_ip"`
+	ListenIP          string `json:"listen_ip"`
+	IdleTimeout       int64  `json:"idle_timeout"`    //多长时间没有拉流, 单位秒. 如果开启hook通知, 根据hook响应, 决定是否关闭Source(200-不关闭/非200关闭). 否则会直接关闭Source.
+	ReceiveTimeout    int64  `json:"receive_timeout"` //多长时间没有收到流, 单位秒. 如果开启hook通知, 根据hook响应, 决定是否关闭Source(200-不关闭/非200关闭). 否则会直接关闭Source.
+	Debug             bool   `json:"debug"`           //debug模式, 开启将保存推流
 
 	//缓存指定时长的包，满了之后才发送给Sink. 可以降低用户态和内核态的交互频率，大幅提升性能.
 	//合并写的大小范围，应当大于一帧的时长，不超过一组GOP的时长，在实际发送流的时候也会遵循此条例.
@@ -268,11 +271,17 @@ func SetDefaultConfig(config_ *AppConfig_) {
 	config_.GOPBufferSize = limitInt(4096*1024/8, 2048*1024*10, config_.GOPBufferSize) //最低4M码率 最高160M码率
 	config_.MergeWriteLatency = limitInt(350, 2000, config_.MergeWriteLatency)         //最低缓存350毫秒数据才发送 最高缓存2秒数据才发送
 	config_.ProbeTimeout = limitInt(2000, 5000, config_.MergeWriteLatency)             //2-5秒内必须解析完AVStream
+	config_.WriteTimeout = limitInt(2000, 10000, config_.WriteTimeout)
+	config_.WriteBufferNumber = config_.WriteTimeout/config_.MergeWriteLatency + 1
 
 	config_.Log.Level = limitInt(int(zapcore.DebugLevel), int(zapcore.FatalLevel), config_.Log.Level)
 	config_.Log.MaxSize = limitMin(1, config_.Log.MaxSize)
 	config_.Log.MaxBackup = limitMin(1, config_.Log.MaxBackup)
 	config_.Log.MaxAge = limitMin(1, config_.Log.MaxAge)
+
+	config_.IdleTimeout *= int64(time.Second)
+	config_.ReceiveTimeout *= int64(time.Second)
+	config_.Hook.Timeout *= int64(time.Second)
 }
 
 func limitMin(min, value int) int {

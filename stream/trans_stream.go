@@ -1,7 +1,9 @@
 package stream
 
 import (
+	"github.com/yangjiechina/avformat/transport"
 	"github.com/yangjiechina/avformat/utils"
+	"github.com/yangjiechina/lkm/log"
 )
 
 // TransStream 将AVPacket封装成传输流，转发给各个Sink
@@ -93,6 +95,35 @@ func (t *BaseTransStream) Close() error {
 func (t *BaseTransStream) SendPacket(data []byte) error {
 	for _, sink := range t.Sinks {
 		sink.Input(data)
+	}
+
+	return nil
+}
+
+type TCPTransStream struct {
+	BaseTransStream
+}
+
+func (t *TCPTransStream) AddSink(sink Sink) error {
+	if err := t.BaseTransStream.AddSink(sink); err != nil {
+		return err
+	}
+
+	sink.GetConn().(*transport.Conn).EnableAsyncWriteMode(AppConfig.WriteBufferNumber - 1)
+	return nil
+}
+
+func (t *TCPTransStream) SendPacket(data []byte) error {
+	for _, sink := range t.Sinks {
+		err := sink.Input(data)
+		if err == nil {
+			continue
+		}
+
+		if _, ok := err.(*transport.ZeroWindowSizeError); ok {
+			log.Sugar.Errorf("发送超时, 强制删除 sink:%s", sink.PrintInfo())
+			go sink.Close()
+		}
 	}
 
 	return nil
