@@ -3,11 +3,11 @@ package rtsp
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/yangjiechina/avformat/libavc"
-	"github.com/yangjiechina/avformat/librtp"
-	"github.com/yangjiechina/avformat/librtsp/sdp"
-	"github.com/yangjiechina/avformat/utils"
-	"github.com/yangjiechina/lkm/stream"
+	"github.com/lkmio/avformat/libavc"
+	"github.com/lkmio/avformat/librtp"
+	"github.com/lkmio/avformat/librtsp/sdp"
+	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/lkm/stream"
 	"net"
 	"strconv"
 )

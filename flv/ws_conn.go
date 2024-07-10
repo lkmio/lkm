@@ -2,7 +2,7 @@ package flv
 
 import (
 	"github.com/gorilla/websocket"
-	"github.com/yangjiechina/avformat/transport"
+	"github.com/lkmio/avformat/transport"
 	"net"
 	"time"
 )

@@ -3,14 +3,14 @@ package gb28181
 import (
 	"encoding/hex"
 	"fmt"
+	"github.com/lkmio/avformat/libavc"
+	"github.com/lkmio/avformat/libhevc"
+	"github.com/lkmio/avformat/libmpeg"
+	"github.com/lkmio/avformat/transport"
+	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/lkm/log"
+	"github.com/lkmio/lkm/stream"
 	"github.com/pion/rtp"
-	"github.com/yangjiechina/avformat/libavc"
-	"github.com/yangjiechina/avformat/libhevc"
-	"github.com/yangjiechina/avformat/libmpeg"
-	"github.com/yangjiechina/avformat/transport"
-	"github.com/yangjiechina/avformat/utils"
-	"github.com/yangjiechina/lkm/log"
-	"github.com/yangjiechina/lkm/stream"
 	"net"
 )
 

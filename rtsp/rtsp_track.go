@@ -1,8 +1,8 @@
 package rtsp
 
 import (
-	"github.com/yangjiechina/avformat/librtp"
-	"github.com/yangjiechina/avformat/utils"
+	"github.com/lkmio/avformat/librtp"
+	"github.com/lkmio/avformat/utils"
 )
 
 // 对rtsp每路输出流的封装

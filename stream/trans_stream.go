@@ -1,9 +1,9 @@
 package stream
 
 import (
-	"github.com/yangjiechina/avformat/transport"
-	"github.com/yangjiechina/avformat/utils"
-	"github.com/yangjiechina/lkm/log"
+	"github.com/lkmio/avformat/transport"
+	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/lkm/log"
 )
 
 // TransStream 将AVPacket封装成传输流，转发给各个Sink

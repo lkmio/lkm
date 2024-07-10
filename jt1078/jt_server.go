@@ -1,9 +1,9 @@
 package jt1078
 
 import (
-	"github.com/yangjiechina/avformat/transport"
-	"github.com/yangjiechina/avformat/utils"
-	"github.com/yangjiechina/lkm/stream"
+	"github.com/lkmio/avformat/transport"
+	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/lkm/stream"
 	"net"
 	"runtime"
 )

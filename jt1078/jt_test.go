@@ -1,8 +1,8 @@
 package jt1078
 
 import (
-	"github.com/yangjiechina/avformat/libbufio"
-	"github.com/yangjiechina/avformat/transport"
+	"github.com/lkmio/avformat/libbufio"
+	"github.com/lkmio/avformat/transport"
 	"net"
 	"os"
 	"testing"

@@ -1,13 +1,13 @@
 package rtmp
 
 import (
-	"github.com/yangjiechina/lkm/log"
-	"github.com/yangjiechina/lkm/stream"
+	"github.com/lkmio/lkm/log"
+	"github.com/lkmio/lkm/stream"
 	"net"
 	"runtime"
 
-	"github.com/yangjiechina/avformat/transport"
-	"github.com/yangjiechina/avformat/utils"
+	"github.com/lkmio/avformat/transport"
+	"github.com/lkmio/avformat/utils"
 )
 
 type Server interface {

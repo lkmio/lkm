@@ -1,10 +1,10 @@
 package rtmp
 
 import (
-	"github.com/yangjiechina/avformat/libflv"
-	"github.com/yangjiechina/avformat/librtmp"
-	"github.com/yangjiechina/avformat/utils"
-	"github.com/yangjiechina/lkm/stream"
+	"github.com/lkmio/avformat/libflv"
+	"github.com/lkmio/avformat/librtmp"
+	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/lkm/stream"
 )
 
 type transStream struct {

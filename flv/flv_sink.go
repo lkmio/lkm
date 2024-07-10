@@ -1,7 +1,7 @@
 package flv
 
 import (
-	"github.com/yangjiechina/lkm/stream"
+	"github.com/lkmio/lkm/stream"
 	"net"
 )
 

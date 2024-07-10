@@ -3,15 +3,15 @@ package stream
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/yangjiechina/lkm/collections"
-	"github.com/yangjiechina/lkm/log"
+	"github.com/lkmio/lkm/collections"
+	"github.com/lkmio/lkm/log"
 	"net"
 	"net/url"
 	"time"
 
-	"github.com/yangjiechina/avformat/stream"
-	"github.com/yangjiechina/avformat/utils"
-	"github.com/yangjiechina/lkm/transcode"
+	"github.com/lkmio/avformat/stream"
+	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/lkm/transcode"
 )
 
 // SourceType 推流类型

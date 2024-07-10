@@ -3,7 +3,7 @@ package stream
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/yangjiechina/avformat/utils"
+	"github.com/lkmio/avformat/utils"
 	"net"
 	"net/url"
 	"sync"

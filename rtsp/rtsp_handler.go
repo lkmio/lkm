@@ -2,9 +2,9 @@ package rtsp
 
 import (
 	"fmt"
-	"github.com/yangjiechina/avformat/utils"
-	"github.com/yangjiechina/lkm/log"
-	"github.com/yangjiechina/lkm/stream"
+	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/lkm/log"
+	"github.com/lkmio/lkm/stream"
 	"net/http"
 	"net/textproto"
 	"net/url"

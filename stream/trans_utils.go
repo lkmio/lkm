@@ -1,6 +1,6 @@
 package stream
 
-import "github.com/yangjiechina/avformat/utils"
+import "github.com/lkmio/avformat/utils"
 
 // TransStreamId 每个传输流的唯一Id，根据输出流协议ID+流包含的音视频编码器ID生成
 // 输出流协议ID占用高8位

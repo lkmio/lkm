@@ -1,6 +1,6 @@
 package collections
 
-import "github.com/yangjiechina/avformat/utils"
+import "github.com/lkmio/avformat/utils"
 
 type Node[T any] struct {
 	data T

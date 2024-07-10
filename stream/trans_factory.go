@@ -2,7 +2,7 @@ package stream
 
 import (
 	"fmt"
-	"github.com/yangjiechina/avformat/utils"
+	"github.com/lkmio/avformat/utils"
 )
 
 type TransStreamFactory func(source Source, protocol Protocol, streams []utils.AVStream) (TransStream, error)

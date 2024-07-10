@@ -3,9 +3,9 @@ package flv
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/yangjiechina/avformat/libflv"
-	"github.com/yangjiechina/avformat/utils"
-	"github.com/yangjiechina/lkm/stream"
+	"github.com/lkmio/avformat/libflv"
+	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/lkm/stream"
 )
 
 const (

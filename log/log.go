@@ -2,8 +2,8 @@ package log
 
 import (
 	"fmt"
+	"github.com/lkmio/avformat/utils"
 	"github.com/natefinch/lumberjack"
-	"github.com/yangjiechina/avformat/utils"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"os"

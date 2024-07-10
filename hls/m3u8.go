@@ -2,7 +2,7 @@ package hls
 
 import (
 	"bytes"
-	"github.com/yangjiechina/lkm/collections"
+	"github.com/lkmio/lkm/collections"
 	"math"
 	"strconv"
 )

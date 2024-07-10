@@ -2,22 +2,22 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/yangjiechina/avformat/transport"
-	"github.com/yangjiechina/lkm/flv"
-	"github.com/yangjiechina/lkm/gb28181"
-	"github.com/yangjiechina/lkm/hls"
-	"github.com/yangjiechina/lkm/jt1078"
-	"github.com/yangjiechina/lkm/log"
-	"github.com/yangjiechina/lkm/rtc"
-	"github.com/yangjiechina/lkm/rtsp"
+	"github.com/lkmio/avformat/transport"
+	"github.com/lkmio/lkm/flv"
+	"github.com/lkmio/lkm/gb28181"
+	"github.com/lkmio/lkm/hls"
+	"github.com/lkmio/lkm/jt1078"
+	"github.com/lkmio/lkm/log"
+	"github.com/lkmio/lkm/rtc"
+	"github.com/lkmio/lkm/rtsp"
 	"go.uber.org/zap/zapcore"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"strconv"
 
-	"github.com/yangjiechina/lkm/rtmp"
-	"github.com/yangjiechina/lkm/stream"
+	"github.com/lkmio/lkm/rtmp"
+	"github.com/lkmio/lkm/stream"
 )
 
 func init() {

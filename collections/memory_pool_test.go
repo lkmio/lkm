@@ -2,7 +2,7 @@ package collections
 
 import (
 	"encoding/hex"
-	"github.com/yangjiechina/avformat/utils"
+	"github.com/lkmio/avformat/utils"
 	"testing"
 	"unsafe"
 )

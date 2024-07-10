@@ -1,7 +1,7 @@
 package collections
 
 import (
-	"github.com/yangjiechina/avformat/utils"
+	"github.com/lkmio/avformat/utils"
 )
 
 // MemoryPool 从解复用阶段，拼凑成完整的AVPacket开始(写)，到GOP缓存结束(释放)，整个过程都使用池中内存

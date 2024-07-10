@@ -2,10 +2,10 @@ package gb28181
 
 import (
 	"encoding/hex"
+	"github.com/lkmio/avformat/transport"
+	"github.com/lkmio/lkm/log"
+	"github.com/lkmio/lkm/stream"
 	"github.com/pion/rtp"
-	"github.com/yangjiechina/avformat/transport"
-	"github.com/yangjiechina/lkm/log"
-	"github.com/yangjiechina/lkm/stream"
 	"net"
 )
 

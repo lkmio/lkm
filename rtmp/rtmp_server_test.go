@@ -1,9 +1,9 @@
 package rtmp
 
 import (
-	"github.com/yangjiechina/avformat/librtmp"
-	"github.com/yangjiechina/avformat/utils"
-	"github.com/yangjiechina/lkm/stream"
+	"github.com/lkmio/avformat/librtmp"
+	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/lkm/stream"
 	"net"
 	"testing"
 )

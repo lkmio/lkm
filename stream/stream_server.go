@@ -1,8 +1,8 @@
 package stream
 
 import (
-	"github.com/yangjiechina/avformat/transport"
-	"github.com/yangjiechina/lkm/log"
+	"github.com/lkmio/avformat/transport"
+	"github.com/lkmio/lkm/log"
 	"net"
 )
 

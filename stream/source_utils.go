@@ -2,7 +2,7 @@ package stream
 
 import (
 	"fmt"
-	"github.com/yangjiechina/lkm/log"
+	"github.com/lkmio/lkm/log"
 	"net/url"
 	"strings"
 )

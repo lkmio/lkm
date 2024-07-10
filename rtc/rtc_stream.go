@@ -1,9 +1,9 @@
 package rtc
 
 import (
+	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/lkm/stream"
 	"github.com/pion/webrtc/v3"
-	"github.com/yangjiechina/avformat/utils"
-	"github.com/yangjiechina/lkm/stream"
 )
 
 type transStream struct {

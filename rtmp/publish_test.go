@@ -2,7 +2,7 @@ package rtmp
 
 import (
 	"encoding/binary"
-	"github.com/yangjiechina/avformat/transport"
+	"github.com/lkmio/avformat/transport"
 	"net"
 	"os"
 	"testing"

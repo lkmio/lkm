@@ -3,11 +3,11 @@ package jt1078
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/yangjiechina/avformat/transport"
-	"github.com/yangjiechina/avformat/utils"
-	"github.com/yangjiechina/lkm/collections"
-	"github.com/yangjiechina/lkm/log"
-	"github.com/yangjiechina/lkm/stream"
+	"github.com/lkmio/avformat/transport"
+	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/lkm/collections"
+	"github.com/lkmio/lkm/log"
+	"github.com/lkmio/lkm/stream"
 	"net"
 )
 

@@ -1,7 +1,7 @@
 package stream
 
 import (
-	"github.com/yangjiechina/avformat/utils"
+	"github.com/lkmio/avformat/utils"
 )
 
 type StreamManager struct {
