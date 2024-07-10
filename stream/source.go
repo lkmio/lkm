@@ -558,10 +558,6 @@ func (s *PublishSource) OnDeMuxStream(stream utils.AVStream) {
 
 	//启动探测超时计时器
 	if len(s.originStreams.All()) == 1 {
-		if AppConfig.ProbeTimeout == 0 {
-			AppConfig.ProbeTimeout = 2000
-		}
-
 		s.probeTimer = time.AfterFunc(time.Duration(AppConfig.ProbeTimeout)*time.Millisecond, func() {
 			s.probeTimoutEvent <- true
 		})
