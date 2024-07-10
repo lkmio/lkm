@@ -1,4 +1,4 @@
-package stream
+package collections
 
 import (
 	"github.com/yangjiechina/avformat/libbufio"

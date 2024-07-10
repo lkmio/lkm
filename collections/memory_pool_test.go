@@ -1,4 +1,4 @@
-package stream
+package collections
 
 import (
 	"encoding/hex"

@@ -1,4 +1,4 @@
-package stream
+package collections
 
 type directMemoryPool struct {
 	*memoryPool

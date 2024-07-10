@@ -1,4 +1,4 @@
-package stream
+package collections
 
 import (
 	"github.com/yangjiechina/avformat/utils"
@@ -43,6 +43,12 @@ type MemoryPool interface {
 
 	// Clear 清空所有内存块
 	Clear()
+
+	IsEmpty() bool
+
+	Capacity() int
+
+	Size() int
 }
 
 type memoryPool struct {
@@ -203,4 +209,18 @@ func (m *memoryPool) Clear() {
 
 	m.blockQueue.Clear()
 	m.discardBlockCount = 0
+}
+
+func (m *memoryPool) IsEmpty() bool {
+	utils.Assert(!m.marked)
+	return m.blockQueue.Size() < 1
+}
+
+func (m *memoryPool) Capacity() int {
+	return m.capacity
+}
+
+func (m *memoryPool) Size() int {
+	head, tail := m.Data()
+	return len(head) + len(tail)
 }
