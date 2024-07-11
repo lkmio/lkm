@@ -89,7 +89,7 @@ func main() {
 	//单端口模式下, 启动时就创建收流端口
 	//多端口模式下, 创建GBSource时才创建收流端口
 	if !stream.AppConfig.GB28181.IsMultiPort() {
-		if stream.AppConfig.GB28181.EnableUDP() {
+		if stream.AppConfig.GB28181.IsEnableUDP() {
 			server, err := gb28181.NewUDPServer(gb28181.NewSharedFilter(128))
 			if err != nil {
 				panic(err)
@@ -99,7 +99,7 @@ func main() {
 			log.Sugar.Info("启动GB28181 UDP收流端口成功:" + stream.ListenAddr(stream.AppConfig.GB28181.Port[0]))
 		}
 
-		if stream.AppConfig.GB28181.EnableTCP() {
+		if stream.AppConfig.GB28181.IsEnableTCP() {
 			server, err := gb28181.NewTCPServer(gb28181.NewSharedFilter(128))
 			if err != nil {
 				panic(err)
@@ -125,8 +125,18 @@ func main() {
 		log.Sugar.Info("启动jt1078服务成功 addr:", jtAddr.String())
 	}
 
+	if stream.AppConfig.Hook.IsEnableOnStarted() {
+		go func() {
+			if _, err := stream.Hook(stream.HookEventStarted, "", nil); err != nil {
+				log.Sugar.Errorf("发送启动通知失败 err:%s", err.Error())
+			}
+		}()
+	}
+
 	err := http.ListenAndServe(":19999", nil)
 	if err != nil {
-		panic(err)
+		println(err)
 	}
+
+	select {}
 }

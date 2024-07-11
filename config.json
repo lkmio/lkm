@@ -56,6 +56,9 @@
   "hook": {
     "enable": true,
     "timeout": 10,
+
+    "on_started": "http://localhost:9000/api/v1/hook/on_started",
+
     "on_publish": "http://localhost:9000/api/v1/hook/on_publish",
     "on_publish_done": "http://localhost:9000/api/v1/hook/on_publish_done",
     "on_play" : "http://localhost:9000/api/v1/hook/on_play",

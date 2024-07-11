@@ -9,7 +9,7 @@ import (
 func PreparePlaySink(sink Sink) (*http.Response, utils.HookState) {
 	var response *http.Response
 
-	if AppConfig.Hook.EnableOnPlay() {
+	if AppConfig.Hook.IsEnableOnPlay() {
 		hook, err := Hook(HookEventPlay, sink.UrlValues().Encode(), NewHookPlayEventInfo(sink))
 		if err != nil {
 			log.Sugar.Errorf("通知播放事件失败 err:%s sink:%s-%v source:%s", err.Error(), sink.Protocol().ToString(), sink.Id(), sink.SourceId())
@@ -46,7 +46,7 @@ func PreparePlaySink(sink Sink) (*http.Response, utils.HookState) {
 func HookPlayDoneEvent(sink Sink) (*http.Response, bool) {
 	var response *http.Response
 
-	if AppConfig.Hook.EnableOnPlayDone() {
+	if AppConfig.Hook.IsEnableOnPlayDone() {
 		hook, err := Hook(HookEventPlayDone, sink.UrlValues().Encode(), NewHookPlayEventInfo(sink))
 		if err != nil {
 			log.Sugar.Errorf("通知播放结束事件失败 err:%s sink:%s-%v source:%s", err.Error(), sink.Protocol().ToString(), sink.Id(), sink.SourceId())

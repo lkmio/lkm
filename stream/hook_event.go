@@ -12,6 +12,7 @@ const (
 	HookEventRecord         = HookEvent(0x5)
 	HookEventIdleTimeout    = HookEvent(0x6)
 	HookEventReceiveTimeout = HookEvent(0x7)
+	HookEventStarted        = HookEvent(0x8)
 )
 
 var (
@@ -27,6 +28,7 @@ func InitHookUrl() {
 		HookEventRecord:         AppConfig.Hook.OnRecordUrl,
 		HookEventIdleTimeout:    AppConfig.Hook.OnIdleTimeoutUrl,
 		HookEventReceiveTimeout: AppConfig.Hook.OnReceiveTimeoutUrl,
+		HookEventStarted:        AppConfig.Hook.OnStartedUrl,
 	}
 }
 

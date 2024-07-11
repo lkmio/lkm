@@ -254,7 +254,7 @@ func (source *BaseGBSource) PreparePublish(conn net.Conn, ssrc uint32, source_ G
 	source.SetSSRC(ssrc)
 	source.SetState(stream.SessionStateTransferring)
 
-	if stream.AppConfig.Hook.EnablePublishEvent() {
+	if stream.AppConfig.Hook.IsEnablePublishEvent() {
 		go func() {
 			_, state := stream.HookPublishEvent(source_)
 			if utils.HookStateOK != state {
@@ -271,13 +271,13 @@ func (source *BaseGBSource) PreparePublish(conn net.Conn, ssrc uint32, source_ G
 // NewGBSource 创建gb源,返回监听的收流端口
 func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, int, error) {
 	if tcp {
-		utils.Assert(stream.AppConfig.GB28181.EnableTCP())
+		utils.Assert(stream.AppConfig.GB28181.IsEnableTCP())
 	} else {
-		utils.Assert(stream.AppConfig.GB28181.EnableUDP())
+		utils.Assert(stream.AppConfig.GB28181.IsEnableUDP())
 	}
 
 	if active {
-		utils.Assert(tcp && stream.AppConfig.GB28181.EnableTCP() && stream.AppConfig.GB28181.IsMultiPort())
+		utils.Assert(tcp && stream.AppConfig.GB28181.IsEnableTCP() && stream.AppConfig.GB28181.IsMultiPort())
 	}
 
 	var source GBSource

@@ -149,7 +149,7 @@ func (api *ApiServer) createGBSource(w http.ResponseWriter, r *http.Request) {
 			err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "创建GB28181 Source失败, 单端口模式下不能主动拉流"}
 		} else if !tcp {
 			err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "创建GB28181 Source失败, UDP不能主动拉流"}
-		} else if !stream.AppConfig.GB28181.EnableTCP() {
+		} else if !stream.AppConfig.GB28181.IsEnableTCP() {
 			err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "创建GB28181 Source失败, 未开启TCP, UDP不能主动拉流"}
 		}
 

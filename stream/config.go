@@ -69,11 +69,11 @@ type GB28181Config struct {
 	Port []int `json:"port"`
 }
 
-func (g TransportConfig) EnableTCP() bool {
+func (g TransportConfig) IsEnableTCP() bool {
 	return strings.Contains(g.Transport, "TCP")
 }
 
-func (g TransportConfig) EnableUDP() bool {
+func (g TransportConfig) IsEnableUDP() bool {
 	return strings.Contains(g.Transport, "UDP")
 }
 
@@ -118,6 +118,7 @@ func (c HlsConfig) TSFormat(sourceId string) string {
 type HookConfig struct {
 	Enable              bool   `json:"enable"`
 	Timeout             int64  `json:"timeout"`
+	OnStartedUrl        string `json:"on_started"`         //应用启动后回调
 	OnPublishUrl        string `json:"on_publish"`         //推流回调
 	OnPublishDoneUrl    string `json:"on_publish_done"`    //推流结束回调
 	OnPlayUrl           string `json:"on_play"`            //拉流回调
@@ -127,32 +128,36 @@ type HookConfig struct {
 	OnReceiveTimeoutUrl string `json:"on_receive_timeout"` //没有推流回调
 }
 
-func (hook *HookConfig) EnablePublishEvent() bool {
+func (hook *HookConfig) IsEnablePublishEvent() bool {
 	return hook.Enable && hook.OnPublishUrl != ""
 }
 
-func (hook *HookConfig) EnableOnPublishDone() bool {
+func (hook *HookConfig) IsEnableOnPublishDone() bool {
 	return hook.Enable && hook.OnPublishDoneUrl != ""
 }
 
-func (hook *HookConfig) EnableOnPlay() bool {
+func (hook *HookConfig) IsEnableOnPlay() bool {
 	return hook.Enable && hook.OnPlayUrl != ""
 }
 
-func (hook *HookConfig) EnableOnPlayDone() bool {
+func (hook *HookConfig) IsEnableOnPlayDone() bool {
 	return hook.Enable && hook.OnPlayDoneUrl != ""
 }
 
-func (hook *HookConfig) EnableOnRecord() bool {
+func (hook *HookConfig) IsEnableOnRecord() bool {
 	return hook.Enable && hook.OnRecordUrl != ""
 }
 
-func (hook *HookConfig) EnableOnIdleTimeout() bool {
+func (hook *HookConfig) IsEnableOnIdleTimeout() bool {
 	return hook.Enable && hook.OnIdleTimeoutUrl != ""
 }
 
-func (hook *HookConfig) EnableOnReceiveTimeout() bool {
+func (hook *HookConfig) IsEnableOnReceiveTimeout() bool {
 	return hook.Enable && hook.OnReceiveTimeoutUrl != ""
+}
+
+func (hook *HookConfig) IsEnableOnStarted() bool {
+	return hook.Enable && hook.OnStartedUrl != ""
 }
 
 func GetStreamPlayUrls(sourceId string) []string {

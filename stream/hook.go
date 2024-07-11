@@ -38,7 +38,6 @@ func sendHookEvent(url string, body interface{}) (*http.Response, error) {
 	}
 
 	log.Sugar.Infof("发送hook通知 url:%s body:%s", url, marshal)
-
 	request.Header.Set("Content-Type", "application/json")
 	return client.Do(request)
 }
@@ -52,6 +51,7 @@ func Hook(event HookEvent, params string, body interface{}) (*http.Response, err
 	if "" != params {
 		url += "?" + params
 	}
+
 	response, err := sendHookEvent(url, body)
 	if err == nil && http.StatusOK != response.StatusCode {
 		return response, fmt.Errorf("reason %s", response.Status)
