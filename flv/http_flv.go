@@ -43,11 +43,9 @@ func (t *httpTransStream) Input(packet utils.AVPacket) error {
 		videoKey = packet.KeyFrame()
 	}
 
-	//发送剩余数据
+	//关键帧都放在切片头部，所以需要创建新切片, 发送当前切片剩余流
 	if videoKey && !t.mwBuffer.IsNewSegment() {
-		t.mwBuffer.Reserve(2)
-		segment := t.mwBuffer.FlushSegment()
-		t.sendUnpackedSegment(segment)
+		t.forceFlushSegment()
 	}
 
 	var n int
@@ -60,7 +58,7 @@ func (t *httpTransStream) Input(packet utils.AVPacket) error {
 		n = HttpFlvBlockLengthSize
 	}
 
-	//结束时, 预留换行符
+	//切片末尾, 预留换行符
 	if t.mwBuffer.IsFull(dts) {
 		separatorSize += 2
 	}
@@ -70,10 +68,8 @@ func (t *httpTransStream) Input(packet utils.AVPacket) error {
 	n += t.muxer.Input(bytes[n:], packet.MediaType(), len(data), dts, pts, packet.KeyFrame(), false)
 	copy(bytes[n:], data)
 
-	//添加长度和换行符
-	//每一个合并写切片开始和预留长度所需的字节数
-	//合并写切片末尾加上换行符
-	//长度是16进制字符串
+	//添加长度和换行符, 长度是16进制字符串
+	//每一个合并写切片, 头部预留长度所需的字节数, 末尾加上换行符
 	if segment := t.mwBuffer.PeekCompletedSegment(); len(segment) > 0 {
 		t.sendUnpackedSegment(segment)
 	}
@@ -94,6 +90,12 @@ func (t *httpTransStream) AddTrack(stream utils.AVStream) error {
 		t.muxer.AddProperty("height", stream.CodecParameters().Height())
 	}
 	return nil
+}
+
+func (t *httpTransStream) forceFlushSegment() {
+	t.mwBuffer.Reserve(2)
+	segment := t.mwBuffer.FlushSegment()
+	t.sendUnpackedSegment(segment)
 }
 
 // 发送还未添加包长和换行符的切片
@@ -197,8 +199,8 @@ func (t *httpTransStream) WriteHeader() error {
 
 func (t *httpTransStream) Close() error {
 	//发送剩余的流
-	if segment := t.mwBuffer.FlushSegment(); len(segment) > 0 {
-		t.sendUnpackedSegment(segment)
+	if !t.mwBuffer.IsNewSegment() {
+		t.forceFlushSegment()
 	}
 	return nil
 }

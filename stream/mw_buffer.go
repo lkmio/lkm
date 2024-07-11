@@ -174,7 +174,7 @@ func (m *mergeWritingBuffer) IsNewSegment() bool {
 func (m *mergeWritingBuffer) Reserve(number int) {
 	utils.Assert(m.mwBlocks[m.index].buffer != nil)
 
-	m.mwBlocks[m.index].buffer.Reserve(number)
+	_ = m.mwBlocks[m.index].buffer.Allocate(number)
 }
 
 func (m *mergeWritingBuffer) ReadSegmentsFromKeyFrameIndex(cb func([]byte)) {
