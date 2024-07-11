@@ -121,8 +121,8 @@ func (t *TCPTransStream) SendPacket(data []byte) error {
 		}
 
 		if _, ok := err.(*transport.ZeroWindowSizeError); ok {
-			log.Sugar.Errorf("发送超时, 强制删除 sink:%s", sink.PrintInfo())
-			go sink.Close()
+			log.Sugar.Errorf("发送超时, 强制断开链接 sink:%s", sink.PrintInfo())
+			sink.GetConn().Close()
 		}
 	}
 

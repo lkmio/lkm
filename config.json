@@ -59,7 +59,7 @@
     "on_publish": "http://localhost:9000/api/v1/hook/on_publish",
     "on_publish_done": "http://localhost:9000/api/v1/hook/on_publish_done",
     "on_play" : "http://localhost:9000/api/v1/hook/on_play",
-    "on_play_done" : "http://localhost:9000/api/on_play_done",
+    "on_play_done" : "http://localhost:9000/api/v1/hook/on_play_done",
 
     "on_record": "http://localhost:9000/api/v1/hook/on_reocrd",
     "on_idle_timeout": "http://localhost:9000/api/v1/hook/on_idle_timeout",
