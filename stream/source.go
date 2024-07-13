@@ -50,7 +50,7 @@ const (
 	SessionStateHandshakeDone    = SessionState(4) //握手完成
 	SessionStateWait             = SessionState(5) //位于等待队列中
 	SessionStateTransferring     = SessionState(6) //推拉流中
-	SessionStateClose            = SessionState(7) //关闭状态
+	SessionStateClosed           = SessionState(7) //关闭状态
 )
 
 // Source 父类Source负责, 除解析流以外的所有事情
@@ -407,7 +407,7 @@ func (s *PublishSource) AddSink(sink Sink) bool {
 		sink.Lock()
 		defer sink.UnLock()
 
-		if SessionStateClose == sink.State() {
+		if SessionStateClosed == sink.State() {
 			log.Sugar.Warnf("AddSink失败, sink已经断开链接 %s", sink.PrintInfo())
 		} else {
 			transStream.AddSink(sink)
@@ -519,7 +519,7 @@ func (s *PublishSource) doClose() {
 				sink.Lock()
 				defer sink.UnLock()
 
-				if SessionStateClose == sink.State() {
+				if SessionStateClosed == sink.State() {
 					log.Sugar.Warnf("添加到sink到等待队列失败, sink已经断开链接 %s", sink.PrintInfo())
 				} else {
 					sink.SetState(SessionStateWait)
@@ -527,7 +527,7 @@ func (s *PublishSource) doClose() {
 				}
 			}
 
-			if SessionStateClose != sink.State() {
+			if SessionStateClosed != sink.State() {
 				sink.Flush()
 			}
 		})

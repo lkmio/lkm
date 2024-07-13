@@ -35,6 +35,7 @@ func init() {
 	stream.SetDefaultConfig(config)
 	stream.AppConfig = *config
 	stream.InitHookUrl()
+	rtc.InitConfig()
 
 	//初始化日志
 	log.InitLogger(zapcore.Level(stream.AppConfig.Log.Level), stream.AppConfig.Log.Name, stream.AppConfig.Log.MaxSize, stream.AppConfig.Log.MaxBackup, stream.AppConfig.Log.MaxAge, stream.AppConfig.Log.Compress)

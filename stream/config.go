@@ -69,6 +69,11 @@ type GB28181Config struct {
 	Port []int `json:"port"`
 }
 
+type WebRtcConfig struct {
+	TransportConfig
+	Port int `json:"port"`
+}
+
 func (g TransportConfig) IsEnableTCP() bool {
 	return strings.Contains(g.Transport, "TCP")
 }
@@ -244,6 +249,7 @@ type AppConfig_ struct {
 	JT1078            JT1078Config
 	Rtsp              RtspConfig
 	GB28181           GB28181Config
+	WebRtc            WebRtcConfig
 
 	Hook   HookConfig
 	Record RecordConfig

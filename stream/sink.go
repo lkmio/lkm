@@ -72,7 +72,11 @@ type Sink interface {
 func GenerateSinkId(addr net.Addr) SinkId {
 	network := addr.Network()
 	if "tcp" == network {
-		id := uint64(binary.BigEndian.Uint32(addr.(*net.TCPAddr).IP.To4()))
+		to4 := addr.(*net.TCPAddr).IP.To4()
+		if to4 == nil {
+			to4 = make([]byte, 4)
+		}
+		id := uint64(binary.BigEndian.Uint32(to4))
 		id <<= 32
 		id |= uint64(addr.(*net.TCPAddr).Port << 16)
 
@@ -186,7 +190,9 @@ func (s *BaseSink) DesiredVideoCodecId() utils.AVCodecID {
 // 拉流断开连接,不需要考虑线程安全
 // 踢流走source管道删除,并且关闭Conn
 func (s *BaseSink) Close() {
-	utils.Assert(SessionStateClose != s.State_)
+	if SessionStateClosed != s.State_ {
+		return
+	}
 
 	if s.Conn != nil {
 		s.Conn.Close()
@@ -202,12 +208,12 @@ func (s *BaseSink) Close() {
 	{
 		s.Lock()
 		defer s.UnLock()
-		if s.State_ == SessionStateClose {
+		if s.State_ == SessionStateClosed {
 			return
 		}
 
 		state = s.State_
-		s.State_ = SessionStateClose
+		s.State_ = SessionStateClosed
 	}
 
 	if state == SessionStateTransferring {
