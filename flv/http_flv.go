@@ -9,9 +9,11 @@ import (
 )
 
 const (
-	// HttpFlvBlockLengthSize 在每块HttpFlv数据前面，增加指定长度的头数据, 用户描述flv数据的长度信息
-	// http-flv-block  |block size[4]|skip count[2]|length\r\n|flv data\r\n
-	HttpFlvBlockLengthSize = 20
+	// HttpFlvBlockHeaderSize 在每块HttpFlv块头部，预留指定大小的数据, 用于描述flv数据块的长度信息
+	//实际发送流 http-flv: |length\r\n|flv data\r\n
+	//方便封装 http-flv-block: |block size[4]|skip count[2]|length\r\n|flv data\r\n
+	//skip count是因为flv-length不固定, 需要一个字段说明, 跳过多少字节才是http-flv数据
+	HttpFlvBlockHeaderSize = 20
 )
 
 type httpTransStream struct {
@@ -53,9 +55,9 @@ func (t *httpTransStream) Input(packet utils.AVPacket) error {
 
 	//新的合并写切片, 预留包长字节
 	if t.mwBuffer.IsNewSegment() {
-		separatorSize = HttpFlvBlockLengthSize
+		separatorSize = HttpFlvBlockHeaderSize
 		//10字节描述flv包长, 前2个字节描述无效字节长度
-		n = HttpFlvBlockLengthSize
+		n = HttpFlvBlockHeaderSize
 	}
 
 	//切片末尾, 预留换行符
@@ -68,8 +70,7 @@ func (t *httpTransStream) Input(packet utils.AVPacket) error {
 	n += t.muxer.Input(bytes[n:], packet.MediaType(), len(data), dts, pts, packet.KeyFrame(), false)
 	copy(bytes[n:], data)
 
-	//添加长度和换行符, 长度是16进制字符串
-	//每一个合并写切片, 头部预留长度所需的字节数, 末尾加上换行符
+	//合并写满再发
 	if segment := t.mwBuffer.PeekCompletedSegment(); len(segment) > 0 {
 		t.sendUnpackedSegment(segment)
 	}
@@ -90,28 +91,6 @@ func (t *httpTransStream) AddTrack(stream utils.AVStream) error {
 		t.muxer.AddProperty("height", stream.CodecParameters().Height())
 	}
 	return nil
-}
-
-func (t *httpTransStream) forceFlushSegment() {
-	t.mwBuffer.Reserve(2)
-	segment := t.mwBuffer.FlushSegment()
-	t.sendUnpackedSegment(segment)
-}
-
-// 发送还未添加包长和换行符的切片
-func (t *httpTransStream) sendUnpackedSegment(segment []byte) {
-	t.writeSeparator(segment)
-	skip := t.computeSkipCount(segment)
-	t.SendPacket(segment[skip:])
-}
-
-// 为单个sink发送flv切片, 切片已经添加分隔符
-func (t *httpTransStream) sendSegment(sink stream.Sink, data []byte) error {
-	return sink.Input(data[t.computeSkipCount(data):])
-}
-
-func (t *httpTransStream) computeSkipCount(data []byte) int {
-	return int(6 + binary.BigEndian.Uint16(data[4:]))
 }
 
 func (t *httpTransStream) AddSink(sink stream.Sink) error {
@@ -142,36 +121,8 @@ func (t *httpTransStream) AddSink(sink stream.Sink) error {
 	return nil
 }
 
-// 为flv数据添加长度和换行符
-// @dst flv数据, 开头需要空出HttpFlvBlockLengthSize字节长度, 末尾空出2字节换行符
-func (t *httpTransStream) writeSeparator(dst []byte) {
-	//写block size
-	binary.BigEndian.PutUint32(dst, uint32(len(dst)-4))
-
-	//写长度字符串
-	//flv长度转16进制字符串
-	flvSize := len(dst) - HttpFlvBlockLengthSize - 2
-	hexStr := fmt.Sprintf("%X", flvSize)
-	//+2是将换行符计算在内
-	n := len(hexStr) + 2
-	copy(dst[HttpFlvBlockLengthSize-n:], hexStr)
-
-	//写间隔长度
-	//-6 是block size和skip count合计长度
-	skipCount := HttpFlvBlockLengthSize - n - 6
-	binary.BigEndian.PutUint16(dst[4:], uint16(skipCount))
-
-	//flv长度和flv数据之间的换行符
-	dst[HttpFlvBlockLengthSize-2] = 0x0D
-	dst[HttpFlvBlockLengthSize-1] = 0x0A
-
-	//末尾换行符
-	dst[len(dst)-2] = 0x0D
-	dst[len(dst)-1] = 0x0A
-}
-
 func (t *httpTransStream) WriteHeader() error {
-	t.headerSize += t.muxer.WriteHeader(t.header[HttpFlvBlockLengthSize:])
+	t.headerSize += t.muxer.WriteHeader(t.header[HttpFlvBlockHeaderSize:])
 
 	for _, track := range t.BaseTransStream.Tracks {
 		var data []byte
@@ -189,7 +140,7 @@ func (t *httpTransStream) WriteHeader() error {
 		t.headerTagSize = n - 15 + len(data) + 11
 	}
 
-	//将结尾换行符计算在内
+	//加上末尾换行符
 	t.headerSize += 2
 	t.writeSeparator(t.header[:t.headerSize])
 
@@ -205,11 +156,63 @@ func (t *httpTransStream) Close() error {
 	return nil
 }
 
+func (t *httpTransStream) forceFlushSegment() {
+	t.mwBuffer.Reserve(2)
+	segment := t.mwBuffer.FlushSegment()
+	t.sendUnpackedSegment(segment)
+}
+
+// 为单个sink发送flv切片, 切片已经添加分隔符
+func (t *httpTransStream) sendSegment(sink stream.Sink, data []byte) error {
+	return sink.Input(data[t.computeSkipCount(data):])
+}
+
+// 发送还未添加包长和换行符的切片
+func (t *httpTransStream) sendUnpackedSegment(segment []byte) {
+	t.writeSeparator(segment)
+	skip := t.computeSkipCount(segment)
+	t.SendPacket(segment[skip:])
+}
+
+func (t *httpTransStream) computeSkipCount(data []byte) int {
+	return int(6 + binary.BigEndian.Uint16(data[4:]))
+}
+
+// 为http-flv数据块添加长度和换行符
+// @dst http-flv数据块, 头部需要空出HttpFlvBlockLengthSize字节长度, 末尾空出2字节换行符
+func (t *httpTransStream) writeSeparator(dst []byte) {
+	//http-flv: length\r\n|flv data\r\n
+	//http-flv-block: |block size[4]|skip count[2]|length\r\n|flv data\r\n
+
+	//写block size
+	binary.BigEndian.PutUint32(dst, uint32(len(dst)-4))
+
+	//写flv实际长度字符串, 16进制表达
+	flvSize := len(dst) - HttpFlvBlockHeaderSize - 2
+	hexStr := fmt.Sprintf("%X", flvSize)
+	//+2是跳过length后的换行符
+	n := len(hexStr) + 2
+	copy(dst[HttpFlvBlockHeaderSize-n:], hexStr)
+
+	//写跳过字节数量
+	//-6是block size和skip count字段合计长度
+	skipCount := HttpFlvBlockHeaderSize - n - 6
+	binary.BigEndian.PutUint16(dst[4:], uint16(skipCount))
+
+	//flv length字段和flv数据之间的换行符
+	dst[HttpFlvBlockHeaderSize-2] = 0x0D
+	dst[HttpFlvBlockHeaderSize-1] = 0x0A
+
+	//末尾换行符
+	dst[len(dst)-2] = 0x0D
+	dst[len(dst)-1] = 0x0A
+}
+
 func NewHttpTransStream() stream.TransStream {
 	return &httpTransStream{
 		muxer:      libflv.NewMuxer(),
 		header:     make([]byte, 1024),
-		headerSize: HttpFlvBlockLengthSize,
+		headerSize: HttpFlvBlockHeaderSize,
 	}
 }
 
