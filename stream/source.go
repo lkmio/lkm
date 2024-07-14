@@ -1,7 +1,6 @@
 package stream
 
 import (
-	"encoding/json"
 	"fmt"
 	"github.com/lkmio/lkm/collections"
 	"github.com/lkmio/lkm/log"
@@ -175,8 +174,8 @@ type PublishSource struct {
 	idleTimer        *time.Timer
 	sinkCount        int  //拉流计数
 	closed           bool //是否已经被关闭
-	firstPacket      bool //是否第一包
 	urlValues        url.Values
+	timeoutTracks    []int
 }
 
 func (s *PublishSource) Id() string {
@@ -236,7 +235,7 @@ func (s *PublishSource) FindOrCreatePacketBuffer(index int, mediaType utils.AVMe
 
 	if s.pktBuffers[index] == nil {
 		if utils.AVMediaTypeAudio == mediaType {
-			s.pktBuffers[index] = collections.NewRbMemoryPool(48000 * 64)
+			s.pktBuffers[index] = collections.NewRbMemoryPool(48000 * 12)
 		} else if AppConfig.GOPCache {
 			//开启GOP缓存
 			s.pktBuffers[index] = collections.NewRbMemoryPool(AppConfig.GOPBufferSize)
@@ -256,13 +255,6 @@ func (s *PublishSource) LoopEvent() {
 		case data := <-s.inputDataEvent:
 			if s.closed {
 				break
-			}
-
-			if !s.firstPacket {
-				urls := GetStreamPlayUrls(s.Id_)
-				indent, _ := json.MarshalIndent(urls, "", "\t")
-				log.Sugar.Infof("%s 开始推流 source:%s 拉流地址:\r\n%s", s.Type_.ToString(), s.Id_, indent)
-				s.firstPacket = true
 			}
 
 			if AppConfig.ReceiveTimeout > 0 {
@@ -583,9 +575,14 @@ func (s *PublishSource) writeHeader() {
 	}
 
 	s.completed = true
-
 	if s.probeTimer != nil {
 		s.probeTimer.Stop()
+	}
+
+	if len(s.originStreams.All()) == 0 {
+		log.Sugar.Errorf("没有一路流, 删除source:%s", s.Id_)
+		s.doClose()
+		return
 	}
 
 	//创建录制流和HLS
@@ -601,6 +598,30 @@ func (s *PublishSource) writeHeader() {
 
 func (s *PublishSource) IsCompleted() bool {
 	return s.completed
+}
+
+func (s *PublishSource) NotTrackAdded(index int) bool {
+	for _, avStream := range s.originStreams.All() {
+		if avStream.Index() == index {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (s *PublishSource) IsTimeoutTrack(index int) bool {
+	for _, i := range s.timeoutTracks {
+		if i == index {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (s *PublishSource) SetTimeoutTrack(index int) {
+	s.timeoutTracks = append(s.timeoutTracks, index)
 }
 
 func (s *PublishSource) OnDeMuxStreamDone() {

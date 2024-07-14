@@ -1,10 +1,7 @@
 package gb28181
 
 import (
-	"encoding/hex"
 	"fmt"
-	"github.com/lkmio/avformat/libavc"
-	"github.com/lkmio/avformat/libhevc"
 	"github.com/lkmio/avformat/libmpeg"
 	"github.com/lkmio/avformat/transport"
 	"github.com/lkmio/avformat/utils"
@@ -103,103 +100,49 @@ func (source *BaseGBSource) OnLossPacket(index int, mediaType utils.AVMediaType,
 // OnCompletePacket 完整帧回调
 func (source *BaseGBSource) OnCompletePacket(index int, mediaType utils.AVMediaType, codec utils.AVCodecID, dts int64, pts int64, key bool) error {
 	buffer := source.FindOrCreatePacketBuffer(index, mediaType)
-
 	data := buffer.Fetch()
+
 	var packet utils.AVPacket
 	var stream_ utils.AVStream
+	var err error
+
 	defer func() {
 		if packet == nil {
 			buffer.FreeTail()
 		}
 	}()
 
-	if utils.AVCodecIdH264 == codec {
-		//从关键帧中解析出sps和pps
-		if source.videoStream == nil {
-			sps, pps, err := libavc.ParseExtraDataFromKeyNALU(data)
-			if err != nil {
-				log.Sugar.Errorf("从关键帧中解析sps pps失败 source:%s data:%s", source.Id_, hex.EncodeToString(data))
-				return err
-			}
-
-			codecData, err := utils.NewAVCCodecData(sps, pps)
-			if err != nil {
-				log.Sugar.Errorf("解析sps pps失败 source:%s data:%s sps:%s, pps:%s", source.Id_, hex.EncodeToString(data), hex.EncodeToString(sps), hex.EncodeToString(pps))
-				return err
-			}
-
-			source.videoStream = utils.NewAVStream(utils.AVMediaTypeVideo, 0, codec, codecData.AnnexBExtraData(), codecData)
-			stream_ = source.videoStream
+	if source.IsCompleted() && source.NotTrackAdded(index) {
+		if !source.IsTimeoutTrack(index) {
+			source.SetTimeoutTrack(index)
+			log.Sugar.Errorf("添加track超时 source:%s", source.Id())
 		}
 
-		packet = utils.NewVideoPacket(data, dts, pts, key, utils.PacketTypeAnnexB, codec, index, 90000)
-	} else if utils.AVCodecIdH265 == codec {
-		if source.videoStream == nil {
-			vps, sps, pps, err := libhevc.ParseExtraDataFromKeyNALU(data)
-			if err != nil {
-				log.Sugar.Errorf("从关键帧中解析vps sps pps失败 source:%s data:%s", source.Id_, hex.EncodeToString(data))
-				return err
-			}
-
-			codecData, err := utils.NewHEVCCodecData(vps, sps, pps)
-			if err != nil {
-				log.Sugar.Errorf("解析sps pps失败 source:%s data:%s vps:%s sps:%s, pps:%s", source.Id_, hex.EncodeToString(data), hex.EncodeToString(vps), hex.EncodeToString(sps), hex.EncodeToString(pps))
-				return err
-			}
-
-			source.videoStream = utils.NewAVStream(utils.AVMediaTypeVideo, 0, codec, codecData.AnnexBExtraData(), codecData)
-			stream_ = source.videoStream
-		}
-
-		packet = utils.NewVideoPacket(data, dts, pts, key, utils.PacketTypeAnnexB, codec, index, 90000)
-	} else if utils.AVCodecIdAAC == codec {
-		//必须包含ADTSHeader
-		if len(data) < 7 {
-			log.Sugar.Warnf("need more data...")
-			return nil
-		}
-
-		var skip int
-		header, err := utils.ReadADtsFixedHeader(data)
-		if err != nil {
-			log.Sugar.Errorf("读取ADTSHeader失败 suorce:%s data:%s", source.Id_, hex.EncodeToString(data[:7]))
-			return nil
-		} else {
-			skip = 7
-			//跳过ADtsHeader长度
-			if header.ProtectionAbsent() == 0 {
-				skip += 2
-			}
-		}
-
-		if source.audioStream == nil {
-			if source.IsCompleted() {
-				return nil
-			}
-
-			configData, err := utils.ADtsHeader2MpegAudioConfigData(header)
-			config, err := utils.ParseMpeg4AudioConfig(configData)
-			println(config)
-			if err != nil {
-				log.Sugar.Errorf("adt头转m4ac失败 suorce:%s data:%s", source.Id_, hex.EncodeToString(data[:7]))
-				return nil
-			}
-
-			source.audioStream = utils.NewAVStream(utils.AVMediaTypeAudio, index, codec, configData, nil)
-			stream_ = source.audioStream
-		}
-
-		packet = utils.NewAudioPacket(data[skip:], dts, pts, codec, index, 90000)
-	} else if utils.AVCodecIdPCMALAW == codec || utils.AVCodecIdPCMMULAW == codec {
-		if source.audioStream == nil {
-			source.audioStream = utils.NewAVStream(utils.AVMediaTypeAudio, index, codec, nil, nil)
-			stream_ = source.audioStream
-		}
-
-		packet = utils.NewAudioPacket(data, dts, pts, codec, index, 90000)
-	} else {
-		log.Sugar.Errorf("the codec %d is not implemented.", codec)
 		return nil
+	}
+
+	if utils.AVMediaTypeAudio == mediaType {
+		stream_, packet, err = stream.ExtractAudioPacket(codec, source.audioStream == nil, data, pts, dts, index, 90000)
+		if err != nil {
+			return err
+		}
+
+		if stream_ != nil {
+			source.audioStream = stream_
+		}
+	} else {
+		if source.videoStream == nil && !key {
+			log.Sugar.Errorf("skip non keyframes conn:%s", source.Conn.RemoteAddr())
+			return nil
+		}
+
+		stream_, packet, err = stream.ExtractVideoPacket(codec, key, source.videoStream == nil, data, pts, dts, index, 90000)
+		if err != nil {
+			return err
+		}
+		if stream_ != nil {
+			source.videoStream = stream_
+		}
 	}
 
 	if stream_ != nil {
@@ -210,7 +153,6 @@ func (source *BaseGBSource) OnCompletePacket(index int, mediaType utils.AVMediaT
 	}
 
 	source.OnDeMuxPacket(packet)
-
 	return nil
 }
 

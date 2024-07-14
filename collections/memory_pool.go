@@ -19,6 +19,8 @@ type MemoryPool interface {
 	// Mark 标记内存块起始位置
 	Mark()
 
+	TryMark()
+
 	// Write 向内存块中写入数据, 必须先调用Mark函数
 	Write(data []byte)
 
@@ -113,6 +115,13 @@ func (m *memoryPool) Mark() {
 	m.marked = true
 }
 
+func (m *memoryPool) TryMark() {
+	if !m.marked {
+		m.markIndex = m.tail
+		m.marked = true
+	}
+}
+
 func (m *memoryPool) Write(data []byte) {
 	utils.Assert(m.marked)
 
@@ -157,11 +166,11 @@ func (m *memoryPool) freeOldBlocks() bool {
 }
 
 func (m *memoryPool) FreeHead() {
-	if m.freeOldBlocks() {
+	if m.freeOldBlocks() || m.blockQueue.IsEmpty() {
 		return
 	}
 
-	utils.Assert(!m.blockQueue.IsEmpty())
+	//utils.Assert(!m.blockQueue.IsEmpty())
 	size := m.blockQueue.Pop().(int)
 	m.head += size
 
@@ -174,11 +183,11 @@ func (m *memoryPool) FreeHead() {
 }
 
 func (m *memoryPool) FreeTail() {
-	if m.freeOldBlocks() {
+	if m.freeOldBlocks() || m.blockQueue.IsEmpty() {
 		return
 	}
 
-	utils.Assert(!m.blockQueue.IsEmpty())
+	//utils.Assert(!m.blockQueue.IsEmpty())
 	size := m.blockQueue.PopBack().(int)
 	m.tail -= size
 

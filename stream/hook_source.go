@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"encoding/json"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/log"
 	"net/http"
@@ -30,6 +31,10 @@ func PreparePublishSource(source Source, hook bool) (*http.Response, utils.HookS
 	if AppConfig.IdleTimeout > 0 {
 		source.StartIdleTimer()
 	}
+
+	urls := GetStreamPlayUrls(source.Id())
+	indent, _ := json.MarshalIndent(urls, "", "\t")
+	log.Sugar.Infof("%s准备推流 source:%s 拉流地址:\r\n%s", source.Type().ToString(), source.Id(), indent)
 
 	return response, utils.HookStateOK
 }

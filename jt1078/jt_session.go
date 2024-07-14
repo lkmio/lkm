@@ -58,6 +58,190 @@ type RtpPacket struct {
 	payload []byte
 }
 
+func (s *Session) OnJtPTPPacket(data []byte) {
+	packet, err := read1078RTPPacket(data)
+	if err != nil {
+		return
+	}
+
+	//过滤空数据
+	if len(packet.payload) == 0 {
+		return
+	}
+
+	//首包处理, hook通知
+	if s.rtpPacket == nil {
+		s.Id_ = packet.simNumber
+		s.rtpPacket = &RtpPacket{}
+		*s.rtpPacket = packet
+
+		go func() {
+			_, state := stream.PreparePublishSource(s, true)
+			if utils.HookStateOK != state {
+				log.Sugar.Errorf("1078推流失败 source:%s", s.phone)
+
+				if s.Conn != nil {
+					s.Conn.Close()
+				}
+			}
+		}()
+	}
+
+	//完整包/最后一个分包, 创建AVPacket
+	//参考时间戳, 遇到不同的时间戳, 处理前一包. 分包标记可能不靠谱
+	if s.rtpPacket.ts != packet.ts || s.rtpPacket.pt != packet.pt {
+		if s.rtpPacket.packetType == AudioFrameMark && s.audioBuffer != nil {
+			if err := s.processAudioPacket(s.rtpPacket.pt, s.rtpPacket.packetType, s.rtpPacket.ts, s.audioBuffer.Fetch(), s.audioIndex); err != nil {
+				log.Sugar.Errorf("处理音频包失败 phone:%s err:%s", s.phone, err.Error())
+				s.audioBuffer.FreeTail()
+			}
+
+			*s.rtpPacket = packet
+		} else if s.rtpPacket.packetType < AudioFrameMark && s.videoBuffer != nil {
+			if err := s.processVideoPacket(s.rtpPacket.pt, s.rtpPacket.packetType, s.rtpPacket.ts, s.videoBuffer.Fetch(), s.videoIndex); err != nil {
+				log.Sugar.Errorf("处理视频包失败 phone:%s err:%s", s.phone, err.Error())
+				s.videoBuffer.FreeTail()
+			}
+
+			*s.rtpPacket = packet
+		}
+	}
+
+	if packet.packetType == AudioFrameMark {
+		if s.audioBuffer == nil {
+			if s.videoIndex == 0 && s.audioIndex == 0 {
+				s.videoIndex = 1
+			}
+
+			if s.IsCompleted() {
+				if !s.IsTimeoutTrack(s.audioIndex) {
+					s.SetTimeoutTrack(s.audioIndex)
+					log.Sugar.Errorf("添加audiotrack超时")
+				}
+				return
+			}
+
+			s.audioBuffer = s.FindOrCreatePacketBuffer(s.audioIndex, utils.AVMediaTypeAudio)
+		}
+
+		s.audioBuffer.TryMark()
+		s.audioBuffer.Write(packet.payload)
+	} else {
+		if s.videoBuffer == nil {
+			if s.videoIndex == 0 && s.audioIndex == 0 {
+				s.audioIndex = 1
+			}
+
+			if s.IsCompleted() {
+				if !s.IsTimeoutTrack(s.videoIndex) {
+					s.SetTimeoutTrack(s.videoIndex)
+					log.Sugar.Errorf("添加videotrack超时")
+				}
+				return
+			}
+
+			s.videoBuffer = s.FindOrCreatePacketBuffer(s.videoIndex, utils.AVMediaTypeVideo)
+		}
+
+		s.videoBuffer.TryMark()
+		s.videoBuffer.Write(packet.payload)
+	}
+}
+
+func (s *Session) Input(data []byte) error {
+	return s.decoder.Input(data)
+}
+
+func (s *Session) Close() {
+	log.Sugar.Infof("1078推流结束 phone number:%s %s", s.phone, s.PublishSource.PrintInfo())
+
+	if s.audioBuffer != nil {
+		s.audioBuffer.Clear()
+	}
+
+	if s.videoBuffer != nil {
+		s.videoBuffer.Clear()
+	}
+
+	if s.Conn != nil {
+		s.Conn.Close()
+		s.Conn = nil
+	}
+
+	if s.decoder != nil {
+		s.decoder.Close()
+		s.decoder = nil
+	}
+
+	s.PublishSource.Close()
+}
+
+func (s *Session) processVideoPacket(pt byte, pktType byte, ts uint64, data []byte, index int) error {
+	var codecId utils.AVCodecID
+
+	if PTVideoH264 == pt {
+		if s.videoStream == nil && VideoIFrameMark != pktType {
+			log.Sugar.Errorf("skip non keyframes conn:%s", s.Conn.RemoteAddr())
+			return nil
+		}
+		codecId = utils.AVCodecIdH264
+	} else if PTVideoH265 == pt {
+		if s.videoStream == nil && VideoIFrameMark != pktType {
+			log.Sugar.Errorf("skip non keyframes conn:%s", s.Conn.RemoteAddr())
+			return nil
+		}
+		codecId = utils.AVCodecIdH265
+	} else {
+		return fmt.Errorf("the codec %d is not implemented", pt)
+	}
+
+	videoStream, videoPacket, err := stream.ExtractVideoPacket(codecId, VideoIFrameMark == pktType, s.videoStream == nil, data, int64(ts), int64(ts), index, 1000)
+	if err != nil {
+		return err
+	}
+
+	if videoStream != nil {
+		s.videoStream = videoStream
+		s.OnDeMuxStream(videoStream)
+		if s.videoStream != nil && s.audioStream != nil {
+			s.OnDeMuxStreamDone()
+		}
+	}
+
+	s.OnDeMuxPacket(videoPacket)
+	return nil
+}
+
+func (s *Session) processAudioPacket(pt byte, pktType byte, ts uint64, data []byte, index int) error {
+	var codecId utils.AVCodecID
+
+	if PTAudioG711A == pt {
+		codecId = utils.AVCodecIdPCMALAW
+	} else if PTAudioG711U == pt {
+		codecId = utils.AVCodecIdPCMMULAW
+	} else if PTAudioAAC == pt {
+		codecId = utils.AVCodecIdAAC
+	} else {
+		return fmt.Errorf("the codec %d is not implemented", pt)
+	}
+
+	audioStream, audioPacket, err := stream.ExtractAudioPacket(codecId, s.audioStream == nil, data, int64(ts), int64(ts), index, 1000)
+	if err != nil {
+		return err
+	}
+
+	if audioStream != nil {
+		s.audioStream = audioStream
+		s.OnDeMuxStream(audioStream)
+		if s.videoStream != nil && s.audioStream != nil {
+			s.OnDeMuxStreamDone()
+		}
+	}
+
+	s.OnDeMuxPacket(audioPacket)
+	return nil
+}
+
 // 读取1078的rtp包, 返回数据类型, 负载类型、时间戳、负载数据
 func read1078RTPPacket(data []byte) (RtpPacket, error) {
 	if len(data) < 12 {
@@ -112,193 +296,6 @@ func read1078RTPPacket(data []byte) (RtpPacket, error) {
 	n += 2
 
 	return RtpPacket{pt: pt, packetType: packetType, ts: ts, simNumber: simNumber, subMark: subMark, payload: data[n:]}, nil
-}
-
-func (s *Session) processVideoPacket(pt byte, pktType byte, ts uint64, data []byte, index int) error {
-	var packet utils.AVPacket
-	var stream_ utils.AVStream
-
-	if PTVideoH264 == pt {
-		if s.videoStream == nil {
-			if VideoIFrameMark != pktType {
-				return fmt.Errorf("skip non keyframes")
-			}
-
-			videoStream, err := utils.CreateAVCStreamFromKeyFrame(data, 1)
-			if err != nil {
-				return err
-			}
-
-			stream_ = videoStream
-		}
-
-		packet = utils.NewVideoPacket(data, int64(ts), int64(ts), VideoIFrameMark == pktType, utils.PacketTypeAnnexB, utils.AVCodecIdH265, index, 1000)
-	} else if PTVideoH265 == pt {
-		if s.videoStream == nil {
-			if VideoIFrameMark != pktType {
-				return fmt.Errorf("skip non keyframes")
-			}
-
-			videoStream, err := utils.CreateHevcStreamFromKeyFrame(data, 1)
-			if err != nil {
-				return err
-			}
-
-			stream_ = videoStream
-		}
-
-		packet = utils.NewVideoPacket(data, int64(ts), int64(ts), VideoIFrameMark == pktType, utils.PacketTypeAnnexB, utils.AVCodecIdH265, index, 1000)
-	} else {
-		return fmt.Errorf("the codec %d is not implemented", pt)
-	}
-
-	if stream_ != nil {
-		s.videoStream = stream_
-		s.OnDeMuxStream(stream_)
-		if s.videoStream != nil && s.audioStream != nil {
-			s.OnDeMuxStreamDone()
-		}
-	}
-
-	s.OnDeMuxPacket(packet)
-	return nil
-}
-
-func (s *Session) processAudioPacket(pt byte, pktType byte, ts uint64, data []byte, index int) error {
-	var packet utils.AVPacket
-	var stream_ utils.AVStream
-
-	if PTAudioG711A == pt {
-		if s.audioStream == nil {
-			stream_ = utils.NewAVStream(utils.AVMediaTypeAudio, 0, utils.AVCodecIdPCMALAW, nil, nil)
-		}
-
-		packet = utils.NewAudioPacket(data, int64(ts), int64(ts), utils.AVCodecIdPCMALAW, index, 1000)
-	} else if PTAudioG711U == pt {
-		if s.audioStream == nil {
-			stream_ = utils.NewAVStream(utils.AVMediaTypeAudio, 0, utils.AVCodecIdPCMMULAW, nil, nil)
-		}
-
-		packet = utils.NewAudioPacket(data, int64(ts), int64(ts), utils.AVCodecIdPCMMULAW, index, 1000)
-	} else if PTAudioAAC == pt {
-
-	} else {
-		return fmt.Errorf("the codec %d is not implemented", pt)
-	}
-
-	if stream_ != nil {
-		s.audioStream = stream_
-		s.OnDeMuxStream(stream_)
-		if s.videoStream != nil && s.audioStream != nil {
-			s.OnDeMuxStreamDone()
-		}
-	}
-
-	s.OnDeMuxPacket(packet)
-	return nil
-}
-func (s *Session) OnJtPTPPacket(data []byte) {
-	packet, err := read1078RTPPacket(data)
-	if err != nil {
-		return
-	}
-
-	//过滤空数据
-	if len(packet.payload) == 0 {
-		return
-	}
-
-	//首包处理, hook通知
-	if s.rtpPacket == nil {
-		s.Id_ = packet.simNumber
-		s.rtpPacket = &RtpPacket{}
-		*s.rtpPacket = packet
-
-		go func() {
-			_, state := stream.PreparePublishSource(s, true)
-			if utils.HookStateOK != state {
-				log.Sugar.Errorf("1078推流失败 source:%s", s.phone)
-
-				if s.Conn != nil {
-					s.Conn.Close()
-				}
-			}
-		}()
-	}
-
-	//完整包/最后一个分包, 创建AVPacket
-	//或者参考时间戳, 推流的分包标记为可能不靠谱
-	if s.rtpPacket.ts != packet.ts || s.rtpPacket.pt != packet.pt {
-		if s.rtpPacket.packetType == AudioFrameMark {
-			if err := s.processAudioPacket(s.rtpPacket.pt, s.rtpPacket.packetType, s.rtpPacket.ts, s.audioBuffer.Fetch(), s.audioIndex); err != nil {
-				log.Sugar.Errorf("处理音频包失败 phone:%s err:%s", s.phone, err.Error())
-				s.audioBuffer.FreeTail()
-			}
-
-			*s.rtpPacket = packet
-			s.audioBuffer.Mark()
-		} else {
-			if err := s.processVideoPacket(s.rtpPacket.pt, s.rtpPacket.packetType, s.rtpPacket.ts, s.videoBuffer.Fetch(), s.videoIndex); err != nil {
-				log.Sugar.Errorf("处理视频包失败 phone:%s err:%s", s.phone, err.Error())
-				s.videoBuffer.FreeTail()
-			}
-
-			*s.rtpPacket = packet
-			s.videoBuffer.Mark()
-		}
-	}
-
-	if packet.packetType == AudioFrameMark {
-		if s.audioBuffer == nil {
-			if s.videoIndex == 0 && s.audioIndex == 0 {
-				s.videoIndex = 1
-			}
-
-			s.audioBuffer = s.FindOrCreatePacketBuffer(s.audioIndex, utils.AVMediaTypeAudio)
-			s.audioBuffer.Mark()
-		}
-
-		s.audioBuffer.Write(packet.payload)
-	} else {
-		if s.videoBuffer == nil {
-			if s.videoIndex == 0 && s.audioIndex == 0 {
-				s.audioIndex = 1
-			}
-
-			s.videoBuffer = s.FindOrCreatePacketBuffer(s.videoIndex, utils.AVMediaTypeVideo)
-			s.videoBuffer.Mark()
-		}
-
-		s.videoBuffer.Write(packet.payload)
-	}
-}
-
-func (s *Session) Input(data []byte) error {
-	return s.decoder.Input(data)
-}
-
-func (s *Session) Close() {
-	log.Sugar.Infof("1078推流结束 phone number:%s %s", s.phone, s.PublishSource.PrintInfo())
-
-	if s.audioBuffer != nil {
-		s.audioBuffer.Clear()
-	}
-
-	if s.videoBuffer != nil {
-		s.videoBuffer.Clear()
-	}
-
-	if s.Conn != nil {
-		s.Conn.Close()
-		s.Conn = nil
-	}
-
-	if s.decoder != nil {
-		s.decoder.Close()
-		s.decoder = nil
-	}
-
-	s.PublishSource.Close()
 }
 
 func NewSession(conn net.Conn) *Session {
