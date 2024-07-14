@@ -190,7 +190,7 @@ func (s *BaseSink) DesiredVideoCodecId() utils.AVCodecID {
 // 拉流断开连接,不需要考虑线程安全
 // 踢流走source管道删除,并且关闭Conn
 func (s *BaseSink) Close() {
-	if SessionStateClosed != s.State_ {
+	if SessionStateClosed == s.State_ {
 		return
 	}
 

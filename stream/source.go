@@ -2,6 +2,7 @@ package stream
 
 import (
 	"fmt"
+	"github.com/lkmio/avformat/transport"
 	"github.com/lkmio/lkm/collections"
 	"github.com/lkmio/lkm/log"
 	"net"
@@ -408,6 +409,7 @@ func (s *PublishSource) AddSink(sink Sink) bool {
 	}
 
 	s.sinkCount++
+	log.Sugar.Infof("sink count:%d source:%s", s.sinkCount, s.Id_)
 
 	//新的传输流，发送缓存的音视频帧
 	if !ok && AppConfig.GOPCache && s.existVideo {
@@ -429,6 +431,7 @@ func (s *PublishSource) RemoveSink(sink Sink) bool {
 			s.sinkCount--
 			s.removeSinkTime = time.Now()
 			HookPlayDoneEvent(sink)
+			log.Sugar.Infof("sink count:%d source:%s", s.sinkCount, s.Id_)
 			return true
 		}
 	}
@@ -456,11 +459,6 @@ func (s *PublishSource) SetState(state SessionState) {
 func (s *PublishSource) doClose() {
 	if s.closed {
 		return
-	}
-
-	if s.Conn != nil {
-		s.Conn.Close()
-		s.Conn = nil
 	}
 
 	if s.TransDeMuxer != nil {
@@ -527,7 +525,14 @@ func (s *PublishSource) doClose() {
 
 	s.closed = true
 	s.transStreams = nil
-	go HookPublishDoneEvent(s)
+	go func() {
+		if s.Conn != nil && s.Conn.(*transport.Conn).IsActive() {
+			s.Conn.Close()
+			s.Conn = nil
+		}
+
+		HookPublishDoneEvent(s)
+	}()
 }
 
 func (s *PublishSource) Close() {
