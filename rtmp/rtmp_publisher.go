@@ -4,6 +4,7 @@ import (
 	"github.com/lkmio/avformat/libflv"
 	"github.com/lkmio/avformat/librtmp"
 	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
 	"net"
 )
@@ -32,7 +33,12 @@ func (p *Publisher) Input(data []byte) error {
 func (p *Publisher) OnDeMuxStream(stream utils.AVStream) {
 	//AVStream的ExtraData已经拷贝, 释放掉内存池中最新分配的内存
 	p.FindOrCreatePacketBuffer(stream.Index(), stream.Type()).FreeTail()
-	p.PublishSource.OnDeMuxStream(stream)
+	if !p.IsCompleted() {
+		p.PublishSource.OnDeMuxStream(stream)
+	} else if !p.IsTimeoutTrack(stream.Index()) {
+		p.SetTimeoutTrack(stream.Index())
+		log.Sugar.Errorf("添加 %s track超时", stream.Type().ToString())
+	}
 }
 
 // OnVideo 解析出来的完整视频包
