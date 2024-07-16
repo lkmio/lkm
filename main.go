@@ -128,9 +128,7 @@ func main() {
 
 	if stream.AppConfig.Hook.IsEnableOnStarted() {
 		go func() {
-			if _, err := stream.Hook(stream.HookEventStarted, "", nil); err != nil {
-				log.Sugar.Errorf("发送启动通知失败 err:%s", err.Error())
-			}
+			_, _ = stream.Hook(stream.HookEventStarted, "", nil)
 		}()
 	}
 

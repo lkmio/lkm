@@ -67,7 +67,7 @@ func NewTCPSession(conn net.Conn, filter Filter) *TCPSession {
 
 		//单端口模式,ssrc匹配source
 		if session.source == nil {
-			//匹配不到直接关闭链接
+			//匹配不到直接关闭连接
 			source := filter.FindSource(packet.SSRC)
 			if source == nil {
 				log.Sugar.Errorf("gb28181推流失败 ssrc:%x配置不到source conn:%s  data:%s", packet.SSRC, session.conn.RemoteAddr().String(), hex.EncodeToString(bytes))

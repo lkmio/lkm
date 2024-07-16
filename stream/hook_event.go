@@ -47,6 +47,8 @@ func (h *HookEvent) ToString() string {
 		return "idle timeout"
 	} else if HookEventReceiveTimeout == *h {
 		return "receive timeout"
+	} else if HookEventStarted == *h {
+		return "started"
 	}
 
 	panic(fmt.Sprintf("unknow hook type %d", h))

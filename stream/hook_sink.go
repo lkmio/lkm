@@ -29,7 +29,7 @@ func PreparePlaySink(sink Sink) (*http.Response, utils.HookState) {
 			defer sink.UnLock()
 
 			if SessionStateClosed == sink.State() {
-				log.Sugar.Warnf("添加到sink到等待队列失败, sink已经断开链接 %s", sink.Id())
+				log.Sugar.Warnf("添加到sink到等待队列失败, sink已经断开连接 %s", sink.Id())
 				return response, utils.HookStateFailure
 			} else {
 				sink.SetState(SessionStateWait)

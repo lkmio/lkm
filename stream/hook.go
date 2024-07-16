@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/lkmio/lkm/log"
+	"io"
 	"net/http"
 	"time"
 )
@@ -16,28 +17,25 @@ type eventInfo struct {
 	RemoteAddr string `json:"remote_addr"` //peer地址
 }
 
-func NewHookPlayEventInfo(sink Sink) eventInfo {
-	return eventInfo{Stream: sink.SourceId(), Protocol: sink.Protocol().ToString(), RemoteAddr: sink.PrintInfo()}
-}
-func NewHookPublishEventInfo(source Source) eventInfo {
-	return eventInfo{Stream: source.Id(), Protocol: source.Type().ToString(), RemoteAddr: source.RemoteAddr()}
-}
-
-func sendHookEvent(url string, body interface{}) (*http.Response, error) {
-	marshal, err := json.Marshal(body)
+func responseBodyToString(resp *http.Response) string {
+	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return ""
 	}
 
+	resp.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+	return string(bodyBytes)
+}
+
+func sendHookEvent(url string, body []byte) (*http.Response, error) {
 	client := &http.Client{
 		Timeout: time.Duration(AppConfig.Hook.Timeout),
 	}
-	request, err := http.NewRequest("post", url, bytes.NewBuffer(marshal))
+	request, err := http.NewRequest("post", url, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
 	}
 
-	log.Sugar.Infof("发送hook通知 url:%s body:%s", url, marshal)
 	request.Header.Set("Content-Type", "application/json")
 	return client.Do(request)
 }
@@ -48,14 +46,34 @@ func Hook(event HookEvent, params string, body interface{}) (*http.Response, err
 		return nil, fmt.Errorf("the url for this %s event does not exist", event.ToString())
 	}
 
+	bytes, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+
 	if "" != params {
 		url += "?" + params
 	}
 
-	response, err := sendHookEvent(url, body)
+	log.Sugar.Infof("sent a hook event for %s. url: %s body: %s", event.ToString(), url, bytes)
+	response, err := sendHookEvent(url, bytes)
+	if err != nil {
+		log.Sugar.Errorf("failed to %s the hook event. err: %s", event.ToString(), err.Error())
+	} else {
+		log.Sugar.Infof("received response for hook %s event: status='%s', response body='%s'", event.ToString(), response.Status, responseBodyToString(response))
+	}
+
 	if err == nil && http.StatusOK != response.StatusCode {
-		return response, fmt.Errorf("reason %s", response.Status)
+		return response, fmt.Errorf("unexpected response status: %s for request %s", response.Status, url)
 	}
 
 	return response, err
+}
+
+func NewHookPlayEventInfo(sink Sink) eventInfo {
+	return eventInfo{Stream: sink.SourceId(), Protocol: sink.Protocol().ToString(), RemoteAddr: sink.PrintInfo()}
+}
+
+func NewHookPublishEventInfo(source Source) eventInfo {
+	return eventInfo{Stream: source.Id(), Protocol: source.Type().ToString(), RemoteAddr: source.RemoteAddr()}
 }
