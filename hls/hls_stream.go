@@ -116,6 +116,10 @@ func (t *transStream) onTSAlloc(size int) []byte {
 }
 
 func (t *transStream) flushSegment(end bool) error {
+	defer func() {
+		t.context.segmentSeq++
+	}()
+
 	//将剩余数据写入缓冲区
 	if t.context.writeBufferSize > 0 {
 		_, _ = t.context.file.Write(t.context.writeBuffer[:t.context.writeBufferSize])
@@ -135,7 +139,6 @@ func (t *transStream) flushSegment(end bool) error {
 	duration := float32(t.muxer.Duration()) / 90000
 
 	t.m3u8.AddSegment(duration, t.context.url, t.context.segmentSeq, t.context.path)
-
 	if _, err := t.m3u8File.Seek(0, 0); err != nil {
 		return err
 	}
@@ -165,25 +168,33 @@ func (t *transStream) flushSegment(end bool) error {
 // 创建一个新的ts切片
 func (t *transStream) createSegment() error {
 	t.muxer.Reset()
-	defer func() {
-		t.context.segmentSeq++
-	}()
 
-	tsName := fmt.Sprintf(t.tsFormat, t.context.segmentSeq)
-	//ts文件
-	t.context.path = fmt.Sprintf("%s/%s", t.dir, tsName)
-	//m3u8列表中切片的url
-	t.context.url = fmt.Sprintf("%s%s", t.tsUrl, tsName)
+	var tsFile *os.File
+	for {
+		tsName := fmt.Sprintf(t.tsFormat, t.context.segmentSeq)
+		//ts文件
+		t.context.path = fmt.Sprintf("%s/%s", t.dir, tsName)
+		//m3u8列表中切片的url
+		t.context.url = fmt.Sprintf("%s%s", t.tsUrl, tsName)
 
-	file, err := os.OpenFile(t.context.path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
-	if err != nil {
+		file, err := os.OpenFile(t.context.path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
+		if err == nil {
+			tsFile = file
+			break
+		}
+
 		log.Sugar.Errorf("创建ts切片文件失败 err:%s path:%s", err.Error(), t.context.path)
-		return err
+		if os.IsPermission(err) || os.IsTimeout(err) || os.IsNotExist(err) {
+			return err
+		}
+
+		//继续创建, 认为是文件名冲突, 并且文件已经被打开.
+		t.context.segmentSeq++
 	}
 
-	t.context.file = file
+	t.context.file = tsFile
 	_ = t.muxer.WriteHeader()
-	return err
+	return nil
 }
 
 func (t *transStream) Close() error {
