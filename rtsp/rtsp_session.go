@@ -102,7 +102,7 @@ func parseMessage(data []byte) (string, *url.URL, textproto.MIMEHeader, error) {
 	line, err := tp.ReadLine()
 	split := strings.Split(line, " ")
 	if len(split) < 3 {
-		panic(fmt.Errorf("wrong request line %s", line))
+		return "", nil, nil, fmt.Errorf("wrong request line %s", line)
 	}
 
 	method := strings.ToUpper(split[0])
