@@ -38,11 +38,11 @@ func (s *Session) OnPublish(app, stream_ string, response chan utils.HookState) 
 	//设置推流的音视频回调
 	s.stack.SetOnPublishHandler(source)
 
-	//初始化放在add source前面, 以防add后再init,空窗期拉流队列空指针.
+	//初始化放在add source前面, 以防add后再init, 空窗期拉流队列空指针.
 	source.Init(source.Input, source.Close, stream.ReceiveBufferTCPBlockCount)
 	source.SetUrlValues(values)
 
-	//推流事件Source统一处理, 是否已经存在, Hook回调....
+	//统一处理source推流事件, source是否已经存在, hook回调....
 	_, state := stream.PreparePublishSource(source, true)
 	if utils.HookStateOK != state {
 		log.Sugar.Errorf("rtmp推流失败 source:%s", sourceId)
@@ -87,7 +87,7 @@ func (s *Session) Input(conn net.Conn, data []byte) error {
 }
 
 func (s *Session) Close() {
-	//session/conn/stack相关引用, go释放不了...手动赋值为nil
+	//session/conn/stack相互引用, go释放不了...手动赋值为nil
 	s.conn = nil
 
 	defer func() {

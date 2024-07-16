@@ -143,7 +143,7 @@ type PublishSource struct {
 
 	TransDeMuxer     stream.DeMuxer            //负责从推流协议中解析出AVStream和AVPacket
 	recordSink       Sink                      //每个Source的录制流
-	hlsStream        TransStream               //如果开开启HLS传输流, 不等拉流时, 创建直接生成
+	hlsStream        TransStream               //HLS传输流, 如果开启, 在@seee writeHeader 直接创建, 如果等拉流时再创建, 会进一步加大HLS延迟.
 	audioTranscoders []transcode.Transcoder    //音频解码器
 	videoTranscoders []transcode.Transcoder    //视频解码器
 	originStreams    StreamManager             //推流的音视频Streams
