@@ -166,11 +166,11 @@ func (m *memoryPool) freeOldBlocks() bool {
 }
 
 func (m *memoryPool) FreeHead() {
-	if m.freeOldBlocks() || m.blockQueue.IsEmpty() {
+	if m.freeOldBlocks() /*|| m.blockQueue.IsEmpty()*/ {
 		return
 	}
 
-	//utils.Assert(!m.blockQueue.IsEmpty())
+	utils.Assert(!m.blockQueue.IsEmpty())
 	size := m.blockQueue.Pop().(int)
 	m.head += size
 
@@ -183,11 +183,11 @@ func (m *memoryPool) FreeHead() {
 }
 
 func (m *memoryPool) FreeTail() {
-	if m.freeOldBlocks() || m.blockQueue.IsEmpty() {
+	if m.freeOldBlocks() /*|| m.blockQueue.IsEmpty()*/ {
 		return
 	}
 
-	//utils.Assert(!m.blockQueue.IsEmpty())
+	utils.Assert(!m.blockQueue.IsEmpty())
 	size := m.blockQueue.PopBack().(int)
 	m.tail -= size
 

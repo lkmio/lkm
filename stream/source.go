@@ -223,6 +223,7 @@ func (s *PublishSource) CreateDefaultOutStreams() {
 			panic(err)
 		}
 
+		s.dispatchGOPBuffer(hlsStream)
 		s.hlsStream = hlsStream
 		s.transStreams[GenerateTransStreamId(ProtocolHls, streams...)] = s.hlsStream
 	}
@@ -330,6 +331,12 @@ func (s *PublishSource) CreateTransStream(protocol Protocol, streams []utils.AVS
 	return transStream, err
 }
 
+func (s *PublishSource) dispatchGOPBuffer(transStream TransStream) {
+	s.gopBuffer.PeekAll(func(packet utils.AVPacket) {
+		transStream.Input(packet)
+	})
+}
+
 func (s *PublishSource) AddSink(sink Sink) bool {
 	// 暂时不考虑多路视频流，意味着只能1路视频流和多路音频流，同理originStreams和allStreams里面的Stream互斥. 同时多路音频流的Codec必须一致
 	audioCodecId, videoCodecId := sink.DesiredAudioCodecId(), sink.DesiredVideoCodecId()
@@ -413,9 +420,7 @@ func (s *PublishSource) AddSink(sink Sink) bool {
 
 	//新的传输流，发送缓存的音视频帧
 	if !ok && AppConfig.GOPCache && s.existVideo {
-		s.gopBuffer.PeekAll(func(packet utils.AVPacket) {
-			transStream.Input(packet)
-		})
+		s.dispatchGOPBuffer(transStream)
 	}
 
 	return true
@@ -564,8 +569,8 @@ func (s *PublishSource) OnDeMuxStream(stream utils.AVStream) {
 		s.existVideo = true
 	}
 
-	//为每个Stream创建对应的Buffer
-	if AppConfig.GOPCache && s.existVideo {
+	//创建GOPBuffer
+	if AppConfig.GOPCache && s.existVideo && s.gopBuffer == nil {
 		s.gopBuffer = NewStreamBuffer()
 		//设置GOP缓存溢出回调
 		s.gopBuffer.SetDiscardHandler(s.OnDiscardPacket)
