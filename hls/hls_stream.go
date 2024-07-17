@@ -156,7 +156,8 @@ func (t *transStream) flushSegment(end bool) error {
 	}
 
 	//通知等待m3u8的sink
-	if len(t.m3u8Sinks) > 0 {
+	//缓存完第二个切片, 才响应发送m3u8文件. 如果一个切片就发, 播放器缓存少会卡顿.
+	if len(t.m3u8Sinks) > 0 && t.m3u8.Size() > 1 {
 		for _, sink := range t.m3u8Sinks {
 			sink.Input([]byte(m3u8Txt))
 		}
