@@ -131,7 +131,7 @@ func (m *m3u8Writer) ToString() string {
 			m.stringBuffer.WriteString("#EXTINF:")
 			m.stringBuffer.WriteString(strconv.FormatFloat(float64(segment.(Segment).duration), 'f', -1, 32))
 			m.stringBuffer.WriteString(",\r\n")
-			m.stringBuffer.WriteString(segment.(Segment).url)
+			m.stringBuffer.WriteString(segment.(Segment).url + "%s")
 			m.stringBuffer.WriteString("\r\n")
 		}
 	}

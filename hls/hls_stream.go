@@ -35,7 +35,8 @@ type transStream struct {
 	duration       int      //切片时长, 单位秒
 	playlistLength int      //最大切片文件个数
 
-	m3u8Sinks map[stream.SinkId]stream.Sink
+	m3u8Sinks        map[stream.SinkId]*M3U8Sink //等待响应m3u8文件的sink
+	m3u8StringFormat string                      //一个协程写, 多个协程读, 不用加锁保护
 }
 
 func (t *transStream) Input(packet utils.AVPacket) error {
@@ -89,16 +90,14 @@ func (t *transStream) WriteHeader() error {
 }
 
 func (t *transStream) AddSink(sink stream.Sink) error {
-	if sink_, ok := sink.(*m3u8Sink); ok {
-		if t.m3u8.Size() > 0 {
-			return sink.Input([]byte(t.m3u8.ToString()))
-		} else {
-			t.m3u8Sinks[sink.Id()] = sink_
-			return nil
-		}
+	t.BaseTransStream.AddSink(sink)
+
+	if t.m3u8.Size() > 0 {
+		return sink.Input([]byte(t.m3u8.ToString()))
 	}
 
-	return t.BaseTransStream.AddSink(sink)
+	t.m3u8Sinks[sink.Id()] = sink.(*M3U8Sink)
+	return nil
 }
 
 func (t *transStream) onTSWrite(data []byte) {
@@ -139,19 +138,17 @@ func (t *transStream) flushSegment(end bool) error {
 	duration := float32(t.muxer.Duration()) / 90000
 
 	t.m3u8.AddSegment(duration, t.context.url, t.context.segmentSeq, t.context.path)
-	if _, err := t.m3u8File.Seek(0, 0); err != nil {
-		return err
-	}
-	if err := t.m3u8File.Truncate(0); err != nil {
-		return err
-	}
-
 	m3u8Txt := t.m3u8.ToString()
 	if end {
 		m3u8Txt += "#EXT-X-ENDLIST"
 	}
+	t.m3u8StringFormat = m3u8Txt
 
-	if _, err := t.m3u8File.Write([]byte(m3u8Txt)); err != nil {
+	if _, err := t.m3u8File.Seek(0, 0); err != nil {
+		return err
+	} else if err := t.m3u8File.Truncate(0); err != nil {
+		return err
+	} else if _, err := t.m3u8File.Write([]byte(m3u8Txt)); err != nil {
 		return err
 	}
 
@@ -159,9 +156,10 @@ func (t *transStream) flushSegment(end bool) error {
 	//缓存完第二个切片, 才响应发送m3u8文件. 如果一个切片就发, 播放器缓存少会卡顿.
 	if len(t.m3u8Sinks) > 0 && t.m3u8.Size() > 1 {
 		for _, sink := range t.m3u8Sinks {
-			sink.Input([]byte(m3u8Txt))
+			sink.SendM3U8Data(&t.m3u8StringFormat)
 		}
-		t.m3u8Sinks = make(map[stream.SinkId]stream.Sink, 0)
+
+		t.m3u8Sinks = make(map[stream.SinkId]*M3U8Sink, 0)
 	}
 	return nil
 }
@@ -283,8 +281,7 @@ func NewTransStream(dir, m3u8Name, tsFormat, tsUrl string, segmentDuration, play
 	stream_.m3u8 = NewM3U8Writer(playlistLength)
 	stream_.m3u8File = file
 
-	//等待响应m3u8文件的sink
-	stream_.m3u8Sinks = make(map[stream.SinkId]stream.Sink, 24)
+	stream_.m3u8Sinks = make(map[stream.SinkId]*M3U8Sink, 24)
 	return stream_, nil
 }
 
