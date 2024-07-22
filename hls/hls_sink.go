@@ -47,8 +47,7 @@ func (s *M3U8Sink) Start() {
 
 func (s *M3U8Sink) GetM3U8String() string {
 	param := fmt.Sprintf("?%s=%s", SessionIdKey, s.sessionId)
-	all := strings.ReplaceAll(string(*s.m3u8StringFormat), "%s", param)
-	log.Sugar.Infof("m3u8 list:%s", all)
+	all := strings.ReplaceAll(*s.m3u8StringFormat, "%s", param)
 	return all
 }
 

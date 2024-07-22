@@ -389,7 +389,6 @@ func (api *ApiServer) onTS(source string, w http.ResponseWriter, r *http.Request
 }
 
 func (api *ApiServer) onHLS(sourceId string, w http.ResponseWriter, r *http.Request) {
-	log.Sugar.Infof("请求m3u8")
 	if !stream.AppConfig.Hls.Enable {
 		log.Sugar.Warnf("处理hls请求失败 server未开启hls")
 		http.Error(w, "hls disable", http.StatusInternalServerError)
