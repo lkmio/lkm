@@ -29,7 +29,7 @@ func responseBodyToString(resp *http.Response) string {
 
 func sendHookEvent(url string, body []byte) (*http.Response, error) {
 	client := &http.Client{
-		Timeout: time.Duration(AppConfig.Hook.Timeout),
+		Timeout: time.Duration(AppConfig.Hooks.Timeout),
 	}
 	request, err := http.NewRequest("post", url, bytes.NewBuffer(body))
 	if err != nil {
@@ -76,4 +76,16 @@ func NewHookPlayEventInfo(sink Sink) eventInfo {
 
 func NewHookPublishEventInfo(source Source) eventInfo {
 	return eventInfo{Stream: source.Id(), Protocol: source.Type().ToString(), RemoteAddr: source.RemoteAddr()}
+}
+
+func NewRecordEventInfo(source Source, path string) interface{} {
+	data := struct {
+		eventInfo
+		Path string `json:"path"`
+	}{
+		eventInfo: NewHookPublishEventInfo(source),
+		Path:      path,
+	}
+
+	return data
 }

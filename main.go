@@ -8,6 +8,7 @@ import (
 	"github.com/lkmio/lkm/hls"
 	"github.com/lkmio/lkm/jt1078"
 	"github.com/lkmio/lkm/log"
+	"github.com/lkmio/lkm/record"
 	"github.com/lkmio/lkm/rtc"
 	"github.com/lkmio/lkm/rtsp"
 	"go.uber.org/zap/zapcore"
@@ -26,6 +27,7 @@ func init() {
 	stream.RegisterTransStreamFactory(stream.ProtocolFlv, flv.TransStreamFactory)
 	stream.RegisterTransStreamFactory(stream.ProtocolRtsp, rtsp.TransStreamFactory)
 	stream.RegisterTransStreamFactory(stream.ProtocolRtc, rtc.TransStreamFactory)
+	stream.SetRecordStreamFactory(record.NewFLVFileSink)
 
 	config, err := stream.LoadConfigFile("./config.json")
 	if err != nil {
@@ -126,7 +128,7 @@ func main() {
 		log.Sugar.Info("启动jt1078服务成功 addr:", jtAddr.String())
 	}
 
-	if stream.AppConfig.Hook.IsEnableOnStarted() {
+	if stream.AppConfig.Hooks.IsEnableOnStarted() {
 		go func() {
 			_, _ = stream.Hook(stream.HookEventStarted, "", nil)
 		}()

@@ -20,7 +20,7 @@
   },
 
   "hls": {
-    "enable": false,
+    "enable": true,
     "segment_duration": 2,
     "playlist_length": 10,
     "dir": "../tmp"
@@ -49,11 +49,12 @@
   },
 
   "record": {
-    "format": "mp4",
-    "path": ""
+    "enable": true,
+    "format": "flv",
+    "dir": "../record"
   },
 
-  "hook": {
+  "hooks": {
     "enable": true,
     "timeout": 10,
 
@@ -64,7 +65,7 @@
     "on_play" : "http://localhost:9000/api/v1/hook/on_play",
     "on_play_done" : "http://localhost:9000/api/v1/hook/on_play_done",
 
-    "on_record": "http://localhost:9000/api/v1/hook/on_reocrd",
+    "on_record": "http://localhost:9000/api/v1/hook/on_record",
     "on_idle_timeout": "http://localhost:9000/api/v1/hook/on_idle_timeout",
     "on_receive_timeout": "http://localhost:9000/api/v1/hook/on_receive_timeout"
   },

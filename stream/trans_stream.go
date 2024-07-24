@@ -109,7 +109,9 @@ func (t *TCPTransStream) AddSink(sink Sink) error {
 		return err
 	}
 
-	sink.GetConn().(*transport.Conn).EnableAsyncWriteMode(AppConfig.WriteBufferNumber - 1)
+	if sink.GetConn() != nil {
+		sink.GetConn().(*transport.Conn).EnableAsyncWriteMode(AppConfig.WriteBufferNumber - 1)
+	}
 	return nil
 }
 

@@ -143,6 +143,7 @@ type PublishSource struct {
 
 	TransDeMuxer     stream.DeMuxer            //负责从推流协议中解析出AVStream和AVPacket
 	recordSink       Sink                      //每个Source的录制流
+	recordFilePath   string                    //录制流文件路径
 	hlsStream        TransStream               //HLS传输流, 如果开启, 在@seee writeHeader 直接创建, 如果等拉流时再创建, 会进一步加大HLS延迟.
 	audioTranscoders []transcode.Transcoder    //音频解码器
 	videoTranscoders []transcode.Transcoder    //视频解码器
@@ -210,7 +211,13 @@ func (s *PublishSource) CreateDefaultOutStreams() {
 
 	//创建录制流
 	if AppConfig.Record.Enable {
-
+		sink, path, err := CreateRecordStream(s.Id_)
+		if err != nil {
+			log.Sugar.Errorf("创建录制sink失败 source:%s err:%s", s.Id_, err.Error())
+		} else {
+			s.recordSink = sink
+			s.recordFilePath = path
+		}
 	}
 
 	//创建HLS输出流
@@ -415,8 +422,10 @@ func (s *PublishSource) AddSink(sink Sink) bool {
 		sink.SetState(SessionStateTransferring)
 	}
 
-	s.sinkCount++
-	log.Sugar.Infof("sink count:%d source:%s", s.sinkCount, s.Id_)
+	if s.recordSink != sink {
+		s.sinkCount++
+		log.Sugar.Infof("sink count:%d source:%s", s.sinkCount, s.Id_)
+	}
 
 	//新的传输流，发送缓存的音视频帧
 	if !ok && AppConfig.GOPCache && s.existVideo {
@@ -497,6 +506,10 @@ func (s *PublishSource) doClose() {
 		s.idleTimer.Stop()
 	}
 
+	if s.recordSink != nil {
+		s.recordSink.Close()
+	}
+
 	//释放解复用器
 	//释放转码器
 	//释放每路转协议流， 将所有sink添加到等待队列
@@ -510,6 +523,10 @@ func (s *PublishSource) doClose() {
 
 		transStream.PopAllSink(func(sink Sink) {
 			sink.SetTransStreamId(0)
+			if s.recordSink == sink {
+				return
+			}
+
 			{
 				sink.Lock()
 				defer sink.UnLock()
@@ -537,6 +554,10 @@ func (s *PublishSource) doClose() {
 		}
 
 		HookPublishDoneEvent(s)
+
+		if s.recordSink != nil {
+			HookRecordEvent(s, s.recordFilePath)
+		}
 	}()
 }
 
@@ -599,6 +620,10 @@ func (s *PublishSource) writeHeader() {
 	s.CreateDefaultOutStreams()
 
 	sinks := PopWaitingSinks(s.Id_)
+	if s.recordSink != nil {
+		sinks = append(sinks, s.recordSink)
+	}
+
 	for _, sink := range sinks {
 		if !s.AddSink(sink) {
 			sink.Close()

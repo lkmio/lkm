@@ -196,7 +196,7 @@ func (source *BaseGBSource) PreparePublish(conn net.Conn, ssrc uint32, source_ G
 	source.SetSSRC(ssrc)
 	source.SetState(stream.SessionStateTransferring)
 
-	if stream.AppConfig.Hook.IsEnablePublishEvent() {
+	if stream.AppConfig.Hooks.IsEnablePublishEvent() {
 		go func() {
 			_, state := stream.HookPublishEvent(source_)
 			if utils.HookStateOK != state {

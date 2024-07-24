@@ -7,8 +7,11 @@ import (
 
 type TransStreamFactory func(source Source, protocol Protocol, streams []utils.AVStream) (TransStream, error)
 
+type RecordStreamFactory func(source string) (Sink, string, error)
+
 var (
 	transStreamFactories map[Protocol]TransStreamFactory
+	recordStreamFactory  RecordStreamFactory
 )
 
 func init() {
@@ -40,4 +43,12 @@ func CreateTransStream(source Source, protocol Protocol, streams []utils.AVStrea
 	}
 
 	return factory(source, protocol, streams)
+}
+
+func SetRecordStreamFactory(factory RecordStreamFactory) {
+	recordStreamFactory = factory
+}
+
+func CreateRecordStream(sourceId string) (Sink, string, error) {
+	return recordStreamFactory(sourceId)
 }

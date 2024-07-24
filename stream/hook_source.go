@@ -10,7 +10,7 @@ import (
 func PreparePublishSource(source Source, hook bool) (*http.Response, utils.HookState) {
 	var response *http.Response
 
-	if hook && AppConfig.Hook.IsEnablePublishEvent() {
+	if hook && AppConfig.Hooks.IsEnablePublishEvent() {
 		rep, state := HookPublishEvent(source)
 		if utils.HookStateOK != state {
 			return rep, state
@@ -41,7 +41,7 @@ func PreparePublishSource(source Source, hook bool) (*http.Response, utils.HookS
 func HookPublishEvent(source Source) (*http.Response, utils.HookState) {
 	var response *http.Response
 
-	if AppConfig.Hook.IsEnablePublishEvent() {
+	if AppConfig.Hooks.IsEnablePublishEvent() {
 		hook, err := Hook(HookEventPublish, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
 		if err != nil {
 			return hook, utils.HookStateFailure
@@ -54,7 +54,7 @@ func HookPublishEvent(source Source) (*http.Response, utils.HookState) {
 }
 
 func HookPublishDoneEvent(source Source) {
-	if AppConfig.Hook.IsEnablePublishEvent() {
+	if AppConfig.Hooks.IsEnablePublishEvent() {
 		_, _ = Hook(HookEventPublishDone, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
 	}
 }
@@ -62,7 +62,7 @@ func HookPublishDoneEvent(source Source) {
 func HookReceiveTimeoutEvent(source Source) (*http.Response, utils.HookState) {
 	var response *http.Response
 
-	if AppConfig.Hook.IsEnableOnReceiveTimeout() {
+	if AppConfig.Hooks.IsEnableOnReceiveTimeout() {
 		resp, err := Hook(HookEventReceiveTimeout, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
 		if err != nil {
 			return resp, utils.HookStateFailure
@@ -77,7 +77,7 @@ func HookReceiveTimeoutEvent(source Source) (*http.Response, utils.HookState) {
 func HookIdleTimeoutEvent(source Source) (*http.Response, utils.HookState) {
 	var response *http.Response
 
-	if AppConfig.Hook.IsEnableOnIdleTimeout() {
+	if AppConfig.Hooks.IsEnableOnIdleTimeout() {
 		resp, err := Hook(HookEventIdleTimeout, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
 		if err != nil {
 			return resp, utils.HookStateFailure
@@ -87,4 +87,10 @@ func HookIdleTimeoutEvent(source Source) (*http.Response, utils.HookState) {
 	}
 
 	return response, utils.HookStateOK
+}
+
+func HookRecordEvent(source Source, path string) {
+	if AppConfig.Hooks.IsEnableOnRecord() {
+		_, _ = Hook(HookEventRecord, "", NewRecordEventInfo(source, path))
+	}
 }

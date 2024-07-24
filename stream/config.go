@@ -49,6 +49,7 @@ type RtspConfig struct {
 type RecordConfig struct {
 	Enable bool   `json:"enable"`
 	Format string `json:"format"`
+	Dir    string `json:"dir"`
 }
 
 type LogConfig struct {
@@ -120,7 +121,7 @@ func (c HlsConfig) TSFormat(sourceId string) string {
 	return split[len(split)-1] + "_%d.ts"
 }
 
-type HookConfig struct {
+type HooksConfig struct {
 	Enable              bool   `json:"enable"`
 	Timeout             int64  `json:"timeout"`
 	OnStartedUrl        string `json:"on_started"`         //应用启动后回调
@@ -133,35 +134,35 @@ type HookConfig struct {
 	OnReceiveTimeoutUrl string `json:"on_receive_timeout"` //没有推流回调
 }
 
-func (hook *HookConfig) IsEnablePublishEvent() bool {
+func (hook *HooksConfig) IsEnablePublishEvent() bool {
 	return hook.Enable && hook.OnPublishUrl != ""
 }
 
-func (hook *HookConfig) IsEnableOnPublishDone() bool {
+func (hook *HooksConfig) IsEnableOnPublishDone() bool {
 	return hook.Enable && hook.OnPublishDoneUrl != ""
 }
 
-func (hook *HookConfig) IsEnableOnPlay() bool {
+func (hook *HooksConfig) IsEnableOnPlay() bool {
 	return hook.Enable && hook.OnPlayUrl != ""
 }
 
-func (hook *HookConfig) IsEnableOnPlayDone() bool {
+func (hook *HooksConfig) IsEnableOnPlayDone() bool {
 	return hook.Enable && hook.OnPlayDoneUrl != ""
 }
 
-func (hook *HookConfig) IsEnableOnRecord() bool {
+func (hook *HooksConfig) IsEnableOnRecord() bool {
 	return hook.Enable && hook.OnRecordUrl != ""
 }
 
-func (hook *HookConfig) IsEnableOnIdleTimeout() bool {
+func (hook *HooksConfig) IsEnableOnIdleTimeout() bool {
 	return hook.Enable && hook.OnIdleTimeoutUrl != ""
 }
 
-func (hook *HookConfig) IsEnableOnReceiveTimeout() bool {
+func (hook *HooksConfig) IsEnableOnReceiveTimeout() bool {
 	return hook.Enable && hook.OnReceiveTimeoutUrl != ""
 }
 
-func (hook *HookConfig) IsEnableOnStarted() bool {
+func (hook *HooksConfig) IsEnableOnStarted() bool {
 	return hook.Enable && hook.OnStartedUrl != ""
 }
 
@@ -251,7 +252,7 @@ type AppConfig_ struct {
 	GB28181           GB28181Config
 	WebRtc            WebRtcConfig
 
-	Hook   HookConfig
+	Hooks  HooksConfig
 	Record RecordConfig
 	Log    LogConfig
 	Http   HttpConfig
@@ -292,7 +293,7 @@ func SetDefaultConfig(config_ *AppConfig_) {
 
 	config_.IdleTimeout *= int64(time.Second)
 	config_.ReceiveTimeout *= int64(time.Second)
-	config_.Hook.Timeout *= int64(time.Second)
+	config_.Hooks.Timeout *= int64(time.Second)
 }
 
 func limitMin(min, value int) int {

@@ -21,14 +21,14 @@ var (
 
 func InitHookUrl() {
 	hookUrls = map[HookEvent]string{
-		HookEventPublish:        AppConfig.Hook.OnPublishUrl,
-		HookEventPublishDone:    AppConfig.Hook.OnPublishDoneUrl,
-		HookEventPlay:           AppConfig.Hook.OnPlayUrl,
-		HookEventPlayDone:       AppConfig.Hook.OnPlayDoneUrl,
-		HookEventRecord:         AppConfig.Hook.OnRecordUrl,
-		HookEventIdleTimeout:    AppConfig.Hook.OnIdleTimeoutUrl,
-		HookEventReceiveTimeout: AppConfig.Hook.OnReceiveTimeoutUrl,
-		HookEventStarted:        AppConfig.Hook.OnStartedUrl,
+		HookEventPublish:        AppConfig.Hooks.OnPublishUrl,
+		HookEventPublishDone:    AppConfig.Hooks.OnPublishDoneUrl,
+		HookEventPlay:           AppConfig.Hooks.OnPlayUrl,
+		HookEventPlayDone:       AppConfig.Hooks.OnPlayDoneUrl,
+		HookEventRecord:         AppConfig.Hooks.OnRecordUrl,
+		HookEventIdleTimeout:    AppConfig.Hooks.OnIdleTimeoutUrl,
+		HookEventReceiveTimeout: AppConfig.Hooks.OnReceiveTimeoutUrl,
+		HookEventStarted:        AppConfig.Hooks.OnStartedUrl,
 	}
 }
 
