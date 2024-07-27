@@ -2,6 +2,7 @@ package stream
 
 import "math"
 
+// JitterBuffer 只处理乱序的JitterBuffer
 type JitterBuffer struct {
 	maxSeqNum  uint16
 	minSeqNum  uint16
@@ -10,9 +11,9 @@ type JitterBuffer struct {
 	count         int
 	minStartCount int
 
+	first    bool
 	queue    []interface{}
 	onPacket func(packet interface{})
-	first    bool
 }
 
 func (j *JitterBuffer) emit() {

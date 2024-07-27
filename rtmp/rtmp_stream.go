@@ -38,14 +38,9 @@ func (t *transStream) Input(packet utils.AVPacket) error {
 	var chunkPayloadOffset int
 	var dts int64
 	var pts int64
-	chunkHeaderSize := 12
 
 	dts = packet.ConvertDts(1000)
 	pts = packet.ConvertPts(1000)
-	if dts >= 0xFFFFFF {
-		chunkHeaderSize += 4
-	}
-
 	ct := pts - dts
 
 	if utils.AVMediaTypeAudio == packet.MediaType() {
@@ -70,20 +65,32 @@ func (t *transStream) Input(packet utils.AVPacket) error {
 	}
 
 	//分配内存
-	allocate := t.mwBuffer.Allocate(chunkHeaderSize+payloadSize+((payloadSize-1)/t.chunkSize), dts, videoKey)
+	//固定type0
+	chunkHeaderSize := 12
+	//type3chunk数量
+	numChunks := (payloadSize - 1) / t.chunkSize
+	rtmpMsgSize := chunkHeaderSize + payloadSize + numChunks
+	//如果时间戳超过3字节, 每个chunk都需要多4字节的扩展时间戳
+	if dts >= 0xFFFFFF && dts <= 0xFFFFFFFF {
+		rtmpMsgSize += (1 + numChunks) * 4
+	}
 
-	//写rtmp chunk header
+	allocate := t.mwBuffer.Allocate(rtmpMsgSize, dts, videoKey)
+
+	//写chunk header
 	chunk.Length = payloadSize
 	chunk.Timestamp = uint32(dts)
 	n := chunk.ToBytes(allocate)
 
 	//写flv
 	if videoPkt {
-		n += t.muxer.WriteVideoData(allocate[chunkHeaderSize:], uint32(ct), packet.KeyFrame(), false)
+		n += t.muxer.WriteVideoData(allocate[n:], uint32(ct), packet.KeyFrame(), false)
 	} else {
-		n += t.muxer.WriteAudioData(allocate[chunkHeaderSize:], false)
+		n += t.muxer.WriteAudioData(allocate[n:], false)
 	}
+
 	n += chunk.WriteData(allocate[n:], data, t.chunkSize, chunkPayloadOffset)
+	utils.Assert(len(allocate) == n)
 
 	//合并写满了再发
 	if segment := t.mwBuffer.PeekCompletedSegment(); len(segment) > 0 {
