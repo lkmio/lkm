@@ -76,7 +76,7 @@ func (t *transStream) AddTrack(stream utils.AVStream) error {
 		return err
 	}
 
-	if stream.CodecId() == utils.AVCodecIdH264 {
+	if utils.AVMediaTypeVideo == stream.Type() {
 		data := stream.CodecParameters().AnnexBExtraData()
 		_, err = t.muxer.AddTrack(stream.Type(), stream.CodecId(), data)
 	} else {
@@ -93,7 +93,7 @@ func (t *transStream) AddSink(sink stream.Sink) error {
 	t.BaseTransStream.AddSink(sink)
 
 	if t.m3u8.Size() > 0 {
-		return sink.Input([]byte(t.m3u8.ToString()))
+		return sink.(*M3U8Sink).SendM3U8Data(&t.m3u8StringFormat)
 	}
 
 	t.m3u8Sinks[sink.Id()] = sink.(*M3U8Sink)

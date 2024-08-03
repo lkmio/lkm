@@ -56,6 +56,11 @@ func (s *M3U8Sink) RefreshPlayTime() {
 }
 
 func (s *M3U8Sink) Close() {
+	if s.playTimer != nil {
+		s.playTimer.Stop()
+		s.playTimer = nil
+	}
+
 	stream.SinkManager.Remove(s.Id_)
 	s.BaseSink.Close()
 }
