@@ -30,9 +30,10 @@ type MergeWritingBuffer interface {
 }
 
 type mwBlock struct {
-	free     bool
-	keyVideo bool
-	buffer   collections.MemoryPool
+	free      bool
+	keyVideo  bool
+	buffer    collections.MemoryPool
+	completed bool
 }
 
 type mergeWritingBuffer struct {
@@ -56,9 +57,9 @@ type mergeWritingBuffer struct {
 
 func (m *mergeWritingBuffer) createMWBlock(videoKey bool) mwBlock {
 	if videoKey {
-		return mwBlock{true, videoKey, collections.NewDirectMemoryPool(m.keyFrameBufferMaxLength)}
+		return mwBlock{true, videoKey, collections.NewDirectMemoryPool(m.keyFrameBufferMaxLength), false}
 	} else {
-		return mwBlock{true, false, collections.NewDirectMemoryPool(m.nonKeyFrameBufferMaxLength)}
+		return mwBlock{true, false, collections.NewDirectMemoryPool(m.nonKeyFrameBufferMaxLength), false}
 	}
 }
 
@@ -95,6 +96,7 @@ func (m *mergeWritingBuffer) Allocate(size int, ts int64, videoKey bool) []byte 
 		}
 
 		m.mwBlocks[m.index].free = false
+		m.mwBlocks[m.index].completed = false
 		m.mwBlocks[m.index].keyVideo = videoKey
 	}
 
@@ -139,9 +141,12 @@ func (m *mergeWritingBuffer) FlushSegment() []byte {
 	}
 
 	m.index = (m.index + 1) % capacity
+	m.mwBlocks[m.index].completed = true
+
 	m.startTS = -1
 	m.duration = 0
 	m.mwBlocks[m.index].free = true
+	m.mwBlocks[m.index].completed = false
 	return data
 }
 
@@ -183,7 +188,7 @@ func (m *mergeWritingBuffer) ReadSegmentsFromKeyFrameIndex(cb func([]byte)) {
 	}
 
 	for i := m.lastKeyFrameIndex; i < cap(m.mwBlocks); i++ {
-		if m.mwBlocks[i].buffer == nil {
+		if m.mwBlocks[i].buffer == nil || !m.mwBlocks[i].completed {
 			continue
 		}
 
@@ -210,7 +215,7 @@ func NewMergeWritingBuffer(existVideo bool) MergeWritingBuffer {
 	}
 
 	if !existVideo || !AppConfig.GOPCache {
-		blocks[0] = mwBlock{true, false, collections.NewDirectMemoryPool(1024 * 100)}
+		blocks[0] = mwBlock{true, false, collections.NewDirectMemoryPool(1024 * 100), false}
 	}
 
 	return &mergeWritingBuffer{
