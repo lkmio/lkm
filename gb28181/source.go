@@ -8,6 +8,7 @@ import (
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
 	"github.com/pion/rtp"
+	"math"
 	"net"
 )
 
@@ -55,6 +56,12 @@ type BaseGBSource struct {
 
 	ssrc      uint32
 	transport transport.ITransport
+
+	audioTimestamp         int64
+	videoTimestamp         int64
+	audioPacketCreatedTime int64
+	videoPacketCreatedTime int64
+	isSystemClock          bool //推流时间戳不正确, 是否使用系统时间.
 }
 
 func (source *BaseGBSource) InputRtp(pkt *rtp.Packet) error {
@@ -152,8 +159,68 @@ func (source *BaseGBSource) OnCompletePacket(index int, mediaType utils.AVMediaT
 		}
 	}
 
+	source.correctTimestamp(packet, dts, pts)
 	source.OnDeMuxPacket(packet)
 	return nil
+}
+
+func (source *BaseGBSource) correctTimestamp(packet utils.AVPacket, dts, pts int64) {
+	//dts和pts保持一致
+	pts = int64(math.Max(float64(dts), float64(pts)))
+	dts = pts
+	packet.SetPts(pts)
+	packet.SetDts(dts)
+
+	var lastTimestamp int64
+	var lastCreatedTime int64
+	if utils.AVMediaTypeAudio == packet.MediaType() {
+		lastTimestamp = source.audioTimestamp
+		lastCreatedTime = source.audioPacketCreatedTime
+	} else if utils.AVMediaTypeVideo == packet.MediaType() {
+		lastTimestamp = source.videoTimestamp
+		lastCreatedTime = source.videoPacketCreatedTime
+	}
+
+	//计算duration
+	var duration int64
+	if !source.isSystemClock && lastTimestamp != -1 {
+		if pts < lastTimestamp {
+			duration = 0x1FFFFFFFF - lastTimestamp + pts
+			if duration < 90000 {
+				//处理正常溢出
+				packet.SetDuration(duration)
+			} else {
+				//时间戳不正确
+				log.Sugar.Errorf("推流时间戳不正确, 使用系统时钟. ssrc:%d", source.ssrc)
+				source.isSystemClock = true
+			}
+		} else {
+			duration = pts - lastTimestamp
+		}
+
+		packet.SetDuration(duration)
+		duration = packet.Duration(90000)
+		if duration < 0 || duration < 750 {
+			log.Sugar.Errorf("推流时间戳不正确, 使用系统时钟. ssrc:%d", source.ssrc)
+			source.isSystemClock = true
+		}
+	}
+
+	//纠正时间戳
+	if source.isSystemClock && lastTimestamp != -1 {
+		duration = (packet.CreatedTime() - lastCreatedTime) * 90
+		packet.SetDts(lastTimestamp + duration)
+		packet.SetPts(lastTimestamp + duration)
+		packet.SetDuration(duration)
+	}
+
+	if utils.AVMediaTypeAudio == packet.MediaType() {
+		source.audioTimestamp = packet.Pts()
+		source.audioPacketCreatedTime = packet.CreatedTime()
+	} else if utils.AVMediaTypeVideo == packet.MediaType() {
+		source.videoTimestamp = packet.Pts()
+		source.videoPacketCreatedTime = packet.CreatedTime()
+	}
 }
 
 func (source *BaseGBSource) Close() {
@@ -195,6 +262,10 @@ func (source *BaseGBSource) PreparePublish(conn net.Conn, ssrc uint32, source_ G
 	source.SetConn(conn)
 	source.SetSSRC(ssrc)
 	source.SetState(stream.SessionStateTransferring)
+	source.audioTimestamp = -1
+	source.videoTimestamp = -1
+	source.audioPacketCreatedTime = -1
+	source.videoPacketCreatedTime = -1
 
 	if stream.AppConfig.Hooks.IsEnablePublishEvent() {
 		go func() {
