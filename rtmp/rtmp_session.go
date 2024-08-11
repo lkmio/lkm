@@ -28,7 +28,7 @@ func (s *Session) generateSourceId(app, stream_ string) string {
 	}
 }
 
-func (s *Session) OnPublish(app, stream_ string, response chan utils.HookState) {
+func (s *Session) OnPublish(app, stream_ string) utils.HookState {
 	log.Sugar.Infof("rtmp onpublish app:%s stream:%s conn:%s", app, stream_, s.conn.RemoteAddr().String())
 
 	streamName, values := stream.ParseUrl(stream_)
@@ -54,10 +54,10 @@ func (s *Session) OnPublish(app, stream_ string, response chan utils.HookState) 
 		go source.LoopEvent()
 	}
 
-	response <- state
+	return state
 }
 
-func (s *Session) OnPlay(app, stream_ string, response chan utils.HookState) {
+func (s *Session) OnPlay(app, stream_ string) utils.HookState {
 	streamName, values := stream.ParseUrl(stream_)
 
 	sourceId := s.generateSourceId(app, streamName)
@@ -73,7 +73,7 @@ func (s *Session) OnPlay(app, stream_ string, response chan utils.HookState) {
 		s.handle = sink
 	}
 
-	response <- state
+	return state
 }
 
 func (s *Session) Input(conn net.Conn, data []byte) error {
