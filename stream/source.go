@@ -2,7 +2,6 @@ package stream
 
 import (
 	"fmt"
-	"github.com/lkmio/avformat/transport"
 	"github.com/lkmio/lkm/collections"
 	"github.com/lkmio/lkm/log"
 	"net"
@@ -14,58 +13,18 @@ import (
 	"github.com/lkmio/lkm/transcode"
 )
 
-// SourceType 推流类型
-type SourceType byte
-
-// Protocol 输出的流协议
-type Protocol uint32
-
-type SourceEvent byte
-
-// SessionState 推拉流Session的状态
-// 包含握手和Hook授权阶段
-type SessionState uint32
-
-const (
-	SourceTypeRtmp  = SourceType(1)
-	SourceType28181 = SourceType(2)
-	SourceType1078  = SourceType(3)
-
-	ProtocolRtmp = Protocol(1)
-	ProtocolFlv  = Protocol(2)
-	ProtocolRtsp = Protocol(3)
-	ProtocolHls  = Protocol(4)
-	ProtocolRtc  = Protocol(5)
-
-	SourceEventPlay     = SourceEvent(1)
-	SourceEventPlayDone = SourceEvent(2)
-	SourceEventInput    = SourceEvent(3)
-	SourceEventClose    = SourceEvent(4)
-)
-
-const (
-	SessionStateCreate           = SessionState(1) //新建状态
-	SessionStateHandshaking      = SessionState(2) //握手中
-	SessionStateHandshakeFailure = SessionState(3) //握手失败
-	SessionStateHandshakeDone    = SessionState(4) //握手完成
-	SessionStateWait             = SessionState(5) //位于等待队列中
-	SessionStateTransferring     = SessionState(6) //推拉流中
-	SessionStateClosed           = SessionState(7) //关闭状态
-)
-
-// Source 父类Source负责, 除解析流以外的所有事情
+// Source 对推流源的封装, 处理除解析流以外的所有事情
 type Source interface {
-	// Id Source的唯一ID/**
-	Id() string
+	// GetID 返回SourceID
+	GetID() string
 
-	SetId(id string)
+	SetID(id string)
 
 	// Input 输入推流数据
-	//@Return bool fatal error.释放Source
 	Input(data []byte) error
 
-	// Type 推流类型
-	Type() SourceType
+	// GetType 返回推流类型
+	GetType() SourceType
 
 	SetType(sourceType SourceType)
 
@@ -76,20 +35,25 @@ type Source interface {
 	TranscodeStreams() []utils.AVStream
 
 	// AddSink 添加Sink, 在此之前请确保Sink已经握手、授权通过. 如果Source还未WriteHeader，先将Sink添加到等待队列.
-	// 匹配拉流的编码器, 创建TransStream或向存在TransStream添加Sink
-	AddSink(sink Sink) bool
+	// 匹配拉流期望的编码器, 创建TransStream或向已经存在TransStream添加Sink
+	AddSink(sink Sink)
 
-	// RemoveSink 删除Sink/**
-	RemoveSink(sink Sink) bool
+	// RemoveSink 删除Sink
+	RemoveSink(sink Sink)
 
-	AddEvent(event SourceEvent, data interface{})
+	RemoveSinkWithID(id SinkID)
 
 	SetState(state SessionState)
 
 	// Close 关闭Source
-	// 停止一切封装和转发流以及转码工作
+	// 关闭推流网络链路, 停止一切封装和转发流以及转码工作
 	// 将Sink添加到等待队列
 	Close()
+
+	DoClose()
+
+	// IsCompleted 所有推流track是否解析完毕
+	IsCompleted() bool
 
 	// FindOrCreatePacketBuffer 查找或者创建AVPacket的内存池
 	FindOrCreatePacketBuffer(index int, mediaType utils.AVMediaType) collections.MemoryPool
@@ -100,10 +64,7 @@ type Source interface {
 	// OnDeMuxStream 解析出AVStream回调
 	OnDeMuxStream(stream utils.AVStream)
 
-	// IsCompleted 是否已经WireHeader
-	IsCompleted() bool
-
-	// OnDeMuxStreamDone 所有track解析完毕, 后续的OnDeMuxStream回调不再处理
+	// OnDeMuxStreamDone 所有track解析完毕回调, 后续的OnDeMuxStream回调不再处理
 	OnDeMuxStreamDone()
 
 	// OnDeMuxPacket 解析出AvPacket回调
@@ -112,127 +73,166 @@ type Source interface {
 	// OnDeMuxDone 所有流解析完毕回调
 	OnDeMuxDone()
 
-	Init(inputCB func(data []byte) error, closeCB func(), receiveQueueSize int)
-
-	LoopEvent()
+	Init(receiveQueueSize int)
 
 	RemoteAddr() string
 
-	PrintInfo() string
-
-	// StartReceiveDataTimer 启动收流超时计时器
-	StartReceiveDataTimer()
-
-	// StartIdleTimer 启动拉流空闲计时器
-	StartIdleTimer()
+	String() string
 
 	State() SessionState
 
-	SetInputCb(func(data []byte) error)
-
+	// UrlValues 返回推流url参数
 	UrlValues() url.Values
 
+	// SetUrlValues 设置推流url参数
 	SetUrlValues(values url.Values)
+
+	// PostEvent 切换到主协程执行当前函数
+	PostEvent(cb func())
+
+	LastPacketTime() time.Time
+
+	SetLastPacketTime(time2 time.Time)
+
+	SinkCount() int
+
+	LastStreamEndTime() time.Time
+
+	SetReceiveDataTimer(timer *time.Timer)
+
+	SetIdleTimer(timer *time.Timer)
+
+	IsClosed() bool
+
+	StreamPipe() chan []byte
+
+	MainContextEvents() chan func()
+
+	CreateTime() time.Time
+
+	SetCreateTime(time time.Time)
 }
 
 type PublishSource struct {
-	Id_   string
-	Type_ SourceType
+	ID    string
+	Type  SourceType
 	state SessionState
 	Conn  net.Conn
 
-	TransDeMuxer     stream.DeMuxer            //负责从推流协议中解析出AVStream和AVPacket
-	recordSink       Sink                      //每个Source的录制流
-	recordFilePath   string                    //录制流文件路径
-	hlsStream        TransStream               //HLS传输流, 如果开启, 在@seee writeHeader 直接创建, 如果等拉流时再创建, 会进一步加大HLS延迟.
-	audioTranscoders []transcode.Transcoder    //音频解码器
-	videoTranscoders []transcode.Transcoder    //视频解码器
-	originStreams    StreamManager             //推流的音视频Streams
-	allStreams       StreamManager             //推流Streams+转码器获得的Stream
-	pktBuffers       [8]collections.MemoryPool //推流每路的AVPacket缓存, AVPacket的data从该内存池中分配. 在GOP缓存溢出时,释放池中内存.
-	gopBuffer        GOPBuffer                 //GOP缓存, 音频和视频混合使用, 以视频关键帧为界, 缓存第二个视频关键帧时, 释放前一组gop. 如果不存在视频流, 不缓存音频
+	TransDeMuxer     stream.DeMuxer            // 负责从推流协议中解析出AVStream和AVPacket
+	recordSink       Sink                      // 每个Source的录制流
+	recordFilePath   string                    // 录制流文件路径
+	hlsStream        TransStream               // HLS传输流, 如果开启, 在@see writeHeader 函数中直接创建, 如果等拉流时再创建, 会进一步加大HLS延迟.
+	audioTranscoders []transcode.Transcoder    // 音频解码器
+	videoTranscoders []transcode.Transcoder    // 视频解码器
+	originStreams    StreamManager             // 推流的音视频Streams
+	allStreams       StreamManager             // 推流Streams+转码器获得的Stream
+	pktBuffers       [8]collections.MemoryPool // 推流每路的AVPacket缓存, AVPacket的data从该内存池中分配. 在GOP缓存溢出时,释放池中内存.
+	gopBuffer        GOPBuffer                 // GOP缓存, 音频和视频混合使用, 以视频关键帧为界, 缓存第二个视频关键帧时, 释放前一组gop. 如果不存在视频流, 不缓存音频
 
-	existVideo bool //是否存在视频
-	completed  bool
-	probeTimer *time.Timer
+	closed     bool // source是否已经关闭
+	completed  bool // 所有推流track是否解析完毕, @see writeHeader 函数中赋值为true
+	existVideo bool // 是否存在视频
 
-	inputCB func(data []byte) error //子类Input回调
-	closeCB func()                  //子类Close回调
+	probeTimer       *time.Timer // track解析超时计时器, 触发时执行@see writeHeader
+	receiveDataTimer *time.Timer // 收流超时计时器
+	idleTimer        *time.Timer // 拉流空闲计时器
 
-	transStreams map[TransStreamId]TransStream //所有的输出流, 持有Sink
+	TransStreams map[TransStreamID]TransStream //所有的输出流, 持有Sink
 
-	//sink的拉流和断开拉流事件，都通过管道交给Source处理. 意味着Source内部解析流、封装流、传输流都可以做到无锁操作
-	//golang的管道是有锁的(https://github.com/golang/go/blob/d38f1d13fa413436d38d86fe86d6a146be44bb84/src/runtime/chan.go#L202), 后面使用cas队列传输事件, 并且可以做到一次读取多个事件
-	inputDataEvent        chan []byte
-	closedEvent           chan byte //发送关闭事件
-	closedConsumedEvent   chan byte //关闭事件已经被消费
-	playingEventQueue     chan Sink
-	playingDoneEventQueue chan Sink
-	probeTimoutEvent      chan bool
+	streamPipe        chan []byte // 推流数据管道
+	mainContextEvents chan func() // 切换到主协程执行函数的事件管道
 
-	lastPacketTime   time.Time
-	removeSinkTime   time.Time
-	receiveDataTimer *time.Timer
-	idleTimer        *time.Timer
-	sinkCount        int  //拉流计数
-	closed           bool //是否已经被关闭
-	urlValues        url.Values
-	timeoutTracks    []int
+	lastPacketTime    time.Time  // 最近收到推流包的时间
+	lastStreamEndTime time.Time  // 最近拉流端结束拉流的时间
+	sinkCount         int        // 拉流端计数
+	urlValues         url.Values // 推流url携带的参数
+	timeoutTracks     []int
+	createTime        time.Time // source创建时间
 }
 
-func (s *PublishSource) Id() string {
-	return s.Id_
+func (s *PublishSource) SetLastPacketTime(time2 time.Time) {
+	s.lastPacketTime = time2
 }
 
-func (s *PublishSource) SetId(id string) {
-	s.Id_ = id
+func (s *PublishSource) IsClosed() bool {
+	return s.closed
 }
 
-func (s *PublishSource) Init(inputCB func(data []byte) error, closeCB func(), receiveQueueSize int) {
-	s.inputCB = inputCB
-	s.closeCB = closeCB
+func (s *PublishSource) StreamPipe() chan []byte {
+	return s.streamPipe
+}
 
+func (s *PublishSource) MainContextEvents() chan func() {
+	return s.mainContextEvents
+}
+
+func (s *PublishSource) SetReceiveDataTimer(timer *time.Timer) {
+	s.receiveDataTimer = timer
+}
+
+func (s *PublishSource) SetIdleTimer(timer *time.Timer) {
+	s.idleTimer = timer
+}
+
+func (s *PublishSource) LastStreamEndTime() time.Time {
+	return s.lastStreamEndTime
+}
+
+func (s *PublishSource) LastPacketTime() time.Time {
+	return s.lastPacketTime
+}
+
+func (s *PublishSource) SinkCount() int {
+	return s.sinkCount
+}
+
+func (s *PublishSource) GetID() string {
+	return s.ID
+}
+
+func (s *PublishSource) SetID(id string) {
+	s.ID = id
+}
+
+func (s *PublishSource) Init(receiveQueueSize int) {
 	s.SetState(SessionStateHandshakeDone)
-	//初始化事件接收缓冲区
-	//收流和网络断开的chan都阻塞执行
-	//-2是为了保证从管道取到流, 到处理完流.整个过程安全的, 不会被覆盖
-	s.inputDataEvent = make(chan []byte, receiveQueueSize-2)
-	s.closedEvent = make(chan byte)
-	s.closedConsumedEvent = make(chan byte)
-	s.playingEventQueue = make(chan Sink, 128)
-	s.playingDoneEventQueue = make(chan Sink, 128)
-	s.probeTimoutEvent = make(chan bool)
+
+	// 初始化事件接收管道
+	// -2是为了保证从管道取到流, 到处理完流整个过程安全的, 不会被覆盖
+	s.streamPipe = make(chan []byte, receiveQueueSize-2)
+	s.mainContextEvents = make(chan func(), 128)
 }
 
 func (s *PublishSource) CreateDefaultOutStreams() {
-	if s.transStreams == nil {
-		s.transStreams = make(map[TransStreamId]TransStream, 10)
+	if s.TransStreams == nil {
+		s.TransStreams = make(map[TransStreamID]TransStream, 10)
 	}
 
-	//创建录制流
+	// 创建录制流
 	if AppConfig.Record.Enable {
-		sink, path, err := CreateRecordStream(s.Id_)
+		sink, path, err := CreateRecordStream(s.ID)
 		if err != nil {
-			log.Sugar.Errorf("创建录制sink失败 source:%s err:%s", s.Id_, err.Error())
+			log.Sugar.Errorf("创建录制sink失败 source:%s err:%s", s.ID, err.Error())
 		} else {
 			s.recordSink = sink
 			s.recordFilePath = path
 		}
 	}
 
-	//创建HLS输出流
+	// 创建HLS输出流
 	if AppConfig.Hls.Enable {
 		streams := s.OriginStreams()
 		utils.Assert(len(streams) > 0)
 
-		hlsStream, err := s.CreateTransStream(ProtocolHls, streams)
+		hlsStream, err := s.CreateTransStream(TransStreamHls, streams)
 		if err != nil {
 			panic(err)
 		}
 
 		s.dispatchGOPBuffer(hlsStream)
 		s.hlsStream = hlsStream
-		s.transStreams[GenerateTransStreamId(ProtocolHls, streams...)] = s.hlsStream
+		s.TransStreams[GenerateTransStreamID(TransStreamHls, streams...)] = s.hlsStream
 	}
 }
 
@@ -246,11 +246,11 @@ func (s *PublishSource) FindOrCreatePacketBuffer(index int, mediaType utils.AVMe
 		if utils.AVMediaTypeAudio == mediaType {
 			s.pktBuffers[index] = collections.NewRbMemoryPool(48000 * 12)
 		} else if AppConfig.GOPCache {
-			//开启GOP缓存
+			// 开启GOP缓存
 			s.pktBuffers[index] = collections.NewRbMemoryPool(AppConfig.GOPBufferSize)
 		} else {
-			//未开启GOP缓存
-			//1M缓存大小, 单帧绰绰有余
+			// 未开启GOP缓存
+			// 1M缓存大小, 单帧绰绰有余
 			s.pktBuffers[index] = collections.NewRbMemoryPool(1024 * 1000)
 		}
 	}
@@ -258,48 +258,8 @@ func (s *PublishSource) FindOrCreatePacketBuffer(index int, mediaType utils.AVMe
 	return s.pktBuffers[index]
 }
 
-func (s *PublishSource) LoopEvent() {
-	for {
-		select {
-		case data := <-s.inputDataEvent:
-			if s.closed {
-				break
-			}
-
-			if AppConfig.ReceiveTimeout > 0 {
-				s.lastPacketTime = time.Now()
-			}
-
-			if err := s.inputCB(data); err != nil {
-				log.Sugar.Errorf("处理输入流失败 释放source:%s err:%s", s.Id_, err.Error())
-				s.doClose()
-			}
-			break
-		case sink := <-s.playingEventQueue:
-			if !s.completed {
-				AddSinkToWaitingQueue(sink.SourceId(), sink)
-			} else {
-				if !s.AddSink(sink) {
-					sink.Close()
-				}
-			}
-			break
-		case sink := <-s.playingDoneEventQueue:
-			s.RemoveSink(sink)
-			break
-		case _ = <-s.closedEvent:
-			s.doClose()
-			s.closedConsumedEvent <- 1
-			return
-		case _ = <-s.probeTimoutEvent:
-			s.writeHeader()
-			break
-		}
-	}
-}
-
 func (s *PublishSource) Input(data []byte) error {
-	s.AddEvent(SourceEventInput, data)
+	s.streamPipe <- data
 	return nil
 }
 
@@ -311,20 +271,20 @@ func (s *PublishSource) TranscodeStreams() []utils.AVStream {
 	return s.allStreams.All()
 }
 
-func IsSupportMux(protocol Protocol, audioCodecId, videoCodecId utils.AVCodecID) bool {
-	if ProtocolRtmp == protocol || ProtocolFlv == protocol {
+func IsSupportMux(protocol TransStreamProtocol, audioCodecId, videoCodecId utils.AVCodecID) bool {
+	if TransStreamRtmp == protocol || TransStreamFlv == protocol {
 
 	}
 
 	return true
 }
 
-func (s *PublishSource) CreateTransStream(protocol Protocol, streams []utils.AVStream) (TransStream, error) {
-	log.Sugar.Debugf("创建%s-stream source:%s", protocol.ToString(), s.Id_)
+func (s *PublishSource) CreateTransStream(protocol TransStreamProtocol, streams []utils.AVStream) (TransStream, error) {
+	log.Sugar.Debugf("创建%s-stream source:%s", protocol.ToString(), s.ID)
 
 	transStream, err := CreateTransStream(s, protocol, streams)
 	if err != nil {
-		log.Sugar.Errorf("创建传输流失败 err:%s source:%s", err.Error(), s.Id_)
+		log.Sugar.Errorf("创建传输流失败 err:%s source:%s", err.Error(), s.ID)
 		return nil, err
 	}
 
@@ -344,7 +304,7 @@ func (s *PublishSource) dispatchGOPBuffer(transStream TransStream) {
 	})
 }
 
-func (s *PublishSource) AddSink(sink Sink) bool {
+func (s *PublishSource) doAddSink(sink Sink) bool {
 	// 暂时不考虑多路视频流，意味着只能1路视频流和多路音频流，同理originStreams和allStreams里面的Stream互斥. 同时多路音频流的Codec必须一致
 	audioCodecId, videoCodecId := sink.DesiredAudioCodecId(), sink.DesiredVideoCodecId()
 	audioStream := s.originStreams.FindStreamWithType(utils.AVMediaTypeAudio)
@@ -356,8 +316,8 @@ func (s *PublishSource) AddSink(sink Sink) bool {
 		return false
 	}
 
-	//不支持对期望编码的流封装. 降级
-	if (utils.AVCodecIdNONE != audioCodecId || utils.AVCodecIdNONE != videoCodecId) && !IsSupportMux(sink.Protocol(), audioCodecId, videoCodecId) {
+	// 不支持对期望编码的流封装. 降级
+	if (utils.AVCodecIdNONE != audioCodecId || utils.AVCodecIdNONE != videoCodecId) && !IsSupportMux(sink.GetProtocol(), audioCodecId, videoCodecId) {
 		audioCodecId = utils.AVCodecIdNONE
 		videoCodecId = utils.AVCodecIdNONE
 	}
@@ -369,12 +329,12 @@ func (s *PublishSource) AddSink(sink Sink) bool {
 		videoCodecId = videoStream.CodecId()
 	}
 
-	//创建音频转码器
+	// 创建音频转码器
 	if !disableAudio && audioCodecId != audioStream.CodecId() {
 		utils.Assert(false)
 	}
 
-	//创建视频转码器
+	// 创建视频转码器
 	if !disableVideo && videoCodecId != videoStream.CodecId() {
 		utils.Assert(false)
 	}
@@ -391,31 +351,31 @@ func (s *PublishSource) AddSink(sink Sink) bool {
 		size++
 	}
 
-	transStreamId := GenerateTransStreamId(sink.Protocol(), streams[:size]...)
-	transStream, ok := s.transStreams[transStreamId]
+	transStreamId := GenerateTransStreamID(sink.GetProtocol(), streams[:size]...)
+	transStream, ok := s.TransStreams[transStreamId]
 	if !ok {
-		if s.transStreams == nil {
-			s.transStreams = make(map[TransStreamId]TransStream, 10)
+		if s.TransStreams == nil {
+			s.TransStreams = make(map[TransStreamID]TransStream, 10)
 		}
 
 		var err error
-		transStream, err = s.CreateTransStream(sink.Protocol(), streams[:size])
+		transStream, err = s.CreateTransStream(sink.GetProtocol(), streams[:size])
 		if err != nil {
-			log.Sugar.Errorf("创建传输流失败 err:%s source:%s", err.Error(), s.Id_)
+			log.Sugar.Errorf("创建传输流失败 err: %s source: %s", err.Error(), s.ID)
 			return false
 		}
 
-		s.transStreams[transStreamId] = transStream
+		s.TransStreams[transStreamId] = transStream
 	}
 
-	sink.SetTransStreamId(transStreamId)
+	sink.SetTransStreamID(transStreamId)
 
 	{
 		sink.Lock()
 		defer sink.UnLock()
 
-		if SessionStateClosed == sink.State() {
-			log.Sugar.Warnf("AddSink失败, sink已经断开连接 %s", sink.PrintInfo())
+		if SessionStateClosed == sink.GetState() {
+			log.Sugar.Warnf("AddSink失败, sink已经断开连接 %s", sink.String())
 		} else {
 			transStream.AddSink(sink)
 		}
@@ -424,10 +384,10 @@ func (s *PublishSource) AddSink(sink Sink) bool {
 
 	if s.recordSink != sink {
 		s.sinkCount++
-		log.Sugar.Infof("sink count:%d source:%s", s.sinkCount, s.Id_)
+		log.Sugar.Infof("sink count: %d source: %s", s.sinkCount, s.ID)
 	}
 
-	//新的传输流，发送缓存的音视频帧
+	// 新建传输流，发送缓存的音视频帧
 	if !ok && AppConfig.GOPCache && s.existVideo {
 		s.dispatchGOPBuffer(transStream)
 	}
@@ -435,59 +395,84 @@ func (s *PublishSource) AddSink(sink Sink) bool {
 	return true
 }
 
-func (s *PublishSource) RemoveSink(sink Sink) bool {
-	id := sink.TransStreamId()
+func (s *PublishSource) AddSink(sink Sink) {
+	s.PostEvent(func() {
+		if !s.completed {
+			AddSinkToWaitingQueue(sink.GetSourceID(), sink)
+		} else {
+			if !s.doAddSink(sink) {
+				sink.Close()
+			}
+		}
+	})
+}
+
+func (s *PublishSource) RemoveSink(sink Sink) {
+	s.PostEvent(func() {
+		s.doRemoveSink(sink)
+	})
+}
+
+func (s *PublishSource) RemoveSinkWithID(id SinkID) {
+	s.PostEvent(func() {
+		for _, transStream := range s.TransStreams {
+			if sink, _ := transStream.RemoveSink(id); sink != nil {
+				s.doRemoveSink(sink)
+				break
+			}
+		}
+	})
+}
+
+func (s *PublishSource) doRemoveSink(sink Sink) bool {
+	id := sink.GetTransStreamID()
 	if id > 0 {
-		transStream := s.transStreams[id]
-		//如果从传输流没能删除sink, 再从等待队列删除
-		_, b := transStream.RemoveSink(sink.Id())
+		transStream := s.TransStreams[id]
+
+		// 从输出流中删除Sink
+		_, b := transStream.RemoveSink(sink.GetID())
 		if b {
 			s.sinkCount--
-			s.removeSinkTime = time.Now()
+			s.lastStreamEndTime = time.Now()
 			HookPlayDoneEvent(sink)
-			log.Sugar.Infof("sink count:%d source:%s", s.sinkCount, s.Id_)
+			log.Sugar.Infof("sink count: %d source: %s", s.sinkCount, s.ID)
 			return true
 		}
 	}
 
-	_, b := RemoveSinkFromWaitingQueue(sink.SourceId(), sink.Id())
-	return b
-}
+	// 从等待队列中删除Sink
+	_, b := RemoveSinkFromWaitingQueue(sink.GetSourceID(), sink.GetID())
 
-func (s *PublishSource) AddEvent(event SourceEvent, data interface{}) {
-	if SourceEventInput == event {
-		s.inputDataEvent <- data.([]byte)
-	} else if SourceEventPlay == event {
-		s.playingEventQueue <- data.(Sink)
-	} else if SourceEventPlayDone == event {
-		s.playingDoneEventQueue <- data.(Sink)
-	} else if SourceEventClose == event {
-		s.closedEvent <- 0
-	}
+	// 从HLS拉流队列删除
+	SinkManager.Remove(sink.GetID())
+
+	return b
 }
 
 func (s *PublishSource) SetState(state SessionState) {
 	s.state = state
 }
 
-func (s *PublishSource) doClose() {
+func (s *PublishSource) DoClose() {
 	if s.closed {
 		return
 	}
+
+	log.Sugar.Infof("关闭推流源 id: %s", s.ID)
 
 	if s.TransDeMuxer != nil {
 		s.TransDeMuxer.Close()
 		s.TransDeMuxer = nil
 	}
 
-	//清空未写完的buffer
+	// 清空未写完的buffer
 	for _, buffer := range s.pktBuffers {
 		if buffer != nil {
 			buffer.Reset()
 		}
 	}
 
-	//释放GOP缓存
+	// 释放GOP缓存
 	if s.gopBuffer != nil {
 		s.gopBuffer.Clear()
 		s.gopBuffer.Close()
@@ -510,19 +495,20 @@ func (s *PublishSource) doClose() {
 		s.recordSink.Close()
 	}
 
-	//释放解复用器
-	//释放转码器
-	//释放每路转协议流， 将所有sink添加到等待队列
-	_, err := SourceManager.Remove(s.Id_)
+	// 释放解复用器
+	// 释放转码器
+	// 释放每路转协议流， 将所有sink添加到等待队列
+	_, err := SourceManager.Remove(s.ID)
 	if err != nil {
-		log.Sugar.Errorf("删除源失败 source:%s err:%s", s.Id_, err.Error())
+		log.Sugar.Errorf("删除源失败 source:%s err:%s", s.ID, err.Error())
 	}
 
-	for _, transStream := range s.transStreams {
+	// 将所有Sink添加到等待队列
+	for _, transStream := range s.TransStreams {
 		transStream.Close()
 
 		transStream.PopAllSink(func(sink Sink) {
-			sink.SetTransStreamId(0)
+			sink.SetTransStreamID(0)
 			if s.recordSink == sink {
 				return
 			}
@@ -531,24 +517,24 @@ func (s *PublishSource) doClose() {
 				sink.Lock()
 				defer sink.UnLock()
 
-				if SessionStateClosed == sink.State() {
-					log.Sugar.Warnf("添加到sink到等待队列失败, sink已经断开连接 %s", sink.PrintInfo())
+				if SessionStateClosed == sink.GetState() {
+					log.Sugar.Warnf("添加到sink到等待队列失败, sink已经断开连接 %s", sink.String())
 				} else {
 					sink.SetState(SessionStateWait)
-					AddSinkToWaitingQueue(s.Id_, sink)
+					AddSinkToWaitingQueue(s.ID, sink)
 				}
 			}
 
-			if SessionStateClosed != sink.State() {
+			if SessionStateClosed != sink.GetState() {
 				sink.Flush()
 			}
 		})
 	}
 
 	s.closed = true
-	s.transStreams = nil
+	s.TransStreams = nil
 	go func() {
-		if s.Conn != nil && s.Conn.(*transport.Conn).IsActive() {
+		if s.Conn != nil {
 			s.Conn.Close()
 			s.Conn = nil
 		}
@@ -562,8 +548,9 @@ func (s *PublishSource) doClose() {
 }
 
 func (s *PublishSource) Close() {
-	s.AddEvent(SourceEventClose, nil)
-	<-s.closedConsumedEvent
+	s.PostEvent(func() {
+		s.DoClose()
+	})
 }
 
 func (s *PublishSource) OnDiscardPacket(packet utils.AVPacket) {
@@ -572,17 +559,19 @@ func (s *PublishSource) OnDiscardPacket(packet utils.AVPacket) {
 
 func (s *PublishSource) OnDeMuxStream(stream utils.AVStream) {
 	if s.completed {
-		log.Sugar.Warnf("添加Stream失败 Source: %s已经WriteHeader", s.Id_)
+		log.Sugar.Warnf("添加Stream失败 Source: %s已经WriteHeader", s.ID)
 		return
 	}
 
 	s.originStreams.Add(stream)
 	s.allStreams.Add(stream)
 
-	//启动探测超时计时器
+	// 启动track解析超时计时器
 	if len(s.originStreams.All()) == 1 {
 		s.probeTimer = time.AfterFunc(time.Duration(AppConfig.ProbeTimeout)*time.Millisecond, func() {
-			s.probeTimoutEvent <- true
+			s.PostEvent(func() {
+				s.writeHeader()
+			})
 		})
 	}
 
@@ -590,7 +579,7 @@ func (s *PublishSource) OnDeMuxStream(stream utils.AVStream) {
 		s.existVideo = true
 	}
 
-	//创建GOPBuffer
+	// 创建GOPBuffer
 	if AppConfig.GOPCache && s.existVideo && s.gopBuffer == nil {
 		s.gopBuffer = NewStreamBuffer()
 		//设置GOP缓存溢出回调
@@ -598,10 +587,10 @@ func (s *PublishSource) OnDeMuxStream(stream utils.AVStream) {
 	}
 }
 
-// 从DeMuxer解析完Stream后, 处理等待Sinks
+// 解析完所有track后, 做一些初始化工作
 func (s *PublishSource) writeHeader() {
 	if s.completed {
-		fmt.Printf("添加Stream失败 Source: %s已经WriteHeader", s.Id_)
+		fmt.Printf("添加Stream失败 Source: %s已经WriteHeader", s.ID)
 		return
 	}
 
@@ -611,21 +600,22 @@ func (s *PublishSource) writeHeader() {
 	}
 
 	if len(s.originStreams.All()) == 0 {
-		log.Sugar.Errorf("没有一路流, 删除source:%s", s.Id_)
-		s.doClose()
+		log.Sugar.Errorf("没有一路流, 删除source:%s", s.ID)
+		s.DoClose()
 		return
 	}
 
-	//创建录制流和HLS
+	// 创建录制流和HLS
 	s.CreateDefaultOutStreams()
 
-	sinks := PopWaitingSinks(s.Id_)
+	// 将等待队列的Sink添加到输出流队列
+	sinks := PopWaitingSinks(s.ID)
 	if s.recordSink != nil {
 		sinks = append(sinks, s.recordSink)
 	}
 
 	for _, sink := range sinks {
-		if !s.AddSink(sink) {
+		if !s.doAddSink(sink) {
 			sink.Close()
 		}
 	}
@@ -668,12 +658,12 @@ func (s *PublishSource) OnDeMuxPacket(packet utils.AVPacket) {
 		s.gopBuffer.AddPacket(packet)
 	}
 
-	//分发给各个传输流
-	for _, stream_ := range s.transStreams {
+	// 分发给各个传输流
+	for _, stream_ := range s.TransStreams {
 		stream_.Input(packet)
 	}
 
-	//未开启GOP缓存或只存在音频流, 释放掉内存
+	// 未开启GOP缓存或只存在音频流, 释放掉内存
 	if !AppConfig.GOPCache || !s.existVideo {
 		s.FindOrCreatePacketBuffer(packet.Index(), packet.MediaType()).FreeTail()
 	}
@@ -683,12 +673,12 @@ func (s *PublishSource) OnDeMuxDone() {
 
 }
 
-func (s *PublishSource) Type() SourceType {
-	return s.Type_
+func (s *PublishSource) GetType() SourceType {
+	return s.Type
 }
 
 func (s *PublishSource) SetType(sourceType SourceType) {
-	s.Type_ = sourceType
+	s.Type = sourceType
 }
 
 func (s *PublishSource) RemoteAddr() string {
@@ -699,67 +689,30 @@ func (s *PublishSource) RemoteAddr() string {
 	return s.Conn.RemoteAddr().String()
 }
 
-func (s *PublishSource) PrintInfo() string {
-	return fmt.Sprintf("id:%s type:%s conn:%s ", s.Id_, s.Type_.ToString(), s.RemoteAddr())
-}
-
-func (s *PublishSource) StartReceiveDataTimer() {
-	utils.Assert(s.receiveDataTimer == nil)
-	utils.Assert(AppConfig.ReceiveTimeout > 0)
-
-	s.lastPacketTime = time.Now()
-	s.receiveDataTimer = time.AfterFunc(time.Duration(AppConfig.ReceiveTimeout), func() {
-		dis := time.Now().Sub(s.lastPacketTime)
-
-		//如果开启Hook通知, 根据响应决定是否关闭Source
-		//如果通知失败, 或者非200应答, 释放Source
-		//如果没有开启Hook通知, 直接删除
-		if dis >= time.Duration(AppConfig.ReceiveTimeout) {
-			log.Sugar.Errorf("收流超时 source:%s", s.Id_)
-			response, state := HookReceiveTimeoutEvent(s)
-			if utils.HookStateOK != state || response == nil {
-				s.closeCB()
-				return
-			}
-		}
-
-		//对精度没要求
-		s.receiveDataTimer.Reset(time.Duration(AppConfig.ReceiveTimeout))
-	})
-}
-
-func (s *PublishSource) StartIdleTimer() {
-	utils.Assert(s.idleTimer == nil)
-	utils.Assert(AppConfig.IdleTimeout > 0)
-
-	s.removeSinkTime = time.Now()
-	s.idleTimer = time.AfterFunc(time.Duration(AppConfig.IdleTimeout), func() {
-		dis := time.Now().Sub(s.removeSinkTime)
-
-		if s.sinkCount < 1 && dis >= time.Duration(AppConfig.IdleTimeout) {
-			log.Sugar.Errorf("空闲超时 source:%s", s.Id_)
-			response, state := HookIdleTimeoutEvent(s)
-			if utils.HookStateOK != state || response == nil {
-				s.closeCB()
-				return
-			}
-		}
-
-		s.idleTimer.Reset(time.Duration(AppConfig.IdleTimeout))
-	})
+func (s *PublishSource) String() string {
+	return fmt.Sprintf("source: %s type: %s conn: %s ", s.ID, s.Type.ToString(), s.RemoteAddr())
 }
 
 func (s *PublishSource) State() SessionState {
 	return s.state
 }
 
-func (s *PublishSource) SetInputCb(cb func(data []byte) error) {
-	s.inputCB = cb
-}
-
 func (s *PublishSource) UrlValues() url.Values {
 	return s.urlValues
 }
+
 func (s *PublishSource) SetUrlValues(values url.Values) {
 	s.urlValues = values
+}
+
+func (s *PublishSource) PostEvent(cb func()) {
+	s.mainContextEvents <- cb
+}
+
+func (s *PublishSource) CreateTime() time.Time {
+	return s.createTime
+}
+
+func (s *PublishSource) SetCreateTime(time time.Time) {
+	s.createTime = time
 }

@@ -71,7 +71,7 @@ func (s *Session) OnJtPTPPacket(data []byte) {
 
 	//首包处理, hook通知
 	if s.rtpPacket == nil {
-		s.Id_ = packet.simNumber
+		s.SetID(packet.simNumber)
 		s.rtpPacket = &RtpPacket{}
 		*s.rtpPacket = packet
 
@@ -87,8 +87,8 @@ func (s *Session) OnJtPTPPacket(data []byte) {
 		}()
 	}
 
-	//完整包/最后一个分包, 创建AVPacket
-	//参考时间戳, 遇到不同的时间戳, 处理前一包. 分包标记可能不靠谱
+	// 完整包/最后一个分包, 创建AVPacket
+	// 参考时间戳, 遇到不同的时间戳, 处理前一包. 分包标记可能不靠谱
 	if s.rtpPacket.ts != packet.ts || s.rtpPacket.pt != packet.pt {
 		if s.rtpPacket.packetType == AudioFrameMark && s.audioBuffer != nil {
 			if err := s.processAudioPacket(s.rtpPacket.pt, s.rtpPacket.packetType, s.rtpPacket.ts, s.audioBuffer.Fetch(), s.audioIndex); err != nil {
@@ -153,7 +153,7 @@ func (s *Session) Input(data []byte) error {
 }
 
 func (s *Session) Close() {
-	log.Sugar.Infof("1078推流结束 phone number:%s %s", s.phone, s.PublishSource.PrintInfo())
+	log.Sugar.Infof("1078推流结束 phone number:%s %s", s.phone, s.PublishSource.String())
 
 	if s.audioBuffer != nil {
 		s.audioBuffer.Clear()
@@ -301,15 +301,15 @@ func read1078RTPPacket(data []byte) (RtpPacket, error) {
 func NewSession(conn net.Conn) *Session {
 	session := Session{
 		PublishSource: stream.PublishSource{
-			Conn:  conn,
-			Type_: stream.SourceType1078,
+			Conn: conn,
+			Type: stream.SourceType1078,
 		},
 	}
 	delimiter := [4]byte{0x30, 0x31, 0x63, 0x64}
 	session.decoder = transport.NewDelimiterFrameDecoder(1024*1024*2, delimiter[:], session.OnJtPTPPacket)
 	session.receiveBuffer = stream.NewTCPReceiveBuffer()
 
-	session.Init(session.Input, session.Close, stream.ReceiveBufferTCPBlockCount)
-	go session.LoopEvent()
+	session.Init(stream.ReceiveBufferTCPBlockCount)
+	go stream.LoopEvent(&session)
 	return &session
 }

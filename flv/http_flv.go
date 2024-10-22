@@ -216,6 +216,6 @@ func NewHttpTransStream() stream.TransStream {
 	}
 }
 
-func TransStreamFactory(source stream.Source, protocol stream.Protocol, streams []utils.AVStream) (stream.TransStream, error) {
+func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtocol, streams []utils.AVStream) (stream.TransStream, error) {
 	return NewHttpTransStream(), nil
 }

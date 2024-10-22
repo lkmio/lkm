@@ -191,6 +191,6 @@ func NewTransStream(chunkSize int) stream.TransStream {
 	return &transStream{chunkSize: chunkSize}
 }
 
-func TransStreamFactory(source stream.Source, protocol stream.Protocol, streams []utils.AVStream) (stream.TransStream, error) {
+func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtocol, streams []utils.AVStream) (stream.TransStream, error) {
 	return NewTransStream(librtmp.ChunkSize), nil
 }

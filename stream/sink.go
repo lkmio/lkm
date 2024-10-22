@@ -1,7 +1,6 @@
 package stream
 
 import (
-	"encoding/binary"
 	"fmt"
 	"github.com/lkmio/avformat/utils"
 	"net"
@@ -9,32 +8,33 @@ import (
 	"sync"
 )
 
-type SinkId interface{}
-
+// Sink 对拉流端的封装
 type Sink interface {
-	Id() SinkId
+	GetID() SinkID
+
+	SetID(sink SinkID)
+
+	GetSourceID() string
 
 	Input(data []byte) error
 
 	SendHeader(data []byte) error
 
-	SourceId() string
+	GetTransStreamID() TransStreamID
 
-	TransStreamId() TransStreamId
+	SetTransStreamID(id TransStreamID)
 
-	SetTransStreamId(id TransStreamId)
+	GetProtocol() TransStreamProtocol
 
-	Protocol() Protocol
-
-	// State 获取Sink状态, 调用前外部必须手动加锁
-	State() SessionState
+	// GetState 获取Sink状态, 调用前外部必须手动加锁
+	GetState() SessionState
 
 	// SetState 设置Sink状态, 调用前外部必须手动加锁
 	SetState(state SessionState)
 
 	EnableVideo() bool
 
-	// SetEnableVideo 允许客户端只拉取音频流
+	// SetEnableVideo 设置是否拉取视频流, 允许客户端只拉取音频流
 	SetEnableVideo(enable bool)
 
 	// DesiredAudioCodecId 允许客户端拉取指定的音频流
@@ -46,13 +46,13 @@ type Sink interface {
 	// Close 关闭释放Sink, 从传输流或等待队列中删除sink
 	Close()
 
-	PrintInfo() string
+	String() string
 
 	RemoteAddr() string
 
 	// Lock Sink请求拉流->Source推流->Sink断开整个阶段, 是无锁线程安全
-	//如果Sink在等待队列-Sink断开, 这个过程是非线程安全的
-	//所以Source在AddSink时, SessionStateWait状态时, 需要加锁保护.
+	// 如果Sink在等待队列-Sink断开, 这个过程是非线程安全的
+	// 所以Source在AddSink时, SessionStateWait状态时, 需要加锁保护.
 	Lock()
 
 	UnLock()
@@ -68,53 +68,30 @@ type Sink interface {
 	GetConn() net.Conn
 }
 
-// GenerateSinkId 根据网络地址生成SinkId IPV4使用一个uint64, IPV6使用String
-func GenerateSinkId(addr net.Addr) SinkId {
-	network := addr.Network()
-	if "tcp" == network {
-		to4 := addr.(*net.TCPAddr).IP.To4()
-		if to4 == nil {
-			to4 = make([]byte, 4)
-		}
-		id := uint64(binary.BigEndian.Uint32(to4))
-		id <<= 32
-		id |= uint64(addr.(*net.TCPAddr).Port << 16)
-
-		return id
-	} else if "udp" == network {
-		id := uint64(binary.BigEndian.Uint32(addr.(*net.UDPAddr).IP.To4()))
-		id <<= 32
-		id |= uint64(addr.(*net.UDPAddr).Port << 16)
-
-		return id
-	}
-
-	return addr.String()
-}
-
 type BaseSink struct {
-	Id_            SinkId
-	SourceId_      string
-	Protocol_      Protocol
-	State_         SessionState
-	TransStreamId_ TransStreamId
-	disableVideo   bool
+	ID            SinkID
+	SourceID      string
+	Protocol      TransStreamProtocol
+	State         SessionState
+	TransStreamID TransStreamID
+	disableVideo  bool
 
-	lock sync.RWMutex
-
-	//HasSentKeyVideo 是否已经发送视频关键帧
-	//未开启GOP缓存的情况下，为避免播放花屏，发送的首个视频帧必须为关键帧
-	HasSentKeyVideo bool
+	lock            sync.RWMutex
+	HasSentKeyVideo bool // 是否已经发送视频关键帧，未开启GOP缓存的情况下，为避免播放花屏，发送的首个视频帧必须为关键帧
 
 	DesiredAudioCodecId_ utils.AVCodecID
 	DesiredVideoCodecId_ utils.AVCodecID
 
 	Conn      net.Conn
-	urlValues url.Values
+	urlValues url.Values // 拉流时携带的Url参数
 }
 
-func (s *BaseSink) Id() SinkId {
-	return s.Id_
+func (s *BaseSink) GetID() SinkID {
+	return s.ID
+}
+
+func (s *BaseSink) SetID(id SinkID) {
+	s.ID = id
 }
 
 func (s *BaseSink) Input(data []byte) error {
@@ -131,20 +108,20 @@ func (s *BaseSink) SendHeader(data []byte) error {
 	return s.Input(data)
 }
 
-func (s *BaseSink) SourceId() string {
-	return s.SourceId_
+func (s *BaseSink) GetSourceID() string {
+	return s.SourceID
 }
 
-func (s *BaseSink) TransStreamId() TransStreamId {
-	return s.TransStreamId_
+func (s *BaseSink) GetTransStreamID() TransStreamID {
+	return s.TransStreamID
 }
 
-func (s *BaseSink) SetTransStreamId(id TransStreamId) {
-	s.TransStreamId_ = id
+func (s *BaseSink) SetTransStreamID(id TransStreamID) {
+	s.TransStreamID = id
 }
 
-func (s *BaseSink) Protocol() Protocol {
-	return s.Protocol_
+func (s *BaseSink) GetProtocol() TransStreamProtocol {
+	return s.Protocol
 }
 
 func (s *BaseSink) Lock() {
@@ -155,16 +132,16 @@ func (s *BaseSink) UnLock() {
 	s.lock.Unlock()
 }
 
-func (s *BaseSink) State() SessionState {
+func (s *BaseSink) GetState() SessionState {
 	utils.Assert(!s.lock.TryLock())
 
-	return s.State_
+	return s.State
 }
 
 func (s *BaseSink) SetState(state SessionState) {
 	utils.Assert(!s.lock.TryLock())
 
-	s.State_ = state
+	s.State = state
 }
 
 func (s *BaseSink) EnableVideo() bool {
@@ -190,7 +167,7 @@ func (s *BaseSink) DesiredVideoCodecId() utils.AVCodecID {
 // 拉流断开连接,不需要考虑线程安全
 // 踢流走source管道删除,并且关闭Conn
 func (s *BaseSink) Close() {
-	if SessionStateClosed == s.State_ {
+	if SessionStateClosed == s.State {
 		return
 	}
 
@@ -199,35 +176,37 @@ func (s *BaseSink) Close() {
 		s.Conn = nil
 	}
 
-	//还没有添加到任何队列, 不做任何处理
-	if s.State_ < SessionStateWait {
+	// Sink未添加到任何队列, 不做处理
+	if s.State < SessionStateWait {
 		return
 	}
 
+	// 更新Sink状态
 	var state SessionState
 	{
 		s.Lock()
 		defer s.UnLock()
-		if s.State_ == SessionStateClosed {
+		if s.State == SessionStateClosed {
 			return
 		}
 
-		state = s.State_
-		s.State_ = SessionStateClosed
+		state = s.State
+		s.State = SessionStateClosed
 	}
 
 	if state == SessionStateTransferring {
-		source := SourceManager.Find(s.SourceId_)
-		source.AddEvent(SourceEventPlayDone, s)
+		// 从Source中删除Sink
+		source := SourceManager.Find(s.SourceID)
+		source.RemoveSink(s)
 	} else if state == SessionStateWait {
-		RemoveSinkFromWaitingQueue(s.SourceId_, s.Id_)
-		//拉流结束事件, 在等待队列直接发送通知, 在拉流由Source负责发送.
+		// 从等待队列中删除Sink
+		RemoveSinkFromWaitingQueue(s.SourceID, s.ID)
 		go HookPlayDoneEvent(s)
 	}
 }
 
-func (s *BaseSink) PrintInfo() string {
-	return fmt.Sprintf("%s-%v source:%s", s.Protocol().ToString(), s.Id_, s.SourceId_)
+func (s *BaseSink) String() string {
+	return fmt.Sprintf("%s-%v source:%s", s.GetProtocol().ToString(), s.ID, s.SourceID)
 }
 
 func (s *BaseSink) RemoteAddr() string {
@@ -251,6 +230,7 @@ func (s *BaseSink) Start() {
 }
 
 func (s *BaseSink) Flush() {
+
 }
 
 func (s *BaseSink) GetConn() net.Conn {

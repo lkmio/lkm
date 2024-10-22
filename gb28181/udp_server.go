@@ -51,7 +51,8 @@ func (U *UDPServer) OnPacket(conn net.Conn, data []byte) []byte {
 		source.PreparePublish(conn, packet.SSRC, source)
 	}
 
-	source.InputRtp(&packet)
+	packet.Raw = data
+	source.(*UDPSource).InputRtpPacket(&packet)
 	return nil
 }
 

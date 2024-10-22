@@ -7,7 +7,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/flv"
-	"github.com/lkmio/lkm/gb28181"
 	"github.com/lkmio/lkm/hls"
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/rtc"
@@ -17,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -41,15 +41,34 @@ func init() {
 	}
 }
 
-func withCheckParams(f func(sourceId string, w http.ResponseWriter, req *http.Request), suffix string) func(http.ResponseWriter, *http.Request) {
+func filterSourceID(f func(sourceId string, w http.ResponseWriter, req *http.Request), suffix string) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, req *http.Request) {
 		source, err := stream.Path2SourceId(req.URL.Path, suffix)
 		if err != nil {
+			log.Sugar.Errorf("拉流失败 解析流id发生err: %s path: %s", err.Error(), req.URL.Path)
 			httpResponse(w, http.StatusBadRequest, err.Error())
 			return
 		}
 
 		f(source, w, req)
+	}
+}
+
+type IDS struct {
+	// 内部SinkID可能是uint64或者string类型, 但外部传参均使用string类型，程序内部自行兼容ipv6.
+	Sink   string `json:"sink"`
+	Source string `json:"source"`
+}
+
+func filterRequestBodyParams[T any](f func(params T, w http.ResponseWriter, req *http.Request), params interface{}) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, req *http.Request) {
+		if err := HttpDecodeJSONBody(w, req, params); err != nil {
+			log.Sugar.Errorf("处理http请求失败 err: %s path: %s", err.Error(), req.URL.Path)
+			httpResponse2(w, err)
+			return
+		}
+
+		f(params.(T), w, req)
 	}
 }
 
@@ -61,20 +80,27 @@ func startApiServer(addr string) {
 	  http://host:port/xxx_0.ts
 	  ws://host:port/xxx.flv
 	*/
-	//{source}.flv和/{source}/{stream}.flv意味着, 推流id(路径)只能一层
-	apiServer.router.HandleFunc("/{source}.flv", withCheckParams(apiServer.onFlv, ".flv"))
-	apiServer.router.HandleFunc("/{source}/{stream}.flv", withCheckParams(apiServer.onFlv, ".flv"))
-	apiServer.router.HandleFunc("/{source}.m3u8", withCheckParams(apiServer.onHLS, ".m3u8"))
-	apiServer.router.HandleFunc("/{source}/{stream}.m3u8", withCheckParams(apiServer.onHLS, ".m3u8"))
-	apiServer.router.HandleFunc("/{source}.ts", withCheckParams(apiServer.onTS, ".ts"))
-	apiServer.router.HandleFunc("/{source}/{stream}.ts", withCheckParams(apiServer.onTS, ".ts"))
-	apiServer.router.HandleFunc("/{source}.rtc", withCheckParams(apiServer.onRtc, ".rtc"))
-	apiServer.router.HandleFunc("/{source}/{stream}.rtc", withCheckParams(apiServer.onRtc, ".rtc"))
+	// {source}.flv和/{source}/{stream}.flv意味着, 推流id(路径)只能嵌套一层
+	apiServer.router.HandleFunc("/{source}.flv", filterSourceID(apiServer.onFlv, ".flv"))
+	apiServer.router.HandleFunc("/{source}/{stream}.flv", filterSourceID(apiServer.onFlv, ".flv"))
+	apiServer.router.HandleFunc("/{source}.m3u8", filterSourceID(apiServer.onHLS, ".m3u8"))
+	apiServer.router.HandleFunc("/{source}/{stream}.m3u8", filterSourceID(apiServer.onHLS, ".m3u8"))
+	apiServer.router.HandleFunc("/{source}.ts", filterSourceID(apiServer.onTS, ".ts"))
+	apiServer.router.HandleFunc("/{source}/{stream}.ts", filterSourceID(apiServer.onTS, ".ts"))
+	apiServer.router.HandleFunc("/{source}.rtc", filterSourceID(apiServer.onRtc, ".rtc"))
+	apiServer.router.HandleFunc("/{source}/{stream}.rtc", filterSourceID(apiServer.onRtc, ".rtc"))
 
-	apiServer.router.HandleFunc("/api/v1/gb28181/source/create", apiServer.createGBSource)
-	//TCP主动,设置连接地址
-	apiServer.router.HandleFunc("/api/v1/gb28181/source/connect", apiServer.connectGBSource)
-	apiServer.router.HandleFunc("/api/v1/gb28181/source/close", apiServer.closeGBSource)
+	apiServer.router.HandleFunc("/api/v1/source/list", apiServer.OnSourceList)                                    // 查询所有推流源
+	apiServer.router.HandleFunc("/api/v1/source/close", filterRequestBodyParams(apiServer.OnSourceClose, &IDS{})) // 关闭推流源
+	apiServer.router.HandleFunc("/api/v1/sink/list", filterRequestBodyParams(apiServer.OnSinkList, &IDS{}))       // 查询某个推流源下，所有的拉流端列表
+	apiServer.router.HandleFunc("/api/v1/sink/close", filterRequestBodyParams(apiServer.OnSinkClose, &IDS{}))     // 关闭拉流端
+
+	apiServer.router.HandleFunc("/api/v1/streams/statistics", nil) // 统计所有推拉流
+
+	apiServer.router.HandleFunc("/api/v1/gb28181/forward", filterRequestBodyParams(apiServer.OnGBSourceForward, &GBForwardParams{}))     // 设置级联转发目标，停止级联调用sink/close接口，级联断开会走on_play_done事件通知
+	apiServer.router.HandleFunc("/api/v1/gb28181/source/create", filterRequestBodyParams(apiServer.OnGBSourceCreate, &GBSourceParams{})) // 创建国标推流源
+	apiServer.router.HandleFunc("/api/v1/gb28181/source/connect", filterRequestBodyParams(apiServer.OnGBSourceConnect, &GBConnect{}))    // 为国标TCP主动推流，设置连接地址
+
 	apiServer.router.HandleFunc("/api/v1/gc/force", func(writer http.ResponseWriter, request *http.Request) {
 		runtime.GC()
 		writer.WriteHeader(http.StatusOK)
@@ -100,173 +126,17 @@ func startApiServer(addr string) {
 	}
 }
 
-func (api *ApiServer) createGBSource(w http.ResponseWriter, r *http.Request) {
-	//请求参数
-	v := &struct {
-		Source string `json:"source"` //SourceId
-		Setup  string `json:"setup"`  //active/passive
-		SSRC   uint32 `json:"ssrc,omitempty"`
-	}{}
-
-	//返回监听的端口
-	response := &struct {
-		IP   string `json:"ip"`
-		Port int    `json:"port,omitempty"`
-	}{}
-
-	var err error
-	defer func() {
-		if err != nil {
-			log.Sugar.Errorf(err.Error())
-			httpResponse2(w, err)
-		}
-	}()
-
-	if err = HttpDecodeJSONBody(w, r, v); err != nil {
-		return
-	}
-
-	log.Sugar.Infof("gb create:%v", v)
-
-	source := stream.SourceManager.Find(v.Source)
-	if source != nil {
-		err = &MalformedRequest{Code: http.StatusBadRequest, Msg: fmt.Sprintf("创建GB28181 Source失败 %s 已经存在", v.Source)}
-		return
-	}
-
-	tcp := true
-	var active bool
-	if v.Setup == "passive" {
-	} else if v.Setup == "active" {
-		active = true
-	} else {
-		tcp = false
-		//udp收流
-	}
-
-	if tcp && active {
-		if !stream.AppConfig.GB28181.IsMultiPort() {
-			err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "创建GB28181 Source失败, 单端口模式下不能主动拉流"}
-		} else if !tcp {
-			err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "创建GB28181 Source失败, UDP不能主动拉流"}
-		} else if !stream.AppConfig.GB28181.IsEnableTCP() {
-			err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "创建GB28181 Source失败, 未开启TCP, UDP不能主动拉流"}
-		}
-
-		if err != nil {
-			return
-		}
-	}
-
-	_, port, err := gb28181.NewGBSource(v.Source, v.SSRC, tcp, active)
-	if err != nil {
-		err = &MalformedRequest{Code: http.StatusInternalServerError, Msg: fmt.Sprintf("创建GB28181 Source失败 err:%s", err.Error())}
-		return
-	}
-
-	response.IP = stream.AppConfig.PublicIP
-	response.Port = port
-	httpResponseOk(w, response)
-}
-
-func (api *ApiServer) connectGBSource(w http.ResponseWriter, r *http.Request) {
-	//请求参数
-	v := &struct {
-		Source     string `json:"source"` //SourceId
-		RemoteAddr string `json:"remote_addr"`
-	}{}
-
-	var err error
-	defer func() {
-		if err != nil {
-			log.Sugar.Errorf(err.Error())
-			httpResponse2(w, err)
-		}
-	}()
-
-	if err = HttpDecodeJSONBody(w, r, v); err != nil {
-		return
-	}
-
-	log.Sugar.Infof("gb connect:%v", v)
-
-	source := stream.SourceManager.Find(v.Source)
-	if source == nil {
-		err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "gb28181 source 不存在"}
-		return
-	}
-
-	activeSource, ok := source.(*gb28181.ActiveSource)
-	if !ok {
-		err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "gbsource 不能转为active source"}
-		return
-	}
-
-	addr, err := net.ResolveTCPAddr("tcp", v.RemoteAddr)
-	if err != nil {
-		err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "解析连接地址失败"}
-		return
-	}
-
-	err = activeSource.Connect(addr)
-	if err != nil {
-		err = &MalformedRequest{Code: http.StatusBadRequest, Msg: fmt.Sprintf("连接Server失败 err:%s", err.Error())}
-		return
-	}
-
-	httpResponseOk(w, nil)
-}
-
-func (api *ApiServer) closeGBSource(w http.ResponseWriter, r *http.Request) {
-	//请求参数
-	v := &struct {
-		Source string `json:"source"` //SourceId
-	}{}
-
-	var err error
-	defer func() {
-		if err != nil {
-			log.Sugar.Errorf(err.Error())
-			httpResponse2(w, err)
-		}
-	}()
-
-	if err = HttpDecodeJSONBody(w, r, v); err != nil {
-		httpResponse2(w, err)
-		return
-	}
-
-	log.Sugar.Infof("gb close:%v", v)
-
-	source := stream.SourceManager.Find(v.Source)
-	if source == nil {
-		err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "gb28181 source 不存在"}
-		return
-	}
-
-	source.Close()
-	httpResponseOk(w, nil)
-}
-
-func (api *ApiServer) generateSinkId(remoteAddr string) stream.SinkId {
+func (api *ApiServer) generateSinkId(remoteAddr string) stream.SinkID {
 	tcpAddr, err := net.ResolveTCPAddr("tcp", remoteAddr)
 	if err != nil {
 		panic(err)
 	}
 
-	return stream.GenerateSinkId(tcpAddr)
-}
-
-func (api *ApiServer) generateSourceId(remoteAddr string) stream.SinkId {
-	tcpAddr, err := net.ResolveTCPAddr("tcp", remoteAddr)
-	if err != nil {
-		panic(err)
-	}
-
-	return stream.GenerateSinkId(tcpAddr)
+	return stream.NetAddr2SinkId(tcpAddr)
 }
 
 func (api *ApiServer) onFlv(sourceId string, w http.ResponseWriter, r *http.Request) {
+	// 区分ws请求
 	ws := true
 	if !("upgrade" == strings.ToLower(r.Header.Get("Connection"))) {
 		ws = false
@@ -282,6 +152,7 @@ func (api *ApiServer) onFlv(sourceId string, w http.ResponseWriter, r *http.Requ
 		apiServer.onHttpFLV(sourceId, w, r)
 	}
 }
+
 func (api *ApiServer) onWSFlv(sourceId string, w http.ResponseWriter, r *http.Request) {
 	conn, err := api.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -292,11 +163,11 @@ func (api *ApiServer) onWSFlv(sourceId string, w http.ResponseWriter, r *http.Re
 
 	sink := flv.NewFLVSink(api.generateSinkId(r.RemoteAddr), sourceId, flv.NewWSConn(conn))
 	sink.SetUrlValues(r.URL.Query())
-	log.Sugar.Infof("ws-flv 连接 sink:%s", sink.PrintInfo())
+	log.Sugar.Infof("ws-flv 连接 sink:%s", sink.String())
 
 	_, state := stream.PreparePlaySink(sink)
 	if utils.HookStateOK != state {
-		log.Sugar.Warnf("ws-flv 播放失败 sink:%s", sink.PrintInfo())
+		log.Sugar.Warnf("ws-flv 播放失败 sink:%s", sink.String())
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
@@ -305,7 +176,7 @@ func (api *ApiServer) onWSFlv(sourceId string, w http.ResponseWriter, r *http.Re
 	bytes := make([]byte, 64)
 	for {
 		if _, err := netConn.Read(bytes); err != nil {
-			log.Sugar.Infof("ws-flv 断开连接 sink:%s", sink.PrintInfo())
+			log.Sugar.Infof("ws-flv 断开连接 sink:%s", sink.String())
 			sink.Close()
 			break
 		}
@@ -332,11 +203,11 @@ func (api *ApiServer) onHttpFLV(sourceId string, w http.ResponseWriter, r *http.
 
 	sink := flv.NewFLVSink(api.generateSinkId(r.RemoteAddr), sourceId, conn)
 	sink.SetUrlValues(r.URL.Query())
-	log.Sugar.Infof("http-flv 连接 sink:%s", sink.PrintInfo())
+	log.Sugar.Infof("http-flv 连接 sink:%s", sink.String())
 
 	_, state := stream.PreparePlaySink(sink)
 	if utils.HookStateOK != state {
-		log.Sugar.Warnf("http-flv 播放失败 sink:%s", sink.PrintInfo())
+		log.Sugar.Warnf("http-flv 播放失败 sink:%s", sink.String())
 
 		w.WriteHeader(http.StatusForbidden)
 		return
@@ -345,7 +216,7 @@ func (api *ApiServer) onHttpFLV(sourceId string, w http.ResponseWriter, r *http.
 	bytes := make([]byte, 64)
 	for {
 		if _, err := conn.Read(bytes); err != nil {
-			log.Sugar.Infof("http-flv 断开连接 sink:%s", sink.PrintInfo())
+			log.Sugar.Infof("http-flv 断开连接 sink:%s", sink.String())
 			sink.Close()
 			break
 		}
@@ -362,7 +233,7 @@ func (api *ApiServer) onTS(source string, w http.ResponseWriter, r *http.Request
 	sid := r.URL.Query().Get(hls.SessionIdKey)
 	var sink stream.Sink
 	if sid != "" {
-		sink = stream.SinkManager.Find(stream.SinkId(sid))
+		sink = stream.SinkManager.Find(stream.SinkID(sid))
 	}
 	if sink == nil {
 		log.Sugar.Errorf("hls session with id '%s' has expired.", sid)
@@ -377,7 +248,7 @@ func (api *ApiServer) onTS(source string, w http.ResponseWriter, r *http.Request
 	}
 
 	seq := source[index+1:]
-	tsPath := stream.AppConfig.Hls.TSPath(sink.SourceId(), seq)
+	tsPath := stream.AppConfig.Hls.TSPath(sink.GetSourceID(), seq)
 	if _, err := os.Stat(tsPath); err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		return
@@ -430,7 +301,7 @@ func (api *ApiServer) onHLS(sourceId string, w http.ResponseWriter, r *http.Requ
 	sink.SetUrlValues(r.URL.Query())
 	_, state := stream.PreparePlaySink(sink)
 	if utils.HookStateOK != state {
-		log.Sugar.Warnf("m3u8 请求失败 sink:%s", sink.PrintInfo())
+		log.Sugar.Warnf("m3u8 请求失败 sink:%s", sink.String())
 
 		w.WriteHeader(http.StatusForbidden)
 		return
@@ -488,15 +359,84 @@ func (api *ApiServer) onRtc(sourceId string, w http.ResponseWriter, r *http.Requ
 	})
 
 	sink.SetUrlValues(r.URL.Query())
-	log.Sugar.Infof("rtc 请求 sink:%s sdp:%v", sink.PrintInfo(), v.SDP)
+	log.Sugar.Infof("rtc 请求 sink:%s sdp:%v", sink.String(), v.SDP)
 
 	_, state := stream.PreparePlaySink(sink)
 	if utils.HookStateOK != state {
-		log.Sugar.Warnf("rtc 播放失败 sink:%s", sink.PrintInfo())
+		log.Sugar.Warnf("rtc 播放失败 sink:%s", sink.String())
 
 		w.WriteHeader(http.StatusForbidden)
 		group.Done()
 	}
 
 	group.Wait()
+}
+
+func (api *ApiServer) OnSourceList(w http.ResponseWriter, r *http.Request) {
+	sources := stream.SourceManager.All()
+
+	type SourceDetails struct {
+		ID        string    `json:"id,omitempty"`
+		Protocol  string    `json:"protocol"`   // 推流协议
+		Time      time.Time `json:"time"`       // 推流时间
+		SinkCount int       `json:"sink_count"` // 播放端计数
+		Bitrate   string    `json:"bitrate"`    // 码率统计
+		Tracks    []string  `json:"tracks"`     // 每路流编码器ID
+	}
+
+	var details []SourceDetails
+	for _, source := range sources {
+		var tracks []string
+		streams := source.OriginStreams()
+		for _, avStream := range streams {
+			tracks = append(tracks, avStream.CodecId().String())
+		}
+
+		details = append(details, SourceDetails{
+			ID:        source.GetID(),
+			Protocol:  source.GetType().ToString(),
+			Time:      source.CreateTime(),
+			SinkCount: source.SinkCount(),
+			Bitrate:   "", // 后续开发
+			Tracks:    tracks,
+		})
+	}
+
+	httpResponseOK(w, details)
+}
+
+func (api *ApiServer) OnSinkList(v *IDS, w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (api *ApiServer) OnSourceClose(v *IDS, w http.ResponseWriter, r *http.Request) {
+	log.Sugar.Infof("close source: %v", v)
+
+	if source := stream.SourceManager.Find(v.Source); source != nil {
+		source.Close()
+	} else {
+		log.Sugar.Warnf("Source with ID %s does not exist.", v.Source)
+	}
+
+	httpResponseOK(w, nil)
+}
+
+func (api *ApiServer) OnSinkClose(v *IDS, w http.ResponseWriter, r *http.Request) {
+	log.Sugar.Infof("close sink: %v", v)
+
+	var sinkId stream.SinkID
+	i, err := strconv.ParseUint(v.Sink, 10, 64)
+	if err != nil {
+		sinkId = stream.SinkID(v.Sink)
+	} else {
+		sinkId = stream.SinkID(i)
+	}
+
+	if source := stream.SourceManager.Find(v.Source); source != nil {
+		source.RemoveSinkWithID(sinkId)
+	} else {
+		log.Sugar.Warnf("Source with ID %s does not exist.", v.Source)
+	}
+
+	httpResponseOK(w, nil)
 }

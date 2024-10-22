@@ -109,10 +109,10 @@ func (t *transStream) AddSink(sink_ stream.Sink) error {
 	<-complete
 	connection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		rtcSink.state = state
-		log.Sugar.Infof("ice state:%v sink:%d source:%s", state.String(), rtcSink.Id_, rtcSink.SourceId_)
+		log.Sugar.Infof("ice state:%v sink:%d source:%s", state.String(), rtcSink.GetID(), rtcSink.SourceID)
 
 		if state > webrtc.ICEConnectionStateDisconnected {
-			log.Sugar.Errorf("webrtc peer断开连接 sink:%v source:%s", rtcSink.Id_, rtcSink.SourceId_)
+			log.Sugar.Errorf("webrtc peer断开连接 sink:%v source:%s", rtcSink.GetID(), rtcSink.SourceID)
 			rtcSink.Close()
 		}
 	})
@@ -163,6 +163,6 @@ func InitConfig() {
 	webrtcApi = webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithInterceptorRegistry(i), webrtc.WithSettingEngine(setting))
 }
 
-func TransStreamFactory(source stream.Source, protocol stream.Protocol, streams []utils.AVStream) (stream.TransStream, error) {
+func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtocol, streams []utils.AVStream) (stream.TransStream, error) {
 	return NewTransStream(), nil
 }

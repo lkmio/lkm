@@ -12,7 +12,7 @@ import (
 
 // 每个通知事件都需要携带的字段
 type eventInfo struct {
-	Stream     string `json:"stream"`      //stream id
+	Stream     string `json:"stream"`      //stream GetID
 	Protocol   string `json:"protocol"`    //推拉流协议
 	RemoteAddr string `json:"remote_addr"` //peer地址
 }
@@ -27,7 +27,7 @@ func responseBodyToString(resp *http.Response) string {
 	return string(bodyBytes)
 }
 
-func sendHookEvent(url string, body []byte) (*http.Response, error) {
+func SendHookEvent(url string, body []byte) (*http.Response, error) {
 	client := &http.Client{
 		Timeout: time.Duration(AppConfig.Hooks.Timeout),
 	}
@@ -56,7 +56,7 @@ func Hook(event HookEvent, params string, body interface{}) (*http.Response, err
 	}
 
 	log.Sugar.Infof("sent a hook event for %s. url: %s body: %s", event.ToString(), url, bytes)
-	response, err := sendHookEvent(url, bytes)
+	response, err := SendHookEvent(url, bytes)
 	if err != nil {
 		log.Sugar.Errorf("failed to %s the hook event. err: %s", event.ToString(), err.Error())
 	} else {
@@ -71,11 +71,11 @@ func Hook(event HookEvent, params string, body interface{}) (*http.Response, err
 }
 
 func NewHookPlayEventInfo(sink Sink) eventInfo {
-	return eventInfo{Stream: sink.SourceId(), Protocol: sink.Protocol().ToString(), RemoteAddr: sink.PrintInfo()}
+	return eventInfo{Stream: sink.GetSourceID(), Protocol: sink.GetProtocol().ToString(), RemoteAddr: sink.String()}
 }
 
 func NewHookPublishEventInfo(source Source) eventInfo {
-	return eventInfo{Stream: source.Id(), Protocol: source.Type().ToString(), RemoteAddr: source.RemoteAddr()}
+	return eventInfo{Stream: source.GetID(), Protocol: source.GetType().ToString(), RemoteAddr: source.RemoteAddr()}
 }
 
 func NewRecordEventInfo(source Source, path string) interface{} {

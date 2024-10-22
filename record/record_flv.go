@@ -63,7 +63,7 @@ func NewFLVFileSink(sourceId string) (stream.Sink, string, error) {
 	}
 
 	return &FLVFileSink{
-		BaseSink: stream.BaseSink{Id_: "record-sink-flv", SourceId_: sourceId, Protocol_: stream.ProtocolFlv},
+		BaseSink: stream.BaseSink{ID: "record-sink-flv", SourceID: sourceId, Protocol: stream.TransStreamFlv},
 		file:     file,
 	}, path, nil
 }

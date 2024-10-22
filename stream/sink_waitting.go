@@ -3,12 +3,12 @@ package stream
 import "sync"
 
 // 等待队列所有的Sink
-var waitingSinks map[string]map[SinkId]Sink
+var waitingSinks map[string]map[SinkID]Sink
 
 var mutex sync.RWMutex
 
 func init() {
-	waitingSinks = make(map[string]map[SinkId]Sink, 1024)
+	waitingSinks = make(map[string]map[SinkID]Sink, 1024)
 }
 
 func AddSinkToWaitingQueue(streamId string, sink Sink) {
@@ -18,15 +18,15 @@ func AddSinkToWaitingQueue(streamId string, sink Sink) {
 	m, ok := waitingSinks[streamId]
 	if !ok {
 		if m, ok = waitingSinks[streamId]; !ok {
-			m = make(map[SinkId]Sink, 64)
+			m = make(map[SinkID]Sink, 64)
 			waitingSinks[streamId] = m
 		}
 	}
 
-	m[sink.Id()] = sink
+	m[sink.GetID()] = sink
 }
 
-func RemoveSinkFromWaitingQueue(sourceId string, sinkId SinkId) (Sink, bool) {
+func RemoveSinkFromWaitingQueue(sourceId string, sinkId SinkID) (Sink, bool) {
 	mutex.Lock()
 	defer mutex.Unlock()
 
@@ -63,7 +63,7 @@ func PopWaitingSinks(sourceId string) []Sink {
 	return sinks
 }
 
-func ExistSinkInWaitingQueue(sourceId string, sinkId SinkId) bool {
+func ExistSinkInWaitingQueue(sourceId string, sinkId SinkID) bool {
 	mutex.RLock()
 	defer mutex.RUnlock()
 
@@ -76,7 +76,7 @@ func ExistSinkInWaitingQueue(sourceId string, sinkId SinkId) bool {
 	return ok
 }
 
-func ExistSink(sourceId string, sinkId SinkId) bool {
+func ExistSink(sourceId string, sinkId SinkID) bool {
 	if sourceId != "" {
 		if exist := ExistSinkInWaitingQueue(sourceId, sinkId); exist {
 			return true

@@ -9,6 +9,40 @@ import (
 	"github.com/lkmio/lkm/log"
 	"net/url"
 	"strings"
+	"time"
+)
+
+// SourceType 推流类型
+type SourceType byte
+
+// TransStreamProtocol 输出的流协议
+type TransStreamProtocol uint32
+
+// SessionState 推拉流Session的状态
+// 包含握手和Hook授权阶段
+type SessionState uint32
+
+const (
+	SourceTypeRtmp  = SourceType(1)
+	SourceType28181 = SourceType(2)
+	SourceType1078  = SourceType(3)
+
+	TransStreamRtmp            = TransStreamProtocol(1)
+	TransStreamFlv             = TransStreamProtocol(2)
+	TransStreamRtsp            = TransStreamProtocol(3)
+	TransStreamHls             = TransStreamProtocol(4)
+	TransStreamRtc             = TransStreamProtocol(5)
+	TransStreamGBStreamForward = TransStreamProtocol(6) // 国标级联转发
+)
+
+const (
+	SessionStateCreate           = SessionState(1) //新建状态
+	SessionStateHandshaking      = SessionState(2) //握手中
+	SessionStateHandshakeFailure = SessionState(3) //握手失败
+	SessionStateHandshakeDone    = SessionState(4) //握手完成
+	SessionStateWait             = SessionState(5) //位于等待队列中
+	SessionStateTransferring     = SessionState(6) //推拉流中
+	SessionStateClosed           = SessionState(7) //关闭状态
 )
 
 func (s SourceType) ToString() string {
@@ -23,17 +57,19 @@ func (s SourceType) ToString() string {
 	panic(fmt.Sprintf("unknown source type %d", s))
 }
 
-func (p Protocol) ToString() string {
-	if ProtocolRtmp == p {
+func (p TransStreamProtocol) ToString() string {
+	if TransStreamRtmp == p {
 		return "rtmp"
-	} else if ProtocolFlv == p {
+	} else if TransStreamFlv == p {
 		return "flv"
-	} else if ProtocolRtsp == p {
+	} else if TransStreamRtsp == p {
 		return "rtsp"
-	} else if ProtocolHls == p {
+	} else if TransStreamHls == p {
 		return "hls"
-	} else if ProtocolRtc == p {
+	} else if TransStreamRtc == p {
 		return "rtc"
+	} else if TransStreamGBStreamForward == p {
+		return "gb_stream_forward"
 	}
 
 	panic(fmt.Sprintf("unknown stream protocol %d", p))
@@ -162,4 +198,92 @@ func ExtractAudioPacket(codec utils.AVCodecID, extractStream bool, data []byte, 
 	}
 
 	return stream, packet, nil
+}
+
+// StartReceiveDataTimer 启动收流超时计时器
+func StartReceiveDataTimer(source Source) {
+	utils.Assert(AppConfig.ReceiveTimeout > 0)
+
+	var receiveDataTimer *time.Timer
+	receiveDataTimer = time.AfterFunc(time.Duration(AppConfig.ReceiveTimeout), func() {
+		dis := time.Now().Sub(source.LastPacketTime())
+
+		// 如果开启Hook通知, 根据响应决定是否关闭Source
+		// 如果通知失败, 或者非200应答, 释放Source
+		// 如果没有开启Hook通知, 直接删除
+		if dis >= time.Duration(AppConfig.ReceiveTimeout) {
+			log.Sugar.Errorf("收流超时 source: %s", source.GetID())
+
+			response, state := HookReceiveTimeoutEvent(source)
+			if utils.HookStateOK != state || response == nil {
+				source.Close()
+				return
+			}
+		}
+
+		// 对精度没要求
+		receiveDataTimer.Reset(time.Duration(AppConfig.ReceiveTimeout))
+	})
+}
+
+// StartIdleTimer 启动拉流空闲计时器
+func StartIdleTimer(source Source) {
+	utils.Assert(AppConfig.IdleTimeout > 0)
+
+	var idleTimer *time.Timer
+	idleTimer = time.AfterFunc(time.Duration(AppConfig.IdleTimeout), func() {
+		dis := time.Now().Sub(source.LastStreamEndTime())
+
+		if source.SinkCount() < 1 && dis >= time.Duration(AppConfig.IdleTimeout) {
+			log.Sugar.Errorf("拉流空闲超时 source: %s", source.GetID())
+
+			response, state := HookIdleTimeoutEvent(source)
+			if utils.HookStateOK != state || response == nil {
+				source.Close()
+				return
+			}
+		}
+
+		idleTimer.Reset(time.Duration(AppConfig.IdleTimeout))
+	})
+}
+
+// LoopEvent 循环读取事件
+func LoopEvent(source Source) {
+	for {
+		select {
+		case data := <-source.StreamPipe():
+			if source.IsClosed() {
+				return
+			}
+
+			if AppConfig.ReceiveTimeout > 0 {
+				source.SetLastPacketTime(time.Now())
+			}
+
+			if err := source.Input(data); err != nil {
+				log.Sugar.Errorf("处理输入流失败 释放source:%s err:%s", source.GetID(), err.Error())
+				source.DoClose()
+				return
+			}
+
+			if source.IsClosed() {
+				return
+			}
+
+			break
+		case event := <-source.MainContextEvents():
+			if source.IsClosed() {
+				return
+			}
+
+			event()
+
+			if source.IsClosed() {
+				return
+			}
+
+			break
+		}
+	}
 }

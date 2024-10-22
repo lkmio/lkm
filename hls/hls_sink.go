@@ -14,7 +14,7 @@ const (
 
 type M3U8Sink struct {
 	stream.BaseSink
-	cb               func(m3u8 []byte) //生成m3u8文件的发送回调
+	cb               func(m3u8 []byte) // 生成m3u8文件的发送回调
 	sessionId        string
 	playtime         time.Time
 	playTimer        *time.Timer
@@ -36,7 +36,7 @@ func (s *M3U8Sink) Start() {
 	s.playTimer = time.AfterFunc(timeout, func() {
 		sub := time.Now().Sub(s.playtime)
 		if sub > timeout {
-			log.Sugar.Errorf("长时间没有拉取TS切片 sink:%d 超时", s.Id_)
+			log.Sugar.Errorf("长时间没有拉取TS切片 sink:%d 超时", s.ID)
 			s.Close()
 			return
 		}
@@ -61,13 +61,13 @@ func (s *M3U8Sink) Close() {
 		s.playTimer = nil
 	}
 
-	stream.SinkManager.Remove(s.Id_)
+	stream.SinkManager.Remove(s.ID)
 	s.BaseSink.Close()
 }
 
-func NewM3U8Sink(id stream.SinkId, sourceId string, cb func(m3u8 []byte), sessionId string) stream.Sink {
+func NewM3U8Sink(id stream.SinkID, sourceId string, cb func(m3u8 []byte), sessionId string) stream.Sink {
 	return &M3U8Sink{
-		BaseSink:  stream.BaseSink{Id_: id, SourceId_: sourceId, Protocol_: stream.ProtocolHls},
+		BaseSink:  stream.BaseSink{ID: id, SourceID: sourceId, Protocol: stream.TransStreamHls},
 		cb:        cb,
 		sessionId: sessionId,
 	}

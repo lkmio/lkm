@@ -5,6 +5,7 @@ import (
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/log"
 	"net/http"
+	"time"
 )
 
 func PreparePublishSource(source Source, hook bool) (*http.Response, utils.HookState) {
@@ -23,17 +24,20 @@ func PreparePublishSource(source Source, hook bool) (*http.Response, utils.HookS
 		return nil, utils.HookStateOccupy
 	}
 
-	if AppConfig.ReceiveTimeout > 0 {
-		source.StartReceiveDataTimer()
+	if AppConfig.Hooks.IsEnableOnReceiveTimeout() && AppConfig.ReceiveTimeout > 0 {
+		StartReceiveDataTimer(source)
 	}
 
-	if AppConfig.IdleTimeout > 0 {
-		source.StartIdleTimer()
+	if AppConfig.Hooks.IsEnableOnIdleTimeout() && AppConfig.IdleTimeout > 0 {
+		StartIdleTimer(source)
 	}
 
-	urls := GetStreamPlayUrls(source.Id())
+	source.SetCreateTime(time.Now())
+
+	urls := GetStreamPlayUrls(source.GetID())
 	indent, _ := json.MarshalIndent(urls, "", "\t")
-	log.Sugar.Infof("%s准备推流 source:%s 拉流地址:\r\n%s", source.Type().ToString(), source.Id(), indent)
+
+	log.Sugar.Infof("%s准备推流 source:%s 拉流地址:\r\n%s", source.GetType().ToString(), source.GetID(), indent)
 
 	return response, utils.HookStateOK
 }

@@ -20,8 +20,8 @@ type sink struct {
 	cb func(sdp string)
 }
 
-func NewSink(id stream.SinkId, sourceId string, offer string, cb func(sdp string)) stream.Sink {
-	return &sink{stream.BaseSink{Id_: id, SourceId_: sourceId, Protocol_: stream.ProtocolRtc}, offer, "", nil, nil, webrtc.ICEConnectionStateNew, cb}
+func NewSink(id stream.SinkID, sourceId string, offer string, cb func(sdp string)) stream.Sink {
+	return &sink{stream.BaseSink{ID: id, SourceID: sourceId, Protocol: stream.TransStreamRtc}, offer, "", nil, nil, webrtc.ICEConnectionStateNew, cb}
 }
 
 func (s *sink) setTrackCount(count int) {

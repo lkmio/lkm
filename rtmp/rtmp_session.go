@@ -39,7 +39,7 @@ func (s *Session) OnPublish(app, stream_ string) utils.HookState {
 	s.stack.SetOnPublishHandler(source)
 
 	//初始化放在add source前面, 以防add后再init, 空窗期拉流队列空指针.
-	source.Init(source.Input, source.Close, stream.ReceiveBufferTCPBlockCount)
+	source.Init(stream.ReceiveBufferTCPBlockCount)
 	source.SetUrlValues(values)
 
 	//统一处理source推流事件, source是否已经存在, hook回调....
@@ -51,7 +51,7 @@ func (s *Session) OnPublish(app, stream_ string) utils.HookState {
 		s.isPublisher = true
 		s.receiveBuffer = stream.NewTCPReceiveBuffer()
 
-		go source.LoopEvent()
+		go stream.LoopEvent(source)
 	}
 
 	return state
@@ -61,14 +61,14 @@ func (s *Session) OnPlay(app, stream_ string) utils.HookState {
 	streamName, values := stream.ParseUrl(stream_)
 
 	sourceId := s.generateSourceId(app, streamName)
-	sink := NewSink(stream.GenerateSinkId(s.conn.RemoteAddr()), sourceId, s.conn, s.stack)
+	sink := NewSink(stream.NetAddr2SinkId(s.conn.RemoteAddr()), sourceId, s.conn, s.stack)
 	sink.SetUrlValues(values)
 
-	log.Sugar.Infof("rtmp onplay app:%s stream:%s sink:%v conn:%s", app, stream_, sink.Id(), s.conn.RemoteAddr().String())
+	log.Sugar.Infof("rtmp onplay app:%s stream:%s sink:%v conn:%s", app, stream_, sink.GetID(), s.conn.RemoteAddr().String())
 
 	_, state := stream.PreparePlaySink(sink)
 	if utils.HookStateOK != state {
-		log.Sugar.Errorf("rtmp拉流失败 source:%s sink:%s", sourceId, sink.Id())
+		log.Sugar.Errorf("rtmp拉流失败 source:%s sink:%s", sourceId, sink.GetID())
 	} else {
 		s.handle = sink
 	}
@@ -104,7 +104,7 @@ func (s *Session) Close() {
 
 	publisher, ok := s.handle.(*Publisher)
 	if ok {
-		log.Sugar.Infof("rtmp推流结束 %s", publisher.PrintInfo())
+		log.Sugar.Infof("rtmp推流结束 %s", publisher.String())
 
 		if s.isPublisher {
 			s.handle.(*Publisher).Close()
@@ -112,7 +112,7 @@ func (s *Session) Close() {
 		}
 	} else {
 		sink := s.handle.(*Sink)
-		log.Sugar.Infof("rtmp拉流结束 %s", sink.PrintInfo())
+		log.Sugar.Infof("rtmp拉流结束 %s", sink.String())
 		sink.Close()
 	}
 }

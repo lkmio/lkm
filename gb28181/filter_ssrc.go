@@ -9,10 +9,6 @@ type ssrcFilter struct {
 	mute    sync.RWMutex
 }
 
-func NewSharedFilter(guestCount int) Filter {
-	return &ssrcFilter{sources: make(map[uint32]GBSource, guestCount)}
-}
-
 func (r *ssrcFilter) AddSource(ssrc uint32, source GBSource) bool {
 	r.mute.Lock()
 	defer r.mute.Unlock()
@@ -35,4 +31,8 @@ func (r *ssrcFilter) FindSource(ssrc uint32) GBSource {
 	r.mute.RLock()
 	defer r.mute.RUnlock()
 	return r.sources[ssrc]
+}
+
+func NewSSRCFilter(guestCount int) Filter {
+	return &ssrcFilter{sources: make(map[uint32]GBSource, guestCount)}
 }

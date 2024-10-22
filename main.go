@@ -22,11 +22,12 @@ import (
 )
 
 func init() {
-	stream.RegisterTransStreamFactory(stream.ProtocolRtmp, rtmp.TransStreamFactory)
-	stream.RegisterTransStreamFactory(stream.ProtocolHls, hls.TransStreamFactory)
-	stream.RegisterTransStreamFactory(stream.ProtocolFlv, flv.TransStreamFactory)
-	stream.RegisterTransStreamFactory(stream.ProtocolRtsp, rtsp.TransStreamFactory)
-	stream.RegisterTransStreamFactory(stream.ProtocolRtc, rtc.TransStreamFactory)
+	stream.RegisterTransStreamFactory(stream.TransStreamRtmp, rtmp.TransStreamFactory)
+	stream.RegisterTransStreamFactory(stream.TransStreamHls, hls.TransStreamFactory)
+	stream.RegisterTransStreamFactory(stream.TransStreamFlv, flv.TransStreamFactory)
+	stream.RegisterTransStreamFactory(stream.TransStreamRtsp, rtsp.TransStreamFactory)
+	stream.RegisterTransStreamFactory(stream.TransStreamRtc, rtc.TransStreamFactory)
+	stream.RegisterTransStreamFactory(stream.TransStreamGBStreamForward, gb28181.TransStreamFactory)
 	stream.SetRecordStreamFactory(record.NewFLVFileSink)
 
 	config, err := stream.LoadConfigFile("./config.json")
@@ -36,10 +37,11 @@ func init() {
 
 	stream.SetDefaultConfig(config)
 	stream.AppConfig = *config
-	stream.InitHookUrl()
+	stream.InitHookUrls()
+	// 设置公网IP和端口
 	rtc.InitConfig()
 
-	//初始化日志
+	// 初始化日志
 	log.InitLogger(zapcore.Level(stream.AppConfig.Log.Level), stream.AppConfig.Log.Name, stream.AppConfig.Log.MaxSize, stream.AppConfig.Log.MaxBackup, stream.AppConfig.Log.MaxAge, stream.AppConfig.Log.Compress)
 
 	if stream.AppConfig.GB28181.IsMultiPort() {
@@ -93,7 +95,7 @@ func main() {
 	//多端口模式下, 创建GBSource时才创建收流端口
 	if !stream.AppConfig.GB28181.IsMultiPort() {
 		if stream.AppConfig.GB28181.IsEnableUDP() {
-			server, err := gb28181.NewUDPServer(gb28181.NewSharedFilter(128))
+			server, err := gb28181.NewUDPServer(gb28181.NewSSRCFilter(128))
 			if err != nil {
 				panic(err)
 			}
@@ -103,7 +105,7 @@ func main() {
 		}
 
 		if stream.AppConfig.GB28181.IsEnableTCP() {
-			server, err := gb28181.NewTCPServer(gb28181.NewSharedFilter(128))
+			server, err := gb28181.NewTCPServer(gb28181.NewSSRCFilter(128))
 			if err != nil {
 				panic(err)
 			}

@@ -18,9 +18,9 @@ type TransStream interface {
 
 	AddSink(sink Sink) error
 
-	ExistSink(id SinkId) bool
+	ExistSink(id SinkID) bool
 
-	RemoveSink(id SinkId) (Sink, bool)
+	RemoveSink(id SinkID) (Sink, bool)
 
 	PopAllSink(handler func(sink Sink))
 
@@ -29,18 +29,21 @@ type TransStream interface {
 	Close() error
 
 	SendPacket(data []byte) error
+
+	Protocol() TransStreamProtocol
 }
 
 type BaseTransStream struct {
-	Sinks map[SinkId]Sink
+	Sinks map[SinkID]Sink
 	//muxer      stream.Muxer
 	Tracks     []utils.AVStream
 	Completed  bool
 	ExistVideo bool
+	Protocol_  TransStreamProtocol
 }
 
 func (t *BaseTransStream) Init() {
-	t.Sinks = make(map[SinkId]Sink, 64)
+	t.Sinks = make(map[SinkID]Sink, 64)
 }
 
 func (t *BaseTransStream) Input(packet utils.AVPacket) error {
@@ -56,17 +59,17 @@ func (t *BaseTransStream) AddTrack(stream utils.AVStream) error {
 }
 
 func (t *BaseTransStream) AddSink(sink Sink) error {
-	t.Sinks[sink.Id()] = sink
+	t.Sinks[sink.GetID()] = sink
 	sink.Start()
 	return nil
 }
 
-func (t *BaseTransStream) ExistSink(id SinkId) bool {
+func (t *BaseTransStream) ExistSink(id SinkID) bool {
 	_, ok := t.Sinks[id]
 	return ok
 }
 
-func (t *BaseTransStream) RemoveSink(id SinkId) (Sink, bool) {
+func (t *BaseTransStream) RemoveSink(id SinkID) (Sink, bool) {
 	sink, ok := t.Sinks[id]
 	if ok {
 		delete(t.Sinks, id)
@@ -100,6 +103,10 @@ func (t *BaseTransStream) SendPacket(data []byte) error {
 	return nil
 }
 
+func (t *BaseTransStream) Protocol() TransStreamProtocol {
+	return t.Protocol_
+}
+
 type TCPTransStream struct {
 	BaseTransStream
 }
@@ -123,7 +130,7 @@ func (t *TCPTransStream) SendPacket(data []byte) error {
 		}
 
 		if _, ok := err.(*transport.ZeroWindowSizeError); ok {
-			log.Sugar.Errorf("发送超时, 强制断开连接 sink:%s", sink.PrintInfo())
+			log.Sugar.Errorf("发送超时, 强制断开连接 sink:%s", sink.String())
 			sink.GetConn().Close()
 		}
 	}

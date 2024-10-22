@@ -23,6 +23,6 @@ func NewTCPClient(listenPort int, remoteAddr *net.TCPAddr, source GBSource) (*TC
 		return client, err
 	}
 
-	err = tcp.Connect(addr, remoteAddr)
+	_, err = tcp.Connect(addr, remoteAddr)
 	return client, err
 }

@@ -19,7 +19,7 @@ var (
 	hookUrls map[HookEvent]string
 )
 
-func InitHookUrl() {
+func InitHookUrls() {
 	hookUrls = map[HookEvent]string{
 		HookEventPublish:        AppConfig.Hooks.OnPublishUrl,
 		HookEventPublishDone:    AppConfig.Hooks.OnPublishDoneUrl,

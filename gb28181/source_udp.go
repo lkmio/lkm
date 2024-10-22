@@ -5,7 +5,7 @@ import (
 	"github.com/pion/rtp"
 )
 
-// UDPSource GB28181 UDP推流源
+// UDPSource 国标UDP推流源
 type UDPSource struct {
 	BaseGBSource
 
@@ -22,20 +22,22 @@ func NewUDPSource() *UDPSource {
 	return u
 }
 
-func (u *UDPSource) TransportType() TransportType {
-	return TransportTypeUDP
+func (u *UDPSource) SetupType() SetupType {
+	return SetupUDP
 }
 
+// OnOrderedRtp 有序RTP包回调
 func (u *UDPSource) OnOrderedRtp(packet interface{}) {
-	u.PublishSource.Input(packet.(*rtp.Packet).Payload)
+	// 此时还在网络收流携程, 交给Source的主协程处理
+	u.PublishSource.Input(packet.(*rtp.Packet).Raw)
 }
 
-// InputRtp udp收流会先拷贝rtp包,交给jitter buffer处理后再发给source
-func (u *UDPSource) InputRtp(pkt *rtp.Packet) error {
+// InputRtpPacket 将RTP包排序后，交给Source的主协程处理
+func (u *UDPSource) InputRtpPacket(pkt *rtp.Packet) error {
 	block := u.receiveBuffer.GetBlock()
+	copy(block, pkt.Raw)
 
-	copy(block, pkt.Payload)
-	pkt.Payload = block[:len(pkt.Payload)]
+	pkt.Raw = block[:len(pkt.Raw)]
 	u.jitterBuffer.Push(pkt.SequenceNumber, pkt)
 	return nil
 }

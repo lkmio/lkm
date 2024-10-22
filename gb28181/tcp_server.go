@@ -10,7 +10,6 @@ import (
 // TCPServer GB28181TCP被动收流
 type TCPServer struct {
 	stream.StreamServer[*TCPSession]
-
 	tcp    *transport.TCPServer
 	filter Filter
 }
@@ -35,7 +34,7 @@ func (T *TCPServer) OnCloseSession(session *TCPSession) {
 func (T *TCPServer) OnConnected(conn net.Conn) []byte {
 	T.StreamServer.OnConnected(conn)
 
-	//TCP使用ReceiveBuffer区别在于,多端口模式从第一包就使用ReceiveBuffer, 单端口模式先解析出ssrc, 找到source. 后续再使用ReceiveBuffer.
+	//TCP单端口收流, Session已经绑定Source, 使用ReceiveBuffer读取网络包
 	if conn.(*transport.Conn).Data.(*TCPSession).source != nil {
 		return conn.(*transport.Conn).Data.(*TCPSession).receiveBuffer.GetBlock()
 	}
@@ -47,17 +46,20 @@ func (T *TCPServer) OnPacket(conn net.Conn, data []byte) []byte {
 	T.StreamServer.OnPacket(conn, data)
 	session := conn.(*transport.Conn).Data.(*TCPSession)
 
-	//单端口收流
+	// 在Session未绑定到Source时(单端口收流), 先解析出SSRC找到Source.
 	if session.source == nil {
-		//直接传给解码器, 先根据ssrc找到source. 后续还是会直接传给source
 		session.Input(data)
 	} else {
+
+		// 将流交给Source的主协程处理，主协程最终会调用TCPSession.Input函数处理
 		session.source.(*PassiveSource).PublishSource.Input(data)
 	}
 
+	// 绑定Source后, 使用ReceiveBuffer读取网络包, 减少拷贝
 	if session.source != nil {
 		return session.receiveBuffer.GetBlock()
 	}
+
 	return nil
 }
 

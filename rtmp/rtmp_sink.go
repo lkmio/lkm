@@ -25,9 +25,9 @@ func (s *Sink) Close() {
 	s.BaseSink.Close()
 }
 
-func NewSink(id stream.SinkId, sourceId string, conn net.Conn, stack *librtmp.Stack) stream.Sink {
+func NewSink(id stream.SinkID, sourceId string, conn net.Conn, stack *librtmp.Stack) stream.Sink {
 	return &Sink{
-		BaseSink: stream.BaseSink{Id_: id, SourceId_: sourceId, State_: stream.SessionStateCreate, Protocol_: stream.ProtocolRtmp, Conn: conn, DesiredAudioCodecId_: utils.AVCodecIdNONE, DesiredVideoCodecId_: utils.AVCodecIdNONE},
+		BaseSink: stream.BaseSink{ID: id, SourceID: sourceId, State: stream.SessionStateCreate, Protocol: stream.TransStreamRtmp, Conn: conn, DesiredAudioCodecId_: utils.AVCodecIdNONE, DesiredVideoCodecId_: utils.AVCodecIdNONE},
 		stack:    stack,
 	}
 }

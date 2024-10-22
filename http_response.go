@@ -12,7 +12,7 @@ func httpResponse(w http.ResponseWriter, code int, msg string) {
 	})
 }
 
-func httpResponseOk(w http.ResponseWriter, data interface{}) {
+func httpResponseOK(w http.ResponseWriter, data interface{}) {
 	httpResponse2(w, MalformedRequest{
 		Code: http.StatusOK,
 		Msg:  "ok",

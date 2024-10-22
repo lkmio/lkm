@@ -12,7 +12,7 @@ func PreparePlaySink(sink Sink) (*http.Response, utils.HookState) {
 	if AppConfig.Hooks.IsEnableOnPlay() {
 		hook, err := Hook(HookEventPlay, sink.UrlValues().Encode(), NewHookPlayEventInfo(sink))
 		if err != nil {
-			log.Sugar.Errorf("通知播放事件失败 err:%s sink:%s-%v source:%s", err.Error(), sink.Protocol().ToString(), sink.Id(), sink.SourceId())
+			log.Sugar.Errorf("播放事件-通知失败 err:%s sink:%s-%v source:%s", err.Error(), sink.GetProtocol().ToString(), sink.GetID(), sink.GetSourceID())
 
 			return hook, utils.HookStateFailure
 		}
@@ -20,24 +20,24 @@ func PreparePlaySink(sink Sink) (*http.Response, utils.HookState) {
 		response = hook
 	}
 
-	source := SourceManager.Find(sink.SourceId())
+	source := SourceManager.Find(sink.GetSourceID())
 	if source == nil {
-		log.Sugar.Infof("添加sink到等待队列 sink:%s-%v source:%s", sink.Protocol().ToString(), sink.Id(), sink.SourceId())
+		log.Sugar.Infof("添加sink到等待队列 sink:%s-%v source:%s", sink.GetProtocol().ToString(), sink.GetID(), sink.GetSourceID())
 
 		{
 			sink.Lock()
 			defer sink.UnLock()
 
-			if SessionStateClosed == sink.State() {
-				log.Sugar.Warnf("添加到sink到等待队列失败, sink已经断开连接 %s", sink.Id())
+			if SessionStateClosed == sink.GetState() {
+				log.Sugar.Warnf("添加到sink到等待队列失败, sink已经断开连接 %s", sink.GetID())
 				return response, utils.HookStateFailure
 			} else {
 				sink.SetState(SessionStateWait)
-				AddSinkToWaitingQueue(sink.SourceId(), sink)
+				AddSinkToWaitingQueue(sink.GetSourceID(), sink)
 			}
 		}
 	} else {
-		source.AddEvent(SourceEventPlay, sink)
+		source.AddSink(sink)
 	}
 
 	return response, utils.HookStateOK
@@ -49,7 +49,7 @@ func HookPlayDoneEvent(sink Sink) (*http.Response, bool) {
 	if AppConfig.Hooks.IsEnableOnPlayDone() {
 		hook, err := Hook(HookEventPlayDone, sink.UrlValues().Encode(), NewHookPlayEventInfo(sink))
 		if err != nil {
-			log.Sugar.Errorf("通知播放结束事件失败 err:%s sink:%s-%v source:%s", err.Error(), sink.Protocol().ToString(), sink.Id(), sink.SourceId())
+			log.Sugar.Errorf("播放结束事件-通知失败 err:%s sink:%s-%v source:%s", err.Error(), sink.GetProtocol().ToString(), sink.GetID(), sink.GetSourceID())
 			return hook, false
 		}
 

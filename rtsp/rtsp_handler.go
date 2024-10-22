@@ -124,7 +124,7 @@ func (h handler) OnDescribe(request Request) (*http.Response, []byte, error) {
 		}
 	}
 
-	sinkId := stream.GenerateSinkId(request.session.conn.RemoteAddr())
+	sinkId := stream.NetAddr2SinkId(request.session.conn.RemoteAddr())
 	sink_ := NewSink(sinkId, request.sourceId, request.session.conn, func(sdp string) {
 		response = NewOKResponse(request.headers.Get("Cseq"))
 		response.Header.Set("Content-Type", "application/sdp")

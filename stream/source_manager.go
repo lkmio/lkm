@@ -5,6 +5,7 @@ import (
 	"sync"
 )
 
+// SourceManager 全局管理所有推流源
 var SourceManager *sourceManger
 
 func init() {
@@ -16,9 +17,9 @@ type sourceManger struct {
 }
 
 func (s *sourceManger) Add(source Source) error {
-	_, ok := s.m.LoadOrStore(source.Id(), source)
+	_, ok := s.m.LoadOrStore(source.GetID(), source)
 	if ok {
-		return fmt.Errorf("the source %s has been exist", source.Id())
+		return fmt.Errorf("the source %s has been exist", source.GetID())
 	}
 
 	return nil
@@ -39,5 +40,16 @@ func (s *sourceManger) Remove(id string) (Source, error) {
 		return value.(Source), nil
 	}
 
-	return nil, fmt.Errorf("source with id %s was not find", id)
+	return nil, fmt.Errorf("source with GetID %s was not find", id)
+}
+
+func (s *sourceManger) All() []Source {
+	var all []Source
+
+	s.m.Range(func(key, value any) bool {
+		all = append(all, value.(Source))
+		return true
+	})
+
+	return all
 }

@@ -5,27 +5,27 @@ import (
 	"sync"
 )
 
+// SinkManager 目前只用于保存HLS拉流Sink
 var SinkManager *sinkManager
 
 func init() {
 	SinkManager = &sinkManager{}
 }
 
-// ISinkManager 添加到TransStream的所有Sink
 type sinkManager struct {
 	m sync.Map
 }
 
 func (s *sinkManager) Add(sink Sink) error {
-	_, ok := s.m.LoadOrStore(sink.Id(), sink)
+	_, ok := s.m.LoadOrStore(sink.GetID(), sink)
 	if ok {
-		return fmt.Errorf("the sink %s has been exist", sink.Id())
+		return fmt.Errorf("the sink %s has been exist", sink.GetID())
 	}
 
 	return nil
 }
 
-func (s *sinkManager) Find(id SinkId) Sink {
+func (s *sinkManager) Find(id SinkID) Sink {
 	value, ok := s.m.Load(id)
 	if ok {
 		return value.(Sink)
@@ -34,16 +34,16 @@ func (s *sinkManager) Find(id SinkId) Sink {
 	return nil
 }
 
-func (s *sinkManager) Remove(id SinkId) (Sink, error) {
+func (s *sinkManager) Remove(id SinkID) (Sink, error) {
 	value, loaded := s.m.LoadAndDelete(id)
 	if loaded {
 		return value.(Sink), nil
 	}
 
-	return nil, fmt.Errorf("source with id %s was not find", id)
+	return nil, fmt.Errorf("source with GetID %s was not find", id)
 }
 
-func (s *sinkManager) Exist(id SinkId) bool {
+func (s *sinkManager) Exist(id SinkID) bool {
 	_, ok := s.m.Load(id)
 	return ok
 }

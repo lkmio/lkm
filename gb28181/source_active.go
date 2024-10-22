@@ -32,6 +32,6 @@ func (a ActiveSource) Connect(remoteAddr *net.TCPAddr) error {
 	return nil
 }
 
-func (a ActiveSource) TransportType() TransportType {
-	return TransportTypeTCPActive
+func (a ActiveSource) SetupType() SetupType {
+	return SetupActive
 }

@@ -12,12 +12,12 @@ import (
 	"net"
 )
 
-type TransportType int
+type SetupType int
 
 const (
-	TransportTypeUDP        = TransportType(0)
-	TransportTypeTCPPassive = TransportType(1)
-	TransportTypeTCPActive  = TransportType(2)
+	SetupUDP     = SetupType(0)
+	SetupPassive = SetupType(1)
+	SetupActive  = SetupType(2)
 
 	PsProbeBufferSize = 1024 * 1024 * 2
 	JitterBufferSize  = 1024 * 1024
@@ -29,15 +29,13 @@ var (
 	SharedTCPServer *TCPServer
 )
 
-// GBSource GB28181推流Source, 接收PS流解析生成AVStream和AVPacket, 后续全权交给父类Source处理.
-// udp/passive/active 都继承本接口, filter负责解析rtp包, 根据ssrc匹配对应的Source.
+// GBSource GB28181推流Source, 统一解析PS流、级联转发.
 type GBSource interface {
 	stream.Source
 
-	InputRtp(pkt *rtp.Packet) error
+	SetupType() SetupType
 
-	TransportType() TransportType
-
+	// PreparePublish 收到流时, 做一些初始化工作.
 	PreparePublish(conn net.Conn, ssrc uint32, source GBSource)
 
 	SetConn(conn net.Conn)
@@ -61,34 +59,37 @@ type BaseGBSource struct {
 	videoTimestamp         int64
 	audioPacketCreatedTime int64
 	videoPacketCreatedTime int64
-	isSystemClock          bool //推流时间戳不正确, 是否使用系统时间.
+	isSystemClock          bool // 推流时间戳不正确, 是否使用系统时间.
 }
 
-func (source *BaseGBSource) InputRtp(pkt *rtp.Packet) error {
-	panic("implement me")
-}
-
-func (source *BaseGBSource) Transport() TransportType {
-	panic("implement me")
-}
-
-func (source *BaseGBSource) Init(inputCB func(data []byte) error, closeCB func(), receiveQueueSize int) {
+func (source *BaseGBSource) Init(receiveQueueSize int) {
 	source.deMuxerCtx = libmpeg.NewPSDeMuxerContext(make([]byte, PsProbeBufferSize))
 	source.deMuxerCtx.SetHandler(source)
 	source.SetType(stream.SourceType28181)
-	source.PublishSource.Init(inputCB, closeCB, receiveQueueSize)
+	source.PublishSource.Init(receiveQueueSize)
 }
 
-// Input 解析PS流, 确保在loop event协程调用此函数
+// Input 输入rtp包, 处理PS流, 负责解析->封装->推流. 所有GBSource, 均到此处处理, 在event协程调用此函数
 func (source *BaseGBSource) Input(data []byte) error {
-	return source.deMuxerCtx.Input(data)
+	// 国标级联转发
+	for _, transStream := range source.TransStreams {
+		if transStream.Protocol() != stream.TransStreamGBStreamForward {
+			continue
+		}
+
+		transStream.(*ForwardStream).SendPacket(data)
+	}
+
+	packet := rtp.Packet{}
+	_ = packet.Unmarshal(data)
+	return source.deMuxerCtx.Input(packet.Payload)
 }
 
 // OnPartPacket 部分es流回调
 func (source *BaseGBSource) OnPartPacket(index int, mediaType utils.AVMediaType, codec utils.AVCodecID, data []byte, first bool) {
 	buffer := source.FindOrCreatePacketBuffer(index, mediaType)
 
-	//第一个es包, 标记内存起始位置
+	// 第一个es包, 标记内存起始位置
 	if first {
 		buffer.Mark()
 	}
@@ -122,7 +123,7 @@ func (source *BaseGBSource) OnCompletePacket(index int, mediaType utils.AVMediaT
 	if source.IsCompleted() && source.NotTrackAdded(index) {
 		if !source.IsTimeoutTrack(index) {
 			source.SetTimeoutTrack(index)
-			log.Sugar.Errorf("添加track超时 source:%s", source.Id())
+			log.Sugar.Errorf("添加track超时 source:%s", source.GetID())
 		}
 
 		return nil
@@ -164,8 +165,9 @@ func (source *BaseGBSource) OnCompletePacket(index int, mediaType utils.AVMediaT
 	return nil
 }
 
+// 纠正国标推流的时间戳
 func (source *BaseGBSource) correctTimestamp(packet utils.AVPacket, dts, pts int64) {
-	//dts和pts保持一致
+	// dts和pts保持一致
 	pts = int64(math.Max(float64(dts), float64(pts)))
 	dts = pts
 	packet.SetPts(pts)
@@ -181,7 +183,7 @@ func (source *BaseGBSource) correctTimestamp(packet utils.AVPacket, dts, pts int
 		lastCreatedTime = source.videoPacketCreatedTime
 	}
 
-	//计算duration
+	// 计算duration
 	var duration int64
 	if !source.isSystemClock && lastTimestamp != -1 {
 		if pts < lastTimestamp {
@@ -206,7 +208,7 @@ func (source *BaseGBSource) correctTimestamp(packet utils.AVPacket, dts, pts int
 		}
 	}
 
-	//纠正时间戳
+	// 纠正时间戳
 	if source.isSystemClock && lastTimestamp != -1 {
 		duration = (packet.CreatedTime() - lastCreatedTime) * 90
 		packet.SetDts(lastTimestamp + duration)
@@ -224,7 +226,7 @@ func (source *BaseGBSource) correctTimestamp(packet utils.AVPacket, dts, pts int
 }
 
 func (source *BaseGBSource) Close() {
-	log.Sugar.Infof("GB28181推流结束 ssrc:%d %s", source.ssrc, source.PublishSource.PrintInfo())
+	log.Sugar.Infof("GB28181推流结束 ssrc:%d %s", source.ssrc, source.PublishSource.String())
 
 	//释放收流端口
 	if source.transport != nil {
@@ -269,19 +271,19 @@ func (source *BaseGBSource) PreparePublish(conn net.Conn, ssrc uint32, source_ G
 
 	if stream.AppConfig.Hooks.IsEnablePublishEvent() {
 		go func() {
-			_, state := stream.HookPublishEvent(source_)
-			if utils.HookStateOK != state {
-				log.Sugar.Errorf("GB28181 推流失败 source:%s", source.Id())
+			if _, state := stream.HookPublishEvent(source_); utils.HookStateOK == state {
+				return
+			}
 
-				if conn != nil {
-					conn.Close()
-				}
+			log.Sugar.Errorf("GB28181 推流失败 source:%s", source.GetID())
+			if conn != nil {
+				conn.Close()
 			}
 		}()
 	}
 }
 
-// NewGBSource 创建gb源,返回监听的收流端口
+// NewGBSource 创建国标推流源, 返回监听的收流端口
 func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, int, error) {
 	if tcp {
 		utils.Assert(stream.AppConfig.GB28181.IsEnableTCP())
@@ -309,7 +311,7 @@ func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, int, 
 		return nil, 0, err
 	}
 
-	//单端口模式，绑定ssrc
+	// 单端口模式，绑定ssrc
 	if !stream.AppConfig.GB28181.IsMultiPort() {
 		var success bool
 		if tcp {
@@ -324,6 +326,7 @@ func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, int, 
 
 		port = stream.AppConfig.GB28181.Port[0]
 	} else if !active {
+		// 多端口模式, 创建收流Server
 		if tcp {
 			tcpServer, err := NewTCPServer(NewSingleFilter(source))
 			if err != nil {
@@ -350,13 +353,13 @@ func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, int, 
 		bufferBlockCount = stream.ReceiveBufferUdpBlockCount
 	}
 
-	source.SetId(id)
+	source.SetID(id)
 	source.SetSSRC(ssrc)
-	source.Init(source.Input, source.Close, bufferBlockCount)
+	source.Init(bufferBlockCount)
 	if _, state := stream.PreparePublishSource(source, false); utils.HookStateOK != state {
 		return nil, 0, fmt.Errorf("error code %d", state)
 	}
 
-	go source.LoopEvent()
+	go stream.LoopEvent(source)
 	return source, port, err
 }

@@ -12,12 +12,10 @@ func NewPassiveSource() *PassiveSource {
 	return &PassiveSource{}
 }
 
-func (t PassiveSource) TransportType() TransportType {
-	return TransportTypeTCPPassive
+func (t PassiveSource) SetupType() SetupType {
+	return SetupPassive
 }
 
-// InputRtp tcp收流,直接解析ps流.
-func (t PassiveSource) InputRtp(pkt *rtp.Packet) error {
-	t.Input(pkt.Payload)
-	return nil
+func (t PassiveSource) InputRtpPacket(pkt *rtp.Packet) error {
+	return t.Input(pkt.Payload)
 }

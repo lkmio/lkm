@@ -15,7 +15,7 @@ import (
 )
 
 // 输入rtp负载的ps流文件路径, 根据ssrc解析, rtp头不要带扩展
-func readRtp(path string, ssrc uint32, tcp bool, cb func([]byte)) {
+func readRtpRaw(path string, ssrc uint32, tcp bool, cb func([]byte)) {
 	file, err := os.ReadFile(path)
 	if err != nil {
 		panic(err)
@@ -51,7 +51,7 @@ func readRtp(path string, ssrc uint32, tcp bool, cb func([]byte)) {
 
 func connectSource(source string, addr string) {
 	v := &struct {
-		Source     string `json:"source"` //SourceId
+		Source     string `json:"source"` //GetSourceID
 		RemoteAddr string `json:"remote_addr"`
 	}{
 		Source:     source,
@@ -82,7 +82,7 @@ func connectSource(source string, addr string) {
 
 func createSource(source, setup string, ssrc uint32) (string, uint16) {
 	v := struct {
-		Source string `json:"source"` //SourceId
+		Source string `json:"source"` //GetSourceID
 		Setup  string `json:"setup"`  //active/passive
 		SSRC   uint32 `json:"ssrc,omitempty"`
 	}{
@@ -105,8 +105,7 @@ func createSource(source, setup string, ssrc uint32) (string, uint16) {
 	response, err := client.Do(request)
 	if err != nil {
 		panic(err)
-	}
-	if response.StatusCode != http.StatusOK {
+	} else if response.StatusCode != http.StatusOK {
 		panic("")
 	}
 
@@ -132,15 +131,29 @@ func createSource(source, setup string, ssrc uint32) (string, uint16) {
 	return connectInfo.Data.IP, connectInfo.Data.Port
 }
 
+func rtp2overTcp(path string, ssrc uint32) {
+	file, err := os.OpenFile("./rtp.raw", os.O_CREATE|os.O_RDWR, 0666)
+	if err != nil {
+		panic(err)
+	}
+
+	readRtpRaw(path, ssrc, true, func(data []byte) {
+		file.Write(data)
+	})
+
+	file.Close()
+}
+
 // 使用wireshark直接导出udp流
 // 根据ssrc来查找每个rtp包, rtp不要带扩展字段
 func TestUDPRecv(t *testing.T) {
-	path := "D:\\GOProjects\\avformat\\gb28181_h265.rtp"
-	ssrc := 0xBEBC202
+	path := "D:\\GOProjects\\avformat\\gb28181_h264.rtp"
+	ssrc := 0xBEBC201
 	localAddr := "0.0.0.0:20001"
 	setup := "udp" //udp/passive/active
 	id := "hls_mystream"
 
+	rtp2overTcp(path, uint32(ssrc))
 	ip, port := createSource(id, setup, uint32(ssrc))
 
 	if setup == "udp" {
@@ -153,7 +166,7 @@ func TestUDPRecv(t *testing.T) {
 			panic(err)
 		}
 
-		readRtp(path, uint32(ssrc), false, func(data []byte) {
+		readRtpRaw(path, uint32(ssrc), false, func(data []byte) {
 			client.Write(data)
 			time.Sleep(1 * time.Millisecond)
 		})
@@ -162,13 +175,13 @@ func TestUDPRecv(t *testing.T) {
 		remoteAddr, _ := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", ip, port))
 
 		client := transport.TCPClient{}
-		err := client.Connect(addr, remoteAddr)
+		_, err := client.Connect(addr, remoteAddr)
 
 		if err != nil {
 			panic(err)
 		}
 
-		readRtp(path, uint32(ssrc), true, func(data []byte) {
+		readRtpRaw(path, uint32(ssrc), true, func(data []byte) {
 			client.Write(data)
 			time.Sleep(1 * time.Millisecond)
 		})
@@ -177,7 +190,7 @@ func TestUDPRecv(t *testing.T) {
 		server := transport.TCPServer{}
 
 		server.SetHandler2(func(conn net.Conn) []byte {
-			readRtp(path, uint32(ssrc), true, func(data []byte) {
+			readRtpRaw(path, uint32(ssrc), true, func(data []byte) {
 				conn.Write(data)
 				time.Sleep(1 * time.Millisecond)
 			})
