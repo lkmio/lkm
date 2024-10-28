@@ -27,6 +27,8 @@ type MergeWritingBuffer interface {
 
 	// ReadSegmentsFromKeyFrameIndex 从最近的关键帧读取切片
 	ReadSegmentsFromKeyFrameIndex(cb func([]byte))
+
+	Capacity() int
 }
 
 type mwBlock struct {
@@ -39,17 +41,13 @@ type mwBlock struct {
 type mergeWritingBuffer struct {
 	mwBlocks []mwBlock
 
-	//空闲合并写块
-	keyFrameFreeMWBlocks     collections.LinkedList[collections.MemoryPool]
-	noneKeyFreeFrameMWBlocks collections.LinkedList[collections.MemoryPool]
+	index    int   // 当前切片位于mwBlocks的索引
+	startTS  int64 // 当前切片的开始时间
+	duration int   // 当前切片时长
 
-	index    int   //当前切片位于mwBlocks的索引
-	startTS  int64 //当前切片的开始时间
-	duration int   //当前切片时长
-
-	lastKeyFrameIndex int  //最新关键帧所在切片的索引
-	keyFrameCount     int  //关键帧计数
-	existVideo        bool //是否存在视频
+	lastKeyFrameIndex int  // 最新关键帧所在切片的索引
+	keyFrameCount     int  // 关键帧计数
+	existVideo        bool // 是否存在视频
 
 	keyFrameBufferMaxLength    int
 	nonKeyFrameBufferMaxLength int
@@ -205,11 +203,15 @@ func (m *mergeWritingBuffer) ReadSegmentsFromKeyFrameIndex(cb func([]byte)) {
 	}
 }
 
+func (m *mergeWritingBuffer) Capacity() int {
+	return cap(m.mwBlocks)
+}
+
 func NewMergeWritingBuffer(existVideo bool) MergeWritingBuffer {
-	//开启GOP缓存, 输出流也缓存整个GOP
+	// 开启GOP缓存, 输出流也缓存整个GOP
 	var blocks []mwBlock
 	if existVideo {
-		blocks = make([]mwBlock, AppConfig.WriteBufferNumber)
+		blocks = make([]mwBlock, AppConfig.WriteBufferCapacity)
 	} else {
 		blocks = make([]mwBlock, 1)
 	}

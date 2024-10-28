@@ -15,34 +15,31 @@ var (
 	TransportManger transport.Manager
 )
 
-// rtsp拉流sink
+// Sink rtsp拉流sink
 // 对于udp而言, 每个sink维护多个transport
-// tcp直接单端口传输
-type sink struct {
+// tcp使用信令链路传输
+type Sink struct {
 	stream.BaseSink
 
-	senders []*librtp.RtpSender //一个rtsp源，可能存在多个流, 每个流都需要拉取
-	sdpCb   func(sdp string)    //rtsp_stream生成sdp后，使用该回调给rtsp_session, 响应describe
-
-	tcp     bool //tcp拉流标记
-	playing bool //是否已经收到play请求
+	senders []*librtp.RtpSender // 一个rtsp源, 可能存在多个流, 每个流都需要拉取
+	sdpCb   func(sdp string)    // sdp回调, 响应describe
 }
 
-func NewSink(id stream.SinkID, sourceId string, conn net.Conn, cb func(sdp string)) stream.Sink {
-	return &sink{
-		stream.BaseSink{ID: id, SourceID: sourceId, Protocol: stream.TransStreamRtsp, Conn: conn},
-		nil,
-		cb,
-		false,
-		false,
+func (s *Sink) StartStreaming(transStream stream.TransStream) error {
+	if s.senders == nil {
+		s.senders = make([]*librtp.RtpSender, transStream.TrackCount())
 	}
+
+	// sdp回调给sink, sink应答给describe请求
+	if s.sdpCb != nil {
+		s.sdpCb(transStream.(*TranStream).sdp)
+		s.sdpCb = nil
+	}
+
+	return nil
 }
 
-func (s *sink) setSenderCount(count int) {
-	s.senders = make([]*librtp.RtpSender, count)
-}
-
-func (s *sink) addSender(index int, tcp bool, ssrc uint32) (uint16, uint16, error) {
+func (s *Sink) AddSender(index int, tcp bool, ssrc uint32) (uint16, uint16, error) {
 	utils.Assert(index < cap(s.senders))
 	utils.Assert(s.senders[index] == nil)
 
@@ -54,9 +51,8 @@ func (s *sink) addSender(index int, tcp bool, ssrc uint32) (uint16, uint16, erro
 		SSRC: ssrc,
 	}
 
-	//tcp使用信令链路
 	if tcp {
-		s.tcp = true
+		s.TCPStreaming = true
 	} else {
 		sender.Rtp, err = TransportManger.NewUDPServer("0.0.0.0")
 		if err != nil {
@@ -83,39 +79,43 @@ func (s *sink) addSender(index int, tcp bool, ssrc uint32) (uint16, uint16, erro
 	return rtpPort, rtcpPort, err
 }
 
-func (s *sink) input(index int, data []byte, rtpTime uint32) error {
-	//拉流方还没有连上来
-	utils.Assert(index < cap(s.senders))
+func (s *Sink) Write(index int, data [][]byte, rtpTime int64) error {
+	// 拉流方还没有连接上来
+	if index >= cap(s.senders) || s.senders[index] == nil {
+		return nil
+	}
 
-	sender := s.senders[index]
-	sender.PktCount++
-	sender.OctetCount += len(data)
-	if s.tcp {
-		s.Conn.Write(data)
-	} else {
-		//发送rtcp sr包
-		sender.RtpConn.Write(data)
+	for _, bytes := range data {
+		sender := s.senders[index]
+		sender.PktCount++
+		sender.OctetCount += len(bytes)
+		if s.TCPStreaming {
+			s.Conn.Write(bytes)
+		} else {
+			//发送rtcp sr包
+			sender.RtpConn.Write(bytes[OverTcpHeaderSize:])
 
-		if sender.RtcpConn == nil || sender.PktCount%100 != 0 {
-			return nil
+			if sender.RtcpConn == nil || sender.PktCount%100 != 0 {
+				continue
+			}
+
+			nano := uint64(time.Now().UnixNano())
+			ntp := (nano/1000000000 + 2208988800<<32) | (nano % 1000000000)
+			sr := rtcp.SenderReport{
+				SSRC:        sender.SSRC,
+				NTPTime:     ntp,
+				RTPTime:     uint32(rtpTime),
+				PacketCount: uint32(sender.PktCount),
+				OctetCount:  uint32(sender.OctetCount),
+			}
+
+			marshal, err := sr.Marshal()
+			if err != nil {
+				log.Sugar.Errorf("创建rtcp sr消息失败 err:%s msg:%v", err.Error(), sr)
+			}
+
+			sender.RtcpConn.Write(marshal)
 		}
-
-		nano := uint64(time.Now().UnixNano())
-		ntp := (nano/1000000000 + 2208988800<<32) | (nano % 1000000000)
-		sr := rtcp.SenderReport{
-			SSRC:        sender.SSRC,
-			NTPTime:     ntp,
-			RTPTime:     rtpTime,
-			PacketCount: uint32(sender.PktCount),
-			OctetCount:  uint32(sender.OctetCount),
-		}
-
-		marshal, err := sr.Marshal()
-		if err != nil {
-			log.Sugar.Errorf("创建rtcp sr消息失败 err:%s msg:%v", err.Error(), sr)
-		}
-
-		sender.RtcpConn.Write(marshal)
 	}
 
 	return nil
@@ -123,22 +123,10 @@ func (s *sink) input(index int, data []byte, rtpTime uint32) error {
 
 // 拉流链路是否已经连接上
 // 拉流测发送了play请求, 并且对于udp而言, 还需要收到nat穿透包
-func (s *sink) isConnected(index int) bool {
-	return s.playing && (s.tcp || (s.senders[index] != nil && s.senders[index].RtpConn != nil))
+func (s *Sink) isConnected(index int) bool {
+	return s.TCPStreaming || (s.senders[index] != nil && s.senders[index].RtpConn != nil)
 }
-
-// 发送rtp包总数
-func (s *sink) pktCount(index int) int {
-	return s.senders[index].PktCount
-}
-
-// SendHeader 回调rtsp stream的sdp信息
-func (s *sink) SendHeader(data []byte) error {
-	s.sdpCb(string(data))
-	return nil
-}
-
-func (s *sink) Close() {
+func (s *Sink) Close() {
 	s.BaseSink.Close()
 
 	for _, sender := range s.senders {
@@ -153,5 +141,13 @@ func (s *sink) Close() {
 		if sender.Rtcp != nil {
 			sender.Rtcp.Close()
 		}
+	}
+}
+
+func NewSink(id stream.SinkID, sourceId string, conn net.Conn, cb func(sdp string)) stream.Sink {
+	return &Sink{
+		stream.BaseSink{ID: id, SourceID: sourceId, Protocol: stream.TransStreamRtsp, Conn: conn},
+		nil,
+		cb,
 	}
 }

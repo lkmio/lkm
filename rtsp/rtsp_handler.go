@@ -66,7 +66,7 @@ func (h handler) Process(session *session, method string, url_ *url.URL, headers
 
 	//确保拉流要经过授权
 	state, ok := method2StateMap[method]
-	if ok && state > SessionStateSetup && session.sink_ == nil {
+	if ok && state > SessionStateSetup && session.sink == nil {
 		return fmt.Errorf("please establish a session first")
 	}
 
@@ -107,17 +107,17 @@ func (h handler) OnDescribe(request Request) (*http.Response, []byte, error) {
 	var response *http.Response
 	var body []byte
 
-	//校验密码
+	// 校验密码
 	if h.password != "" {
-		var success bool
+		var ok bool
 
 		authorization := request.headers.Get("Authorization")
 		if authorization != "" {
 			params, err := parseAuthParams(authorization)
-			success = err == nil && DoAuthenticatePlainTextPassword(params, h.password)
+			ok = err == nil && DoAuthenticatePlainTextPassword(params, h.password)
 		}
 
-		if !success {
+		if !ok {
 			response401 := NewResponse(http.StatusUnauthorized, request.headers.Get("Cseq"))
 			response401.Header.Set("WWW-Authenticate", generateAuthHeader("lkm"))
 			return response401, nil, nil
@@ -125,26 +125,27 @@ func (h handler) OnDescribe(request Request) (*http.Response, []byte, error) {
 	}
 
 	sinkId := stream.NetAddr2SinkId(request.session.conn.RemoteAddr())
-	sink_ := NewSink(sinkId, request.sourceId, request.session.conn, func(sdp string) {
+	sink := NewSink(sinkId, request.sourceId, request.session.conn, func(sdp string) {
+		// 响应sdp回调
 		response = NewOKResponse(request.headers.Get("Cseq"))
 		response.Header.Set("Content-Type", "application/sdp")
 		request.session.response(response, []byte(sdp))
 	})
 
-	sink_.SetUrlValues(request.url.Query())
-	_, code := stream.PreparePlaySink(sink_)
+	sink.SetUrlValues(request.url.Query())
+	_, code := stream.PreparePlaySinkWithReady(sink, false)
 	if utils.HookStateOK != code {
-		return nil, nil, fmt.Errorf("hook failed. code:%d", code)
+		return nil, nil, fmt.Errorf("hook failed. code: %d", code)
 	}
 
-	request.session.sink_ = sink_.(*sink)
+	request.session.sink = sink.(*Sink)
 	return nil, body, err
 }
 
 func (h handler) OnSetup(request Request) (*http.Response, []byte, error) {
 	var response *http.Response
 
-	//修复rtsp拉流携带参数,参数解析失败.
+	// 修复解析拉流携带的参数失败问题
 	params := strings.ReplaceAll(request.url.RawQuery, "/?", "&")
 	query, err := url.ParseQuery(params)
 	if err != nil {
@@ -196,14 +197,14 @@ func (h handler) OnSetup(request Request) (*http.Response, []byte, error) {
 	}
 
 	ssrc := 0xFFFFFFFF
-	rtpPort, rtcpPort, err := request.session.sink_.addSender(index, tcp, uint32(ssrc))
+	rtpPort, rtcpPort, err := request.session.sink.AddSender(index, tcp, uint32(ssrc))
 	if err != nil {
 		return nil, nil, err
 	}
 
 	responseHeader := transportHeader
 	if tcp {
-		//修改interleaved为实际的stream index
+		// 修改interleaved为实际的stream index
 		responseHeader += ";interleaved=" + fmt.Sprintf("%d-%d", index, index)
 	} else {
 		responseHeader += ";server_port=" + fmt.Sprintf("%d-%d", rtpPort, rtcpPort)
@@ -225,7 +226,14 @@ func (h handler) OnPlay(request Request) (*http.Response, []byte, error) {
 		response.Header.Set("Session", sessionHeader)
 	}
 
-	request.session.sink_.playing = true
+	sink := request.session.sink
+	sink.SetReady(true)
+	source := stream.SourceManager.Find(sink.GetSourceID())
+	if source == nil {
+		return nil, nil, fmt.Errorf("Source with ID %s does not exist.", request.sourceId)
+	}
+
+	source.AddSink(sink)
 	return response, nil, nil
 }
 
@@ -239,7 +247,7 @@ func (h handler) OnPause(request Request) (*http.Response, []byte, error) {
 	return response, nil, nil
 }
 
-func newHandler(password string) *handler {
+func NewHandler(password string) *handler {
 	h := handler{
 		methods:  make(map[string]reflect.Value, 10),
 		password: password,

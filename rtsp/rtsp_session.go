@@ -44,7 +44,7 @@ func init() {
 type session struct {
 	conn net.Conn
 
-	sink_       *sink
+	sink        *Sink
 	sessionId   string
 	writeBuffer *bytes.Buffer //响应体缓冲区
 	state       SessionState
@@ -89,9 +89,9 @@ func (s *session) close() {
 		s.conn = nil
 	}
 
-	if s.sink_ != nil {
-		s.sink_.Close()
-		s.sink_ = nil
+	if s.sink != nil {
+		s.sink.Close()
+		s.sink = nil
 	}
 }
 

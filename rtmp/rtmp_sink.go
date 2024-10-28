@@ -12,11 +12,11 @@ type Sink struct {
 	stack *librtmp.Stack
 }
 
-func (s *Sink) Start() {
-	_ = s.stack.SendStreamBeginChunk(s.Conn)
+func (s *Sink) StartStreaming(_ stream.TransStream) error {
+	return s.stack.SendStreamBeginChunk(s.Conn)
 }
 
-func (s *Sink) Flush() {
+func (s *Sink) StopStreaming(_ stream.TransStream) {
 	_ = s.stack.SendStreamEOFChunk(s.Conn)
 }
 
@@ -27,7 +27,7 @@ func (s *Sink) Close() {
 
 func NewSink(id stream.SinkID, sourceId string, conn net.Conn, stack *librtmp.Stack) stream.Sink {
 	return &Sink{
-		BaseSink: stream.BaseSink{ID: id, SourceID: sourceId, State: stream.SessionStateCreate, Protocol: stream.TransStreamRtmp, Conn: conn, DesiredAudioCodecId_: utils.AVCodecIdNONE, DesiredVideoCodecId_: utils.AVCodecIdNONE},
+		BaseSink: stream.BaseSink{ID: id, SourceID: sourceId, State: stream.SessionStateCreate, Protocol: stream.TransStreamRtmp, Conn: conn, DesiredAudioCodecId_: utils.AVCodecIdNONE, DesiredVideoCodecId_: utils.AVCodecIdNONE, TCPStreaming: true},
 		stack:    stack,
 	}
 }

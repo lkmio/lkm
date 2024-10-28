@@ -1,53 +1,68 @@
 package stream
 
 import (
-	"github.com/lkmio/avformat/transport"
 	"github.com/lkmio/avformat/utils"
-	"github.com/lkmio/lkm/log"
 )
 
-// TransStream 将AVPacket封装成传输流，转发给各个Sink
+// TransStream 将AVPacket封装成传输流
 type TransStream interface {
-	Init()
+	GetID() TransStreamID
 
-	Input(packet utils.AVPacket) error
+	SetID(id TransStreamID)
+
+	Input(packet utils.AVPacket) ([][]byte, int64, bool, error)
 
 	AddTrack(stream utils.AVStream) error
 
+	TrackCount() int
+
+	GetTracks() []utils.AVStream
+
 	WriteHeader() error
 
-	AddSink(sink Sink) error
+	// GetProtocol 返回输出流协议
+	GetProtocol() TransStreamProtocol
 
-	ExistSink(id SinkID) bool
+	// ReadExtraData 获取封装后的编码器扩展数据
+	ReadExtraData(timestamp int64) ([][]byte, int64, error)
 
-	RemoveSink(id SinkID) (Sink, bool)
+	// ReadKeyFrameBuffer 读取已经缓存的包含关键视频帧的输出流
+	ReadKeyFrameBuffer() ([][]byte, int64, error)
 
-	PopAllSink(handler func(sink Sink))
+	Close() ([][]byte, int64, error)
 
-	AllSink() []Sink
+	ClearOutStreamBuffer()
 
-	Close() error
+	AppendOutStreamBuffer(buffer []byte)
 
-	SendPacket(data []byte) error
+	// OutStreamBufferCapacity 返回输出流缓冲区的容量大小, 输出流缓冲区同时作为向sink推流的发送缓冲区, 容量大小决定向sink异步推流的队列大小;
+	OutStreamBufferCapacity() int
 
-	Protocol() TransStreamProtocol
+	IsExistVideo() bool
 }
 
 type BaseTransStream struct {
-	Sinks map[SinkID]Sink
 	//muxer      stream.Muxer
+	ID         TransStreamID
 	Tracks     []utils.AVStream
 	Completed  bool
 	ExistVideo bool
-	Protocol_  TransStreamProtocol
+	Protocol   TransStreamProtocol
+
+	OutBuffer     [][]byte // 完成封装的输出流队列
+	OutBufferSize int
 }
 
-func (t *BaseTransStream) Init() {
-	t.Sinks = make(map[SinkID]Sink, 64)
+func (t *BaseTransStream) GetID() TransStreamID {
+	return t.ID
 }
 
-func (t *BaseTransStream) Input(packet utils.AVPacket) error {
-	return nil
+func (t *BaseTransStream) SetID(id TransStreamID) {
+	t.ID = id
+}
+
+func (t *BaseTransStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, error) {
+	return nil, -1, false, nil
 }
 
 func (t *BaseTransStream) AddTrack(stream utils.AVStream) error {
@@ -58,82 +73,68 @@ func (t *BaseTransStream) AddTrack(stream utils.AVStream) error {
 	return nil
 }
 
-func (t *BaseTransStream) AddSink(sink Sink) error {
-	t.Sinks[sink.GetID()] = sink
-	sink.Start()
-	return nil
+func (t *BaseTransStream) Close() ([][]byte, int64, error) {
+	return nil, 0, nil
 }
 
-func (t *BaseTransStream) ExistSink(id SinkID) bool {
-	_, ok := t.Sinks[id]
-	return ok
+func (t *BaseTransStream) GetProtocol() TransStreamProtocol {
+	return t.Protocol
 }
 
-func (t *BaseTransStream) RemoveSink(id SinkID) (Sink, bool) {
-	sink, ok := t.Sinks[id]
-	if ok {
-		delete(t.Sinks, id)
+func (t *BaseTransStream) ClearOutStreamBuffer() {
+	t.OutBufferSize = 0
+}
+
+func (t *BaseTransStream) AppendOutStreamBuffer(buffer []byte) {
+	if t.OutBufferSize+1 > len(t.OutBuffer) {
+		// 扩容
+		size := (t.OutBufferSize + 1) * 2
+		newBuffer := make([][]byte, size)
+		for i := 0; i < t.OutBufferSize; i++ {
+			newBuffer[i] = t.OutBuffer[i]
+		}
+
+		t.OutBuffer = newBuffer
 	}
 
-	return sink, ok
+	t.OutBuffer[t.OutBufferSize] = buffer
+	t.OutBufferSize++
 }
 
-func (t *BaseTransStream) PopAllSink(handler func(sink Sink)) {
-	for _, sink := range t.Sinks {
-		handler(sink)
-	}
-
-	t.Sinks = nil
+func (t *BaseTransStream) OutStreamBufferCapacity() int {
+	return 0
 }
 
-func (t *BaseTransStream) AllSink() []Sink {
-	//TODO implement me
-	panic("implement me")
+func (t *BaseTransStream) TrackCount() int {
+	return len(t.Tracks)
 }
 
-func (t *BaseTransStream) Close() error {
-	return nil
+func (t *BaseTransStream) GetTracks() []utils.AVStream {
+	return t.Tracks
 }
 
-func (t *BaseTransStream) SendPacket(data []byte) error {
-	for _, sink := range t.Sinks {
-		sink.Input(data)
-	}
-
-	return nil
+func (t *BaseTransStream) IsExistVideo() bool {
+	return t.ExistVideo
 }
 
-func (t *BaseTransStream) Protocol() TransStreamProtocol {
-	return t.Protocol_
+func (t *BaseTransStream) ReadExtraData(timestamp int64) ([][]byte, int64, error) {
+	return nil, 0, nil
+}
+
+func (t *BaseTransStream) ReadKeyFrameBuffer() ([][]byte, int64, error) {
+	return nil, 0, nil
 }
 
 type TCPTransStream struct {
 	BaseTransStream
+
+	// 合并写内存泄露问题: 推流结束后, mwBuffer的data一直释放不掉, 只有拉流全部断开之后, 才会释放该内存.
+	// 起初怀疑是代码层哪儿有问题, 但是测试发现如果将合并写切片再拷贝一次发送 给sink, 推流结束后，mwBuffer的data内存块释放没问题, 只有拷贝的内存块未释放. 所以排除了代码层造成内存泄露的可能性.
+	// 看来是conn在write后还会持有data. 查阅代码发现, 的确如此. 向fd发送数据前buffer会引用data, 但是后续没有赋值为nil, 取消引用. https://github.com/golang/go/blob/d38f1d13fa413436d38d86fe86d6a146be44bb84/src/internal/poll/fd_windows.go#L694
+	MWBuffer MergeWritingBuffer //合并写缓冲区, 同时作为用户态的发送缓冲区
 }
 
-func (t *TCPTransStream) AddSink(sink Sink) error {
-	if err := t.BaseTransStream.AddSink(sink); err != nil {
-		return err
-	}
-
-	if sink.GetConn() != nil {
-		sink.GetConn().(*transport.Conn).EnableAsyncWriteMode(AppConfig.WriteBufferNumber - 1)
-	}
-	return nil
-}
-
-func (t *TCPTransStream) SendPacket(data []byte) error {
-	for _, sink := range t.Sinks {
-		err := sink.Input(data)
-		if err == nil {
-			continue
-		}
-
-		if _, ok := err.(*transport.ZeroWindowSizeError); ok {
-			log.Sugar.Errorf("发送超时, 强制断开连接 sink:%s", sink.String())
-			sink.GetConn().Close()
-		}
-	}
-
-	return nil
+func (t *TCPTransStream) OutStreamBufferCapacity() int {
+	utils.Assert(t.MWBuffer != nil)
+	return t.MWBuffer.Capacity()
 }

@@ -18,23 +18,18 @@ type transStream struct {
 	muxer      libflv.Muxer
 	audioChunk librtmp.Chunk
 	videoChunk librtmp.Chunk
-
-	//合并写内存泄露问题: 推流结束后, mwBuffer的data一直释放不掉, 只有拉流全部断开之后, 才会释放该内存.
-	//起初怀疑是代码层哪儿有问题, 但是测试发现如果将合并写切片再拷贝一次发送 给sink, 推流结束后，mwBuffer的data内存块释放没问题, 只有拷贝的内存块未释放. 所以排除了代码层造成内存泄露的可能性.
-	//看来是conn在write后还会持有data. 查阅代码发现, 的确如此. 向fd发送数据前buffer会引用data, 但是后续没有赋值为nil, 取消引用. https://github.com/golang/go/blob/d38f1d13fa413436d38d86fe86d6a146be44bb84/src/internal/poll/fd_windows.go#L694
-	mwBuffer stream.MergeWritingBuffer //合并写同时作为, 用户态的发送缓冲区
 }
 
-func (t *transStream) Input(packet utils.AVPacket) error {
-	utils.Assert(t.BaseTransStream.Completed)
+func (t *transStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, error) {
+	t.ClearOutStreamBuffer()
 
 	var data []byte
 	var chunk *librtmp.Chunk
 	var videoPkt bool
 	var videoKey bool
-	//rtmp chunk消息体的数据大小
+	// rtmp chunk消息体的数据大小
 	var payloadSize int
-	//先向rtmp buffer写的flv头,再按照chunk size分割,所以第一个chunk要跳过flv头大小
+	// 先向rtmp buffer写的flv头,再按照chunk size分割,所以第一个chunk要跳过flv头大小
 	var chunkPayloadOffset int
 	var dts int64
 	var pts int64
@@ -57,32 +52,32 @@ func (t *transStream) Input(packet utils.AVPacket) error {
 		payloadSize += chunkPayloadOffset + len(data)
 	}
 
-	//遇到视频关键帧, 发送剩余的流, 创建新切片
+	// 遇到视频关键帧, 发送剩余的流, 创建新切片
 	if videoKey {
-		if segment := t.mwBuffer.FlushSegment(); len(segment) > 0 {
-			t.SendPacket(segment)
+		if segment := t.MWBuffer.FlushSegment(); len(segment) > 0 {
+			t.AppendOutStreamBuffer(segment)
 		}
 	}
 
-	//分配内存
-	//固定type0
+	// 分配内存
+	// 固定type0
 	chunkHeaderSize := 12
-	//type3chunk数量
+	// type3chunk数量
 	numChunks := (payloadSize - 1) / t.chunkSize
 	rtmpMsgSize := chunkHeaderSize + payloadSize + numChunks
-	//如果时间戳超过3字节, 每个chunk都需要多4字节的扩展时间戳
+	// 如果时间戳超过3字节, 每个chunk都需要多4字节的扩展时间戳
 	if dts >= 0xFFFFFF && dts <= 0xFFFFFFFF {
 		rtmpMsgSize += (1 + numChunks) * 4
 	}
 
-	allocate := t.mwBuffer.Allocate(rtmpMsgSize, dts, videoKey)
+	allocate := t.MWBuffer.Allocate(rtmpMsgSize, dts, videoKey)
 
-	//写chunk header
+	// 写chunk header
 	chunk.Length = payloadSize
 	chunk.Timestamp = uint32(dts)
 	n := chunk.ToBytes(allocate)
 
-	//写flv
+	// 写flv
 	if videoPkt {
 		n += t.muxer.WriteVideoData(allocate[n:], uint32(ct), packet.KeyFrame(), false)
 	} else {
@@ -92,25 +87,30 @@ func (t *transStream) Input(packet utils.AVPacket) error {
 	n += chunk.WriteData(allocate[n:], data, t.chunkSize, chunkPayloadOffset)
 	utils.Assert(len(allocate) == n)
 
-	//合并写满了再发
-	if segment := t.mwBuffer.PeekCompletedSegment(); len(segment) > 0 {
-		t.SendPacket(segment)
+	// 合并写满了再发
+	if segment := t.MWBuffer.PeekCompletedSegment(); len(segment) > 0 {
+		t.AppendOutStreamBuffer(segment)
 	}
-	return nil
+
+	return t.OutBuffer[:t.OutBufferSize], 0, true, nil
 }
 
-func (t *transStream) AddSink(sink stream.Sink) error {
+func (t *transStream) ReadExtraData(_ int64) ([][]byte, int64, error) {
 	utils.Assert(t.headerSize > 0)
 
-	t.TCPTransStream.AddSink(sink)
-	//发送sequence header
-	sink.Input(t.header[:t.headerSize])
+	// 发送sequence header
+	return [][]byte{t.header[:t.headerSize]}, 0, nil
+}
 
-	//发送当前内存池已有的合并写切片
-	t.mwBuffer.ReadSegmentsFromKeyFrameIndex(func(bytes []byte) {
-		sink.Input(bytes)
+func (t *transStream) ReadKeyFrameBuffer() ([][]byte, int64, error) {
+	t.ClearOutStreamBuffer()
+
+	// 发送当前内存池已有的合并写切片
+	t.MWBuffer.ReadSegmentsFromKeyFrameIndex(func(bytes []byte) {
+		t.AppendOutStreamBuffer(bytes)
 	})
-	return nil
+
+	return t.OutBuffer[:t.OutBufferSize], 0, nil
 }
 
 func (t *transStream) WriteHeader() error {
@@ -136,7 +136,7 @@ func (t *transStream) WriteHeader() error {
 
 	utils.Assert(audioStream != nil || videoStream != nil)
 
-	//初始化
+	// 初始化
 	t.BaseTransStream.Completed = true
 	t.header = make([]byte, 1024)
 	t.muxer = libflv.NewMuxer()
@@ -148,7 +148,7 @@ func (t *transStream) WriteHeader() error {
 		t.muxer.AddVideoTrack(videoCodecId)
 	}
 
-	//统一生成rtmp拉流需要的数据头(chunk+sequence header)
+	// 生成推流的数据头(chunk+sequence header)
 	var n int
 	if audioStream != nil {
 		n += t.muxer.WriteAudioData(t.header[12:], true)
@@ -174,17 +174,19 @@ func (t *transStream) WriteHeader() error {
 	}
 
 	t.headerSize = n
-
-	t.mwBuffer = stream.NewMergeWritingBuffer(t.ExistVideo)
+	t.MWBuffer = stream.NewMergeWritingBuffer(t.ExistVideo)
 	return nil
 }
 
-func (t *transStream) Close() error {
+func (t *transStream) Close() ([][]byte, int64, error) {
+	t.ClearOutStreamBuffer()
+
 	//发送剩余的流
-	if segment := t.mwBuffer.FlushSegment(); len(segment) > 0 {
-		t.SendPacket(segment)
+	if segment := t.MWBuffer.FlushSegment(); len(segment) > 0 {
+		t.AppendOutStreamBuffer(segment)
 	}
-	return nil
+
+	return t.OutBuffer[:t.OutBufferSize], 0, nil
 }
 
 func NewTransStream(chunkSize int) stream.TransStream {

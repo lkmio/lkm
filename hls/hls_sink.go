@@ -27,7 +27,19 @@ func (s *M3U8Sink) SendM3U8Data(data *string) error {
 	return nil
 }
 
-func (s *M3U8Sink) Start() {
+func (s *M3U8Sink) StartStreaming(transStream stream.TransStream) error {
+	hls := transStream.(*TransStream)
+
+	if hls.m3u8.Size() > 0 {
+		if err := s.SendM3U8Data(&hls.m3u8StringFormat); err != nil {
+			return err
+		}
+	} else {
+		// m3u8文件中还没有切片时, 将sink添加到等待队列
+		hls.m3u8Sinks[s.GetID()] = s
+	}
+
+	// 开启拉流超时计时器, 如果拉流端查时间没有拉流, 关闭sink
 	timeout := time.Duration(stream.AppConfig.IdleTimeout)
 	if timeout < time.Second {
 		timeout = time.Duration(stream.AppConfig.Hls.Duration) * 2 * 3 * time.Second
@@ -43,6 +55,8 @@ func (s *M3U8Sink) Start() {
 
 		s.playTimer.Reset(timeout)
 	})
+
+	return nil
 }
 
 func (s *M3U8Sink) GetM3U8String() string {
@@ -67,7 +81,7 @@ func (s *M3U8Sink) Close() {
 
 func NewM3U8Sink(id stream.SinkID, sourceId string, cb func(m3u8 []byte), sessionId string) stream.Sink {
 	return &M3U8Sink{
-		BaseSink:  stream.BaseSink{ID: id, SourceID: sourceId, Protocol: stream.TransStreamHls},
+		BaseSink:  stream.BaseSink{ID: id, SourceID: sourceId, Protocol: stream.TransStreamHls, TCPStreaming: true},
 		cb:        cb,
 		sessionId: sessionId,
 	}

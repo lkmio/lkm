@@ -88,7 +88,7 @@ func main() {
 		log.Sugar.Info("启动rtsp服务成功 addr:", rtspAddr.String())
 	}
 
-	log.Sugar.Info("启动Http服务 addr:", stream.ListenAddr(stream.AppConfig.Http.Port))
+	log.Sugar.Info("启动http服务 addr:", stream.ListenAddr(stream.AppConfig.Http.Port))
 	go startApiServer(net.JoinHostPort(stream.AppConfig.ListenIP, strconv.Itoa(stream.AppConfig.Http.Port)))
 
 	//单端口模式下, 启动时就创建收流端口
@@ -101,7 +101,7 @@ func main() {
 			}
 
 			gb28181.SharedUDPServer = server
-			log.Sugar.Info("启动GB28181 UDP收流端口成功:" + stream.ListenAddr(stream.AppConfig.GB28181.Port[0]))
+			log.Sugar.Info("启动GB28181 udp收流端口成功:" + stream.ListenAddr(stream.AppConfig.GB28181.Port[0]))
 		}
 
 		if stream.AppConfig.GB28181.IsEnableTCP() {
@@ -111,7 +111,7 @@ func main() {
 			}
 
 			gb28181.SharedTCPServer = server
-			log.Sugar.Info("启动GB28181 TCP收流端口成功:" + stream.ListenAddr(stream.AppConfig.GB28181.Port[0]))
+			log.Sugar.Info("启动GB28181 tcp收流端口成功:" + stream.ListenAddr(stream.AppConfig.GB28181.Port[0]))
 		}
 	}
 

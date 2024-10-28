@@ -17,10 +17,22 @@ type ReceiveBuffer struct {
 	index      int
 }
 
+func (r *ReceiveBuffer) Index() int {
+	return r.index
+}
+
+func (r *ReceiveBuffer) Get(index int) []byte {
+	return r.data[index*r.blockSize : (index+1)*r.blockSize]
+}
+
 func (r *ReceiveBuffer) GetBlock() []byte {
 	bytes := r.data[r.index*r.blockSize:]
 	r.index = (r.index + 1) % r.blockCount
 	return bytes[:r.blockSize]
+}
+
+func (r *ReceiveBuffer) BlockCount() int {
+	return r.blockCount
 }
 
 func NewReceiveBuffer(blockSize, blockCount int) *ReceiveBuffer {

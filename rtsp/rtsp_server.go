@@ -16,7 +16,7 @@ type Server interface {
 
 func NewServer(password string) Server {
 	return &server{
-		handler: newHandler(password),
+		handler: NewHandler(password),
 	}
 }
 

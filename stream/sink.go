@@ -16,9 +16,7 @@ type Sink interface {
 
 	GetSourceID() string
 
-	Input(data []byte) error
-
-	SendHeader(data []byte) error
+	Write(index int, data [][]byte, ts int64) error
 
 	GetTransStreamID() TransStreamID
 
@@ -61,11 +59,25 @@ type Sink interface {
 
 	SetUrlValues(values url.Values)
 
-	Start()
+	// StartStreaming Source向Sink开始推流时调用
+	StartStreaming(stream TransStream) error
 
-	Flush()
+	// StopStreaming Source向Sink停止推流时调用
+	StopStreaming(stream TransStream)
 
 	GetConn() net.Conn
+
+	IsTCPStreaming() bool
+
+	GetSentPacketCount() int
+
+	SetSentPacketCount(int)
+
+	IncreaseSentPacketCount()
+
+	IsReady() bool
+
+	SetReady(ok bool)
 }
 
 type BaseSink struct {
@@ -76,14 +88,17 @@ type BaseSink struct {
 	TransStreamID TransStreamID
 	disableVideo  bool
 
-	lock            sync.RWMutex
-	HasSentKeyVideo bool // 是否已经发送视频关键帧，未开启GOP缓存的情况下，为避免播放花屏，发送的首个视频帧必须为关键帧
+	lock sync.RWMutex
 
 	DesiredAudioCodecId_ utils.AVCodecID
 	DesiredVideoCodecId_ utils.AVCodecID
 
-	Conn      net.Conn
-	urlValues url.Values // 拉流时携带的Url参数
+	Conn         net.Conn   // 拉流信令链路
+	TCPStreaming bool       // 是否是TCP流式拉流
+	urlValues    url.Values // 拉流时携带的Url参数
+
+	SentPacketCount int // 发包计数
+	Ready           bool
 }
 
 func (s *BaseSink) GetID() SinkID {
@@ -94,18 +109,17 @@ func (s *BaseSink) SetID(id SinkID) {
 	s.ID = id
 }
 
-func (s *BaseSink) Input(data []byte) error {
+func (s *BaseSink) Write(index int, data [][]byte, ts int64) error {
 	if s.Conn != nil {
-		_, err := s.Conn.Write(data)
-
-		return err
+		for _, bytes := range data {
+			_, err := s.Conn.Write(bytes)
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil
-}
-
-func (s *BaseSink) SendHeader(data []byte) error {
-	return s.Input(data)
 }
 
 func (s *BaseSink) GetSourceID() string {
@@ -133,7 +147,7 @@ func (s *BaseSink) UnLock() {
 }
 
 func (s *BaseSink) GetState() SessionState {
-	utils.Assert(!s.lock.TryLock())
+	//utils.Assert(!s.lock.TryLock())
 
 	return s.State
 }
@@ -161,11 +175,8 @@ func (s *BaseSink) DesiredVideoCodecId() utils.AVCodecID {
 }
 
 // Close 做如下事情:
-// 1. Sink如果正在拉流,删除任务交给Source处理. 否则直接从等待队列删除Sink.
+// 1. Sink如果正在拉流, 删除任务交给Source处理, 否则直接从等待队列删除Sink.
 // 2. 发送PlayDoneHook事件
-// 什么时候调用Close? 是否考虑线程安全?
-// 拉流断开连接,不需要考虑线程安全
-// 踢流走source管道删除,并且关闭Conn
 func (s *BaseSink) Close() {
 	if SessionStateClosed == s.State {
 		return
@@ -195,9 +206,10 @@ func (s *BaseSink) Close() {
 	}
 
 	if state == SessionStateTransferring {
-		// 从Source中删除Sink
-		source := SourceManager.Find(s.SourceID)
-		source.RemoveSink(s)
+		// 从source中删除sink, 如果source为nil, 已经结束推流.
+		if source := SourceManager.Find(s.SourceID); source != nil {
+			source.RemoveSink(s)
+		}
 	} else if state == SessionStateWait {
 		// 从等待队列中删除Sink
 		RemoveSinkFromWaitingQueue(s.SourceID, s.ID)
@@ -225,14 +237,38 @@ func (s *BaseSink) SetUrlValues(values url.Values) {
 	s.urlValues = values
 }
 
-func (s *BaseSink) Start() {
-
+func (s *BaseSink) StartStreaming(stream TransStream) error {
+	return nil
 }
 
-func (s *BaseSink) Flush() {
+func (s *BaseSink) StopStreaming(stream TransStream) {
 
 }
 
 func (s *BaseSink) GetConn() net.Conn {
 	return s.Conn
+}
+
+func (s *BaseSink) IsTCPStreaming() bool {
+	return s.TCPStreaming
+}
+
+func (s *BaseSink) GetSentPacketCount() int {
+	return s.SentPacketCount
+}
+
+func (s *BaseSink) SetSentPacketCount(count int) {
+	s.SentPacketCount = count
+}
+
+func (s *BaseSink) IncreaseSentPacketCount() {
+	s.SentPacketCount++
+}
+
+func (s *BaseSink) IsReady() bool {
+	return s.Ready
+}
+
+func (s *BaseSink) SetReady(ok bool) {
+	s.Ready = ok
 }

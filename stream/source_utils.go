@@ -36,13 +36,13 @@ const (
 )
 
 const (
-	SessionStateCreate           = SessionState(1) //新建状态
-	SessionStateHandshaking      = SessionState(2) //握手中
-	SessionStateHandshakeFailure = SessionState(3) //握手失败
-	SessionStateHandshakeDone    = SessionState(4) //握手完成
-	SessionStateWait             = SessionState(5) //位于等待队列中
-	SessionStateTransferring     = SessionState(6) //推拉流中
-	SessionStateClosed           = SessionState(7) //关闭状态
+	SessionStateCreate           = SessionState(1) // 新建状态
+	SessionStateHandshaking      = SessionState(2) // 握手中
+	SessionStateHandshakeFailure = SessionState(3) // 握手失败
+	SessionStateHandshakeDone    = SessionState(4) // 握手完成
+	SessionStateWait             = SessionState(5) // 位于等待队列中
+	SessionStateTransferring     = SessionState(6) // 推拉流中
+	SessionStateClosed           = SessionState(7) // 关闭状态
 )
 
 func (s SourceType) ToString() string {

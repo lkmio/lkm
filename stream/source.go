@@ -2,6 +2,7 @@ package stream
 
 import (
 	"fmt"
+	"github.com/lkmio/avformat/transport"
 	"github.com/lkmio/lkm/collections"
 	"github.com/lkmio/lkm/log"
 	"net"
@@ -90,12 +91,15 @@ type Source interface {
 	// PostEvent 切换到主协程执行当前函数
 	PostEvent(cb func())
 
+	// LastPacketTime 返回最近收流时间戳
 	LastPacketTime() time.Time
 
 	SetLastPacketTime(time2 time.Time)
 
+	// SinkCount 返回拉流计数
 	SinkCount() int
 
+	// LastStreamEndTime 返回最近结束拉流时间戳
 	LastStreamEndTime() time.Time
 
 	SetReceiveDataTimer(timer *time.Timer)
@@ -111,6 +115,8 @@ type Source interface {
 	CreateTime() time.Time
 
 	SetCreateTime(time time.Time)
+
+	PlaySink(sin Sink)
 }
 
 type PublishSource struct {
@@ -138,7 +144,9 @@ type PublishSource struct {
 	receiveDataTimer *time.Timer // 收流超时计时器
 	idleTimer        *time.Timer // 拉流空闲计时器
 
-	TransStreams map[TransStreamID]TransStream //所有的输出流, 持有Sink
+	TransStreams     map[TransStreamID]TransStream     // 所有的输出流, 持有Sink
+	Sinks            map[SinkID]Sink                   // 保存所有Sink
+	TransStreamSinks map[TransStreamID]map[SinkID]Sink // 输出流对应的Sink
 
 	streamPipe        chan []byte // 推流数据管道
 	mainContextEvents chan func() // 切换到主协程执行函数的事件管道
@@ -202,6 +210,10 @@ func (s *PublishSource) Init(receiveQueueSize int) {
 	// -2是为了保证从管道取到流, 到处理完流整个过程安全的, 不会被覆盖
 	s.streamPipe = make(chan []byte, receiveQueueSize-2)
 	s.mainContextEvents = make(chan func(), 128)
+
+	s.TransStreams = make(map[TransStreamID]TransStream, 10)
+	s.Sinks = make(map[SinkID]Sink, 128)
+	s.TransStreamSinks = make(map[TransStreamID]map[SinkID]Sink, len(transStreamFactories)+1)
 }
 
 func (s *PublishSource) CreateDefaultOutStreams() {
@@ -225,14 +237,15 @@ func (s *PublishSource) CreateDefaultOutStreams() {
 		streams := s.OriginStreams()
 		utils.Assert(len(streams) > 0)
 
-		hlsStream, err := s.CreateTransStream(TransStreamHls, streams)
+		id := GenerateTransStreamID(TransStreamHls, streams...)
+		hlsStream, err := s.CreateTransStream(id, TransStreamHls, streams)
 		if err != nil {
 			panic(err)
 		}
 
-		s.dispatchGOPBuffer(hlsStream)
+		s.DispatchGOPBuffer(hlsStream)
 		s.hlsStream = hlsStream
-		s.TransStreams[GenerateTransStreamID(TransStreamHls, streams...)] = s.hlsStream
+		s.TransStreams[id] = s.hlsStream
 	}
 }
 
@@ -279,8 +292,8 @@ func IsSupportMux(protocol TransStreamProtocol, audioCodecId, videoCodecId utils
 	return true
 }
 
-func (s *PublishSource) CreateTransStream(protocol TransStreamProtocol, streams []utils.AVStream) (TransStream, error) {
-	log.Sugar.Debugf("创建%s-stream source:%s", protocol.ToString(), s.ID)
+func (s *PublishSource) CreateTransStream(id TransStreamID, protocol TransStreamProtocol, streams []utils.AVStream) (TransStream, error) {
+	log.Sugar.Debugf("创建%s-stream source: %s", protocol.ToString(), s.ID)
 
 	transStream, err := CreateTransStream(s, protocol, streams)
 	if err != nil {
@@ -288,22 +301,71 @@ func (s *PublishSource) CreateTransStream(protocol TransStreamProtocol, streams 
 		return nil, err
 	}
 
-	for _, avStream := range streams {
-		transStream.AddTrack(avStream)
+	for _, track := range streams {
+		transStream.AddTrack(track)
 	}
 
-	transStream.Init()
+	transStream.SetID(id)
+	// 创建输出流对应的拉流队列
+	s.TransStreamSinks[id] = make(map[SinkID]Sink, 128)
 	_ = transStream.WriteHeader()
 
 	return transStream, err
 }
 
-func (s *PublishSource) dispatchGOPBuffer(transStream TransStream) {
+func (s *PublishSource) DispatchGOPBuffer(transStream TransStream) {
 	s.gopBuffer.PeekAll(func(packet utils.AVPacket) {
-		transStream.Input(packet)
+		s.DispatchPacket(transStream, packet)
 	})
 }
 
+// DispatchPacket 分发AVPacket
+func (s *PublishSource) DispatchPacket(transStream TransStream, packet utils.AVPacket) {
+	data, timestamp, videoKey, err := transStream.Input(packet)
+	if err != nil || len(data) < 1 {
+		return
+	}
+
+	s.DispatchBuffer(transStream, packet.Index(), data, timestamp, videoKey)
+}
+
+// DispatchBuffer 分发传输流
+func (s *PublishSource) DispatchBuffer(transStream TransStream, index int, data [][]byte, timestamp int64, videoKey bool) {
+	sinks := s.TransStreamSinks[transStream.GetID()]
+	exist := transStream.IsExistVideo()
+	for _, sink := range sinks {
+
+		// 如果存在视频, 确保向sink发送的第一帧是关键帧
+		if exist && sink.GetSentPacketCount() < 1 {
+			if !videoKey {
+				continue
+			}
+
+			if extraData, _, _ := transStream.ReadExtraData(timestamp); len(extraData) > 0 {
+				s.write(sink, index, extraData, timestamp)
+			}
+		}
+
+		s.write(sink, index, data, timestamp)
+	}
+}
+
+// 向sink推流
+func (s *PublishSource) write(sink Sink, index int, data [][]byte, timestamp int64) {
+	err := sink.Write(index, data, timestamp)
+	if err == nil {
+		sink.IncreaseSentPacketCount()
+		//return
+	}
+
+	// 内核发送缓冲区满, 清空sink的发送缓冲区, 等下次关键帧时再尝试发送。
+	//_, ok := err.(*transport.ZeroWindowSizeError)
+	//if ok {
+	//	conn, ok := sink.GetConn().(*transport.Conn)
+	//}
+}
+
+// 创建sink需要的输出流
 func (s *PublishSource) doAddSink(sink Sink) bool {
 	// 暂时不考虑多路视频流，意味着只能1路视频流和多路音频流，同理originStreams和allStreams里面的Stream互斥. 同时多路音频流的Codec必须一致
 	audioCodecId, videoCodecId := sink.DesiredAudioCodecId(), sink.DesiredVideoCodecId()
@@ -352,14 +414,10 @@ func (s *PublishSource) doAddSink(sink Sink) bool {
 	}
 
 	transStreamId := GenerateTransStreamID(sink.GetProtocol(), streams[:size]...)
-	transStream, ok := s.TransStreams[transStreamId]
-	if !ok {
-		if s.TransStreams == nil {
-			s.TransStreams = make(map[TransStreamID]TransStream, 10)
-		}
-
+	transStream, exist := s.TransStreams[transStreamId]
+	if !exist {
 		var err error
-		transStream, err = s.CreateTransStream(sink.GetProtocol(), streams[:size])
+		transStream, err = s.CreateTransStream(transStreamId, sink.GetProtocol(), streams[:size])
 		if err != nil {
 			log.Sugar.Errorf("创建传输流失败 err: %s source: %s", err.Error(), s.ID)
 			return false
@@ -377,19 +435,50 @@ func (s *PublishSource) doAddSink(sink Sink) bool {
 		if SessionStateClosed == sink.GetState() {
 			log.Sugar.Warnf("AddSink失败, sink已经断开连接 %s", sink.String())
 		} else {
-			transStream.AddSink(sink)
+			sink.SetState(SessionStateTransferring)
 		}
-		sink.SetState(SessionStateTransferring)
 	}
 
+	err := sink.StartStreaming(transStream)
+	if err != nil {
+		log.Sugar.Errorf("开始推流失败 err: %s", err.Error())
+		return false
+	}
+
+	// 还没准备好推流, 暂不推流
+	if !sink.IsReady() {
+		return true
+	}
+
+	// TCP拉流开启异步发包
+	conn, ok := sink.GetConn().(*transport.Conn)
+	if ok && sink.IsTCPStreaming() && transStream.OutStreamBufferCapacity() > 2 {
+		conn.EnableAsyncWriteMode(transStream.OutStreamBufferCapacity() - 2)
+	}
+
+	// 发送已有的缓存数据
+	// 此处发送缓存数据，必须要存在关键帧的输出流才发，否则等DispatchPacket时再发送extra。
+	data, timestamp, _ := transStream.ReadKeyFrameBuffer()
+	if len(data) > 0 {
+		if extraData, _, _ := transStream.ReadExtraData(timestamp); len(extraData) > 0 {
+			s.write(sink, 0, extraData, timestamp)
+		}
+
+		s.write(sink, 0, data, timestamp)
+	}
+
+	// 累加拉流计数
 	if s.recordSink != sink {
 		s.sinkCount++
 		log.Sugar.Infof("sink count: %d source: %s", s.sinkCount, s.ID)
 	}
 
-	// 新建传输流，发送缓存的音视频帧
-	if !ok && AppConfig.GOPCache && s.existVideo {
-		s.dispatchGOPBuffer(transStream)
+	s.Sinks[sink.GetID()] = sink
+	s.TransStreamSinks[transStreamId][sink.GetID()] = sink
+
+	// 新建传输流，发送已经缓存的音视频帧
+	if !exist && AppConfig.GOPCache && s.existVideo {
+		s.DispatchGOPBuffer(transStream)
 	}
 
 	return true
@@ -415,38 +504,31 @@ func (s *PublishSource) RemoveSink(sink Sink) {
 
 func (s *PublishSource) RemoveSinkWithID(id SinkID) {
 	s.PostEvent(func() {
-		for _, transStream := range s.TransStreams {
-			if sink, _ := transStream.RemoveSink(id); sink != nil {
-				s.doRemoveSink(sink)
-				break
-			}
+		sink, ok := s.Sinks[id]
+		if ok {
+			s.doRemoveSink(sink)
 		}
 	})
 }
 
 func (s *PublishSource) doRemoveSink(sink Sink) bool {
-	id := sink.GetTransStreamID()
-	if id > 0 {
-		transStream := s.TransStreams[id]
+	transStreamSinks := s.TransStreamSinks[sink.GetTransStreamID()]
+	delete(s.Sinks, sink.GetID())
+	delete(transStreamSinks, sink.GetID())
 
-		// 从输出流中删除Sink
-		_, b := transStream.RemoveSink(sink.GetID())
-		if b {
-			s.sinkCount--
-			s.lastStreamEndTime = time.Now()
-			HookPlayDoneEvent(sink)
-			log.Sugar.Infof("sink count: %d source: %s", s.sinkCount, s.ID)
-			return true
-		}
+	s.sinkCount--
+	s.lastStreamEndTime = time.Now()
+
+	log.Sugar.Infof("sink count: %d source: %s", s.sinkCount, s.ID)
+
+	if sink.GetProtocol() == TransStreamHls {
+		// 从HLS拉流队列删除Sink
+		SinkManager.Remove(sink.GetID())
 	}
 
-	// 从等待队列中删除Sink
-	_, b := RemoveSinkFromWaitingQueue(sink.GetSourceID(), sink.GetID())
-
-	// 从HLS拉流队列删除
-	SinkManager.Remove(sink.GetID())
-
-	return b
+	sink.StopStreaming(s.TransStreams[sink.GetTransStreamID()])
+	HookPlayDoneEvent(sink)
+	return true
 }
 
 func (s *PublishSource) SetState(state SessionState) {
@@ -458,7 +540,9 @@ func (s *PublishSource) DoClose() {
 		return
 	}
 
-	log.Sugar.Infof("关闭推流源 id: %s", s.ID)
+	s.closed = true
+
+	log.Sugar.Infof("关闭推流源: %s", s.ID)
 
 	if s.TransDeMuxer != nil {
 		s.TransDeMuxer.Close()
@@ -479,6 +563,7 @@ func (s *PublishSource) DoClose() {
 		s.gopBuffer = nil
 	}
 
+	// 停止所有计时器
 	if s.probeTimer != nil {
 		s.probeTimer.Stop()
 	}
@@ -491,6 +576,7 @@ func (s *PublishSource) DoClose() {
 		s.idleTimer.Stop()
 	}
 
+	// 关闭录制流
 	if s.recordSink != nil {
 		s.recordSink.Close()
 	}
@@ -503,36 +589,46 @@ func (s *PublishSource) DoClose() {
 		log.Sugar.Errorf("删除源失败 source:%s err:%s", s.ID, err.Error())
 	}
 
-	// 将所有Sink添加到等待队列
+	// 关闭所有输出流
 	for _, transStream := range s.TransStreams {
-		transStream.Close()
-
-		transStream.PopAllSink(func(sink Sink) {
-			sink.SetTransStreamID(0)
-			if s.recordSink == sink {
-				return
-			}
-
-			{
-				sink.Lock()
-				defer sink.UnLock()
-
-				if SessionStateClosed == sink.GetState() {
-					log.Sugar.Warnf("添加到sink到等待队列失败, sink已经断开连接 %s", sink.String())
-				} else {
-					sink.SetState(SessionStateWait)
-					AddSinkToWaitingQueue(s.ID, sink)
-				}
-			}
-
-			if SessionStateClosed != sink.GetState() {
-				sink.Flush()
-			}
-		})
+		// 发送剩余包
+		data, ts, _ := transStream.Close()
+		if len(data) > 0 {
+			s.DispatchBuffer(transStream, -1, data, ts, true)
+		}
 	}
 
-	s.closed = true
+	// 将所有sink添加到等待队列
+	for _, sink := range s.Sinks {
+		transStreamID := sink.GetTransStreamID()
+		sink.SetTransStreamID(0)
+		if s.recordSink == sink {
+			return
+		}
+
+		{
+			sink.Lock()
+
+			if SessionStateClosed == sink.GetState() {
+				log.Sugar.Warnf("添加到sink到等待队列失败, sink已经断开连接 %s", sink.String())
+			} else {
+				sink.SetState(SessionStateWait)
+				AddSinkToWaitingQueue(s.ID, sink)
+			}
+
+			sink.UnLock()
+		}
+
+		if SessionStateClosed != sink.GetState() {
+			sink.StopStreaming(s.TransStreams[transStreamID])
+		}
+	}
+
 	s.TransStreams = nil
+	s.Sinks = nil
+	s.TransStreamSinks = nil
+
+	// 异步hook
 	go func() {
 		if s.Conn != nil {
 			s.Conn.Close()
@@ -582,12 +678,12 @@ func (s *PublishSource) OnDeMuxStream(stream utils.AVStream) {
 	// 创建GOPBuffer
 	if AppConfig.GOPCache && s.existVideo && s.gopBuffer == nil {
 		s.gopBuffer = NewStreamBuffer()
-		//设置GOP缓存溢出回调
+		// 设置GOP缓存溢出回调
 		s.gopBuffer.SetDiscardHandler(s.OnDiscardPacket)
 	}
 }
 
-// 解析完所有track后, 做一些初始化工作
+// 解析完所有track后, 创建各种输出流
 func (s *PublishSource) writeHeader() {
 	if s.completed {
 		fmt.Printf("添加Stream失败 Source: %s已经WriteHeader", s.ID)
@@ -600,7 +696,7 @@ func (s *PublishSource) writeHeader() {
 	}
 
 	if len(s.originStreams.All()) == 0 {
-		log.Sugar.Errorf("没有一路流, 删除source:%s", s.ID)
+		log.Sugar.Errorf("没有一路track, 删除source: %s", s.ID)
 		s.DoClose()
 		return
 	}
@@ -608,7 +704,7 @@ func (s *PublishSource) writeHeader() {
 	// 创建录制流和HLS
 	s.CreateDefaultOutStreams()
 
-	// 将等待队列的Sink添加到输出流队列
+	// 将等待队列的sink添加到输出流队列
 	sinks := PopWaitingSinks(s.ID)
 	if s.recordSink != nil {
 		sinks = append(sinks, s.recordSink)
@@ -659,8 +755,8 @@ func (s *PublishSource) OnDeMuxPacket(packet utils.AVPacket) {
 	}
 
 	// 分发给各个传输流
-	for _, stream_ := range s.TransStreams {
-		stream_.Input(packet)
+	for _, transStream := range s.TransStreams {
+		s.DispatchPacket(transStream, packet)
 	}
 
 	// 未开启GOP缓存或只存在音频流, 释放掉内存
@@ -715,4 +811,10 @@ func (s *PublishSource) CreateTime() time.Time {
 
 func (s *PublishSource) SetCreateTime(time time.Time) {
 	s.createTime = time
+}
+
+func (s *PublishSource) PlaySink(sink Sink) {
+	s.PostEvent(func() {
+
+	})
 }

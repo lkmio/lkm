@@ -1,7 +1,6 @@
 package gb28181
 
 import (
-	"encoding/binary"
 	"github.com/lkmio/avformat/librtp"
 	"github.com/lkmio/avformat/transport"
 	"github.com/lkmio/avformat/utils"
@@ -20,7 +19,6 @@ type ForwardSink struct {
 	setup  SetupType
 	socket transport.ITransport
 	ssrc   uint32
-	buffer *stream.ReceiveBuffer //发送缓冲区
 }
 
 func (f *ForwardSink) OnConnected(conn net.Conn) []byte {
@@ -41,7 +39,7 @@ func (f *ForwardSink) OnDisConnected(conn net.Conn, err error) {
 	f.Close()
 }
 
-func (f *ForwardSink) Input(data []byte) error {
+func (f *ForwardSink) Write(index int, data [][]byte, ts int64) error {
 	if SetupUDP != f.setup && f.Conn == nil {
 		return nil
 	}
@@ -52,23 +50,13 @@ func (f *ForwardSink) Input(data []byte) error {
 	}
 
 	// 修改为与上级协商的SSRC
-	librtp.ModifySSRC(data, f.ssrc)
+	librtp.ModifySSRC(data[0], f.ssrc)
 
 	if SetupUDP == f.setup {
-		// UDP转发, 不拷贝直接发送
-		f.socket.(*transport.UDPClient).Write(data)
+		f.socket.(*transport.UDPClient).Write(data[0][2:])
 	} else {
-		// TCP转发, 拷贝一次再发送
-		block := f.buffer.GetBlock()
-		copy(block[2:], data)
-		binary.BigEndian.PutUint16(block, uint16(len(data)))
-
-		if _, err := f.Conn.Write(block[:2+len(data)]); err == nil {
-			return nil
-		} else if _, ok := err.(*transport.ZeroWindowSizeError); ok {
-			log.Sugar.Errorf("发送缓冲区阻塞")
-			f.Conn.Close()
-			f.Conn = nil
+		if _, err := f.Conn.Write(data[0]); err != nil {
+			return err
 		}
 	}
 
@@ -107,6 +95,7 @@ func NewForwardSink(ssrc uint32, serverAddr string, setup SetupType, sinkId stre
 			return nil, 0, err
 		}
 
+		sink.TCPStreaming = true
 		sink.socket = server
 	} else if SetupPassive == setup {
 		client := transport.TCPClient{}
@@ -135,13 +124,10 @@ func NewForwardSink(ssrc uint32, serverAddr string, setup SetupType, sinkId stre
 			return nil, 0, err
 		}
 
+		sink.TCPStreaming = true
 		sink.socket = &client
 	} else {
 		utils.Assert(false)
-	}
-
-	if SetupUDP != setup {
-		sink.buffer = stream.NewReceiveBuffer(RTPOverTCPPacketSize, TcpStreamForwardBufferBlockSize)
 	}
 
 	return sink, sink.socket.ListenPort(), nil

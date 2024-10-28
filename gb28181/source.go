@@ -69,18 +69,21 @@ func (source *BaseGBSource) Init(receiveQueueSize int) {
 	source.PublishSource.Init(receiveQueueSize)
 }
 
-// Input 输入rtp包, 处理PS流, 负责解析->封装->推流. 所有GBSource, 均到此处处理, 在event协程调用此函数
+// Input 输入rtp包, 处理PS流, 负责解析->封装->推流
 func (source *BaseGBSource) Input(data []byte) error {
 	// 国标级联转发
 	for _, transStream := range source.TransStreams {
-		if transStream.Protocol() != stream.TransStreamGBStreamForward {
+		if transStream.GetProtocol() != stream.TransStreamGBStreamForward {
 			continue
 		}
 
-		transStream.(*ForwardStream).SendPacket(data)
+		bytes := transStream.(*ForwardStream).WrapData(data)
+		rtpPacket := [1][]byte{bytes}
+		source.DispatchBuffer(transStream, -1, rtpPacket[:], -1, true)
 	}
 
 	packet := rtp.Packet{}
+	packet.Marshal()
 	_ = packet.Unmarshal(data)
 	return source.deMuxerCtx.Input(packet.Payload)
 }
@@ -228,13 +231,13 @@ func (source *BaseGBSource) correctTimestamp(packet utils.AVPacket, dts, pts int
 func (source *BaseGBSource) Close() {
 	log.Sugar.Infof("GB28181推流结束 ssrc:%d %s", source.ssrc, source.PublishSource.String())
 
-	//释放收流端口
+	// 释放收流端口
 	if source.transport != nil {
 		source.transport.Close()
 		source.transport = nil
 	}
 
-	//删除ssrc关联
+	// 删除ssrc关联
 	if !stream.AppConfig.GB28181.IsMultiPort() {
 		if SharedTCPServer != nil {
 			SharedTCPServer.filter.RemoveSource(source.ssrc)
