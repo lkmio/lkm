@@ -71,11 +71,11 @@ func Hook(event HookEvent, params string, body interface{}) (*http.Response, err
 }
 
 func NewHookPlayEventInfo(sink Sink) eventInfo {
-	return eventInfo{Stream: sink.GetSourceID(), Protocol: sink.GetProtocol().ToString(), RemoteAddr: sink.String()}
+	return eventInfo{Stream: sink.GetSourceID(), Protocol: sink.GetProtocol().String(), RemoteAddr: sink.String()}
 }
 
 func NewHookPublishEventInfo(source Source) eventInfo {
-	return eventInfo{Stream: source.GetID(), Protocol: source.GetType().ToString(), RemoteAddr: source.RemoteAddr()}
+	return eventInfo{Stream: source.GetID(), Protocol: source.GetType().String(), RemoteAddr: source.RemoteAddr()}
 }
 
 func NewRecordEventInfo(source Source, path string) interface{} {

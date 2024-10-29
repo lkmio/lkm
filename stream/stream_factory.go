@@ -21,7 +21,7 @@ func init() {
 func RegisterTransStreamFactory(protocol TransStreamProtocol, streamFunc TransStreamFactory) {
 	_, ok := transStreamFactories[protocol]
 	if ok {
-		panic(fmt.Sprintf("%s has been registered", protocol.ToString()))
+		panic(fmt.Sprintf("%s has been registered", protocol.String()))
 	}
 
 	transStreamFactories[protocol] = streamFunc
@@ -30,7 +30,7 @@ func RegisterTransStreamFactory(protocol TransStreamProtocol, streamFunc TransSt
 func FindTransStreamFactory(protocol TransStreamProtocol) (TransStreamFactory, error) {
 	f, ok := transStreamFactories[protocol]
 	if !ok {
-		return nil, fmt.Errorf("unknown protocol %s", protocol.ToString())
+		return nil, fmt.Errorf("unknown protocol %s", protocol.String())
 	}
 
 	return f, nil

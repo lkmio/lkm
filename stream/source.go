@@ -7,6 +7,7 @@ import (
 	"github.com/lkmio/lkm/log"
 	"net"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/lkmio/avformat/stream"
@@ -43,6 +44,8 @@ type Source interface {
 	RemoveSink(sink Sink)
 
 	RemoveSinkWithID(id SinkID)
+
+	FindSink(id SinkID) Sink
 
 	SetState(state SessionState)
 
@@ -116,7 +119,7 @@ type Source interface {
 
 	SetCreateTime(time time.Time)
 
-	PlaySink(sin Sink)
+	Sinks() []Sink
 }
 
 type PublishSource struct {
@@ -145,7 +148,7 @@ type PublishSource struct {
 	idleTimer        *time.Timer // 拉流空闲计时器
 
 	TransStreams     map[TransStreamID]TransStream     // 所有的输出流, 持有Sink
-	Sinks            map[SinkID]Sink                   // 保存所有Sink
+	sinks            map[SinkID]Sink                   // 保存所有Sink
 	TransStreamSinks map[TransStreamID]map[SinkID]Sink // 输出流对应的Sink
 
 	streamPipe        chan []byte // 推流数据管道
@@ -212,7 +215,7 @@ func (s *PublishSource) Init(receiveQueueSize int) {
 	s.mainContextEvents = make(chan func(), 128)
 
 	s.TransStreams = make(map[TransStreamID]TransStream, 10)
-	s.Sinks = make(map[SinkID]Sink, 128)
+	s.sinks = make(map[SinkID]Sink, 128)
 	s.TransStreamSinks = make(map[TransStreamID]map[SinkID]Sink, len(transStreamFactories)+1)
 }
 
@@ -293,11 +296,11 @@ func IsSupportMux(protocol TransStreamProtocol, audioCodecId, videoCodecId utils
 }
 
 func (s *PublishSource) CreateTransStream(id TransStreamID, protocol TransStreamProtocol, streams []utils.AVStream) (TransStream, error) {
-	log.Sugar.Debugf("创建%s-stream source: %s", protocol.ToString(), s.ID)
+	log.Sugar.Debugf("创建%s-stream source: %s", protocol.String(), s.ID)
 
 	transStream, err := CreateTransStream(s, protocol, streams)
 	if err != nil {
-		log.Sugar.Errorf("创建传输流失败 err:%s source:%s", err.Error(), s.ID)
+		log.Sugar.Errorf("创建传输流失败 err: %s source: %s", err.Error(), s.ID)
 		return nil, err
 	}
 
@@ -473,7 +476,7 @@ func (s *PublishSource) doAddSink(sink Sink) bool {
 		log.Sugar.Infof("sink count: %d source: %s", s.sinkCount, s.ID)
 	}
 
-	s.Sinks[sink.GetID()] = sink
+	s.sinks[sink.GetID()] = sink
 	s.TransStreamSinks[transStreamId][sink.GetID()] = sink
 
 	// 新建传输流，发送已经缓存的音视频帧
@@ -504,16 +507,34 @@ func (s *PublishSource) RemoveSink(sink Sink) {
 
 func (s *PublishSource) RemoveSinkWithID(id SinkID) {
 	s.PostEvent(func() {
-		sink, ok := s.Sinks[id]
+		sink, ok := s.sinks[id]
 		if ok {
 			s.doRemoveSink(sink)
 		}
 	})
 }
 
+func (s *PublishSource) FindSink(id SinkID) Sink {
+	var result Sink
+	group := sync.WaitGroup{}
+	group.Add(1)
+
+	s.PostEvent(func() {
+		sink, ok := s.sinks[id]
+		if ok {
+			result = sink
+		}
+
+		group.Done()
+	})
+
+	group.Wait()
+	return result
+}
+
 func (s *PublishSource) doRemoveSink(sink Sink) bool {
 	transStreamSinks := s.TransStreamSinks[sink.GetTransStreamID()]
-	delete(s.Sinks, sink.GetID())
+	delete(s.sinks, sink.GetID())
 	delete(transStreamSinks, sink.GetID())
 
 	s.sinkCount--
@@ -599,7 +620,7 @@ func (s *PublishSource) DoClose() {
 	}
 
 	// 将所有sink添加到等待队列
-	for _, sink := range s.Sinks {
+	for _, sink := range s.sinks {
 		transStreamID := sink.GetTransStreamID()
 		sink.SetTransStreamID(0)
 		if s.recordSink == sink {
@@ -625,7 +646,7 @@ func (s *PublishSource) DoClose() {
 	}
 
 	s.TransStreams = nil
-	s.Sinks = nil
+	s.sinks = nil
 	s.TransStreamSinks = nil
 
 	// 异步hook
@@ -786,7 +807,7 @@ func (s *PublishSource) RemoteAddr() string {
 }
 
 func (s *PublishSource) String() string {
-	return fmt.Sprintf("source: %s type: %s conn: %s ", s.ID, s.Type.ToString(), s.RemoteAddr())
+	return fmt.Sprintf("source: %s type: %s conn: %s ", s.ID, s.Type.String(), s.RemoteAddr())
 }
 
 func (s *PublishSource) State() SessionState {
@@ -813,8 +834,19 @@ func (s *PublishSource) SetCreateTime(time time.Time) {
 	s.createTime = time
 }
 
-func (s *PublishSource) PlaySink(sink Sink) {
-	s.PostEvent(func() {
+func (s *PublishSource) Sinks() []Sink {
+	var sinks []Sink
 
+	group := sync.WaitGroup{}
+	group.Add(1)
+	s.PostEvent(func() {
+		for _, sink := range s.sinks {
+			sinks = append(sinks, sink)
+		}
+
+		group.Done()
 	})
+
+	group.Wait()
+	return sinks
 }

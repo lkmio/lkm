@@ -18,7 +18,7 @@ type StreamServer[T any] struct {
 }
 
 func (s *StreamServer[T]) OnConnected(conn net.Conn) []byte {
-	log.Sugar.Debugf("%s连接 conn:%s", s.SourceType.ToString(), conn.RemoteAddr().String())
+	log.Sugar.Debugf("%s连接 conn:%s", s.SourceType.String(), conn.RemoteAddr().String())
 	conn.(*transport.Conn).Data = s.Handler.OnNewSession(conn)
 	return nil
 }
@@ -32,7 +32,7 @@ func (s *StreamServer[T]) OnPacket(conn net.Conn, data []byte) []byte {
 }
 
 func (s *StreamServer[T]) OnDisConnected(conn net.Conn, err error) {
-	log.Sugar.Debugf("%s断开连接 conn:%s", s.SourceType.ToString(), conn.RemoteAddr().String())
+	log.Sugar.Debugf("%s断开连接 conn:%s", s.SourceType.String(), conn.RemoteAddr().String())
 
 	t := conn.(*transport.Conn)
 	if t.Data != nil {

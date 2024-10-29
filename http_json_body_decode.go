@@ -20,7 +20,7 @@ const (
 type MalformedRequest struct {
 	Code int         `json:"code"`
 	Msg  string      `json:"msg"`
-	Data interface{} `json:"data,omitempty"`
+	Data interface{} `json:"data"`
 }
 
 func (mr *MalformedRequest) Error() string {

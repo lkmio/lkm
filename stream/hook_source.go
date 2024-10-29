@@ -37,7 +37,7 @@ func PreparePublishSource(source Source, hook bool) (*http.Response, utils.HookS
 	urls := GetStreamPlayUrls(source.GetID())
 	indent, _ := json.MarshalIndent(urls, "", "\t")
 
-	log.Sugar.Infof("%s准备推流 source:%s 拉流地址:\r\n%s", source.GetType().ToString(), source.GetID(), indent)
+	log.Sugar.Infof("%s准备推流 source:%s 拉流地址:\r\n%s", source.GetType().String(), source.GetID(), indent)
 
 	return response, utils.HookStateOK
 }

@@ -45,7 +45,7 @@ const (
 	SessionStateClosed           = SessionState(7) // 关闭状态
 )
 
-func (s SourceType) ToString() string {
+func (s SourceType) String() string {
 	if SourceTypeRtmp == s {
 		return "rtmp"
 	} else if SourceType28181 == s {
@@ -57,7 +57,7 @@ func (s SourceType) ToString() string {
 	panic(fmt.Sprintf("unknown source type %d", s))
 }
 
-func (p TransStreamProtocol) ToString() string {
+func (p TransStreamProtocol) String() string {
 	if TransStreamRtmp == p {
 		return "rtmp"
 	} else if TransStreamFlv == p {

@@ -376,7 +376,7 @@ func (api *ApiServer) OnSourceList(w http.ResponseWriter, r *http.Request) {
 	sources := stream.SourceManager.All()
 
 	type SourceDetails struct {
-		ID        string    `json:"id,omitempty"`
+		ID        string    `json:"id"`
 		Protocol  string    `json:"protocol"`   // 推流协议
 		Time      time.Time `json:"time"`       // 推流时间
 		SinkCount int       `json:"sink_count"` // 播放端计数
@@ -394,7 +394,7 @@ func (api *ApiServer) OnSourceList(w http.ResponseWriter, r *http.Request) {
 
 		details = append(details, SourceDetails{
 			ID:        source.GetID(),
-			Protocol:  source.GetType().ToString(),
+			Protocol:  source.GetType().String(),
 			Time:      source.CreateTime(),
 			SinkCount: source.SinkCount(),
 			Bitrate:   "", // 后续开发
@@ -406,7 +406,33 @@ func (api *ApiServer) OnSourceList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (api *ApiServer) OnSinkList(v *IDS, w http.ResponseWriter, r *http.Request) {
+	source := stream.SourceManager.Find(v.Source)
+	if source == nil {
+		httpResponseOK(w, nil)
+		return
+	}
 
+	type SinkDetails struct {
+		ID       string    `json:"id"`
+		Protocol string    `json:"protocol"` // 拉流协议
+		Time     time.Time `json:"time"`     // 拉流时间
+		Bitrate  string    `json:"bitrate"`  // 码率统计
+		Tracks   []string  `json:"tracks"`   // 每路流编码器ID
+	}
+
+	var details []SinkDetails
+	sinks := source.Sinks()
+	for _, sink := range sinks {
+		details = append(details,
+			SinkDetails{
+				ID:       stream.SinkId2String(sink.GetID()),
+				Protocol: sink.GetProtocol().String(),
+				Time:     sink.CreateTime(),
+			},
+		)
+	}
+
+	httpResponseOK(w, details)
 }
 
 func (api *ApiServer) OnSourceClose(v *IDS, w http.ResponseWriter, r *http.Request) {
@@ -433,7 +459,9 @@ func (api *ApiServer) OnSinkClose(v *IDS, w http.ResponseWriter, r *http.Request
 	}
 
 	if source := stream.SourceManager.Find(v.Source); source != nil {
-		source.RemoveSinkWithID(sinkId)
+		if sink := source.FindSink(sinkId); sink != nil {
+			sink.Close()
+		}
 	} else {
 		log.Sugar.Warnf("Source with ID %s does not exist.", v.Source)
 	}

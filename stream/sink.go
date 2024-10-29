@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"sync"
+	"time"
 )
 
 // Sink 对拉流端的封装
@@ -78,6 +79,10 @@ type Sink interface {
 	IsReady() bool
 
 	SetReady(ok bool)
+
+	CreateTime() time.Time
+
+	SetCreateTime(time time.Time)
 }
 
 type BaseSink struct {
@@ -99,6 +104,7 @@ type BaseSink struct {
 
 	SentPacketCount int // 发包计数
 	Ready           bool
+	createTime      time.Time
 }
 
 func (s *BaseSink) GetID() SinkID {
@@ -218,7 +224,7 @@ func (s *BaseSink) Close() {
 }
 
 func (s *BaseSink) String() string {
-	return fmt.Sprintf("%s-%v source:%s", s.GetProtocol().ToString(), s.ID, s.SourceID)
+	return fmt.Sprintf("%s-%v source:%s", s.GetProtocol().String(), s.ID, s.SourceID)
 }
 
 func (s *BaseSink) RemoteAddr() string {
@@ -271,4 +277,15 @@ func (s *BaseSink) IsReady() bool {
 
 func (s *BaseSink) SetReady(ok bool) {
 	s.Ready = ok
+	if ok {
+		s.SetCreateTime(time.Now())
+	}
+}
+
+func (s *BaseSink) CreateTime() time.Time {
+	return s.createTime
+}
+
+func (s *BaseSink) SetCreateTime(time time.Time) {
+	s.createTime = time
 }

@@ -16,7 +16,7 @@ func PreparePlaySinkWithReady(sink Sink, ok bool) (*http.Response, utils.HookSta
 	if AppConfig.Hooks.IsEnableOnPlay() {
 		hook, err := Hook(HookEventPlay, sink.UrlValues().Encode(), NewHookPlayEventInfo(sink))
 		if err != nil {
-			log.Sugar.Errorf("播放事件-通知失败 err:%s sink:%s-%v source:%s", err.Error(), sink.GetProtocol().ToString(), sink.GetID(), sink.GetSourceID())
+			log.Sugar.Errorf("播放事件-通知失败 err:%s sink:%s-%v source:%s", err.Error(), sink.GetProtocol().String(), sink.GetID(), sink.GetSourceID())
 
 			return hook, utils.HookStateFailure
 		}
@@ -27,7 +27,7 @@ func PreparePlaySinkWithReady(sink Sink, ok bool) (*http.Response, utils.HookSta
 	sink.SetReady(ok)
 	source := SourceManager.Find(sink.GetSourceID())
 	if source == nil {
-		log.Sugar.Infof("添加sink到等待队列 sink:%s-%v source:%s", sink.GetProtocol().ToString(), sink.GetID(), sink.GetSourceID())
+		log.Sugar.Infof("添加sink到等待队列 sink:%s-%v source:%s", sink.GetProtocol().String(), sink.GetID(), sink.GetSourceID())
 
 		{
 			sink.Lock()
@@ -54,7 +54,7 @@ func HookPlayDoneEvent(sink Sink) (*http.Response, bool) {
 	if AppConfig.Hooks.IsEnableOnPlayDone() {
 		hook, err := Hook(HookEventPlayDone, sink.UrlValues().Encode(), NewHookPlayEventInfo(sink))
 		if err != nil {
-			log.Sugar.Errorf("播放结束事件-通知失败 err:%s sink:%s-%v source:%s", err.Error(), sink.GetProtocol().ToString(), sink.GetID(), sink.GetSourceID())
+			log.Sugar.Errorf("播放结束事件-通知失败 err:%s sink:%s-%v source:%s", err.Error(), sink.GetProtocol().String(), sink.GetID(), sink.GetSourceID())
 			return hook, false
 		}
 

@@ -199,7 +199,7 @@ func DumpStream2File(sourceType SourceType, conn net.Conn, data []byte) {
 		return
 	}
 
-	path := fmt.Sprintf("dump/%s-%s", sourceType.ToString(), conn.RemoteAddr().String())
+	path := fmt.Sprintf("dump/%s-%s", sourceType.String(), conn.RemoteAddr().String())
 	path = strings.ReplaceAll(path, ":", ".")
 
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
