@@ -46,7 +46,7 @@ func (U *UDPServer) OnPacket(conn net.Conn, data []byte) []byte {
 		return nil
 	}
 
-	if stream.SessionStateHandshakeDone == source.State() {
+	if stream.SessionStateHandshakeSuccess == source.State() {
 		conn.(*transport.Conn).Data = source
 		source.PreparePublish(conn, packet.SSRC, source)
 	}

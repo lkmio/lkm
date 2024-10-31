@@ -79,7 +79,7 @@ func NewTCPSession(conn net.Conn, filter Filter) *TCPSession {
 			session.Init(source)
 		}
 
-		if stream.SessionStateHandshakeDone == session.source.State() {
+		if stream.SessionStateHandshakeSuccess == session.source.State() {
 			session.source.PreparePublish(conn, packet.SSRC, session.source)
 		}
 

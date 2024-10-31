@@ -36,11 +36,11 @@ const (
 )
 
 const (
-	SessionStateCreate           = SessionState(1) // 新建状态
+	SessionStateCreated          = SessionState(1) // 新建状态
 	SessionStateHandshaking      = SessionState(2) // 握手中
 	SessionStateHandshakeFailure = SessionState(3) // 握手失败
-	SessionStateHandshakeDone    = SessionState(4) // 握手完成
-	SessionStateWait             = SessionState(5) // 位于等待队列中
+	SessionStateHandshakeSuccess = SessionState(4) // 握手完成
+	SessionStateWaiting          = SessionState(5) // 位于等待队列中
 	SessionStateTransferring     = SessionState(6) // 推拉流中
 	SessionStateClosed           = SessionState(7) // 关闭状态
 )
@@ -73,6 +73,26 @@ func (p TransStreamProtocol) String() string {
 	}
 
 	panic(fmt.Sprintf("unknown stream protocol %d", p))
+}
+
+func (s SessionState) String() string {
+	if SessionStateCreated == s {
+		return "create"
+	} else if SessionStateHandshaking == s {
+		return "handshaking"
+	} else if SessionStateHandshakeFailure == s {
+		return "handshake failure"
+	} else if SessionStateHandshakeSuccess == s {
+		return "handshake success"
+	} else if SessionStateWaiting == s {
+		return "waiting"
+	} else if SessionStateTransferring == s {
+		return "transferring"
+	} else if SessionStateClosed == s {
+		return "closed"
+	}
+
+	panic(fmt.Sprintf("unknown session state %d", s))
 }
 
 func Path2SourceId(path string, suffix string) (string, error) {

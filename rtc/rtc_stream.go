@@ -27,7 +27,7 @@ func (t *transStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, error
 			t.AppendOutStreamBuffer(extra)
 		}
 
-		t.AppendOutStreamBuffer(packet.Data())
+		t.AppendOutStreamBuffer(packet.AnnexBPacketData(t.BaseTransStream.Tracks[packet.Index()]))
 	}
 
 	return t.OutBuffer[:t.OutBufferSize], int64(uint32(packet.Duration(1000))), utils.AVMediaTypeVideo == packet.MediaType() && packet.KeyFrame(), nil

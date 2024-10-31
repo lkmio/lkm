@@ -3,6 +3,7 @@ package stream
 import (
 	"fmt"
 	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/lkm/log"
 	"net"
 	"net/url"
 	"sync"
@@ -184,6 +185,8 @@ func (s *BaseSink) DesiredVideoCodecId() utils.AVCodecID {
 // 1. Sink如果正在拉流, 删除任务交给Source处理, 否则直接从等待队列删除Sink.
 // 2. 发送PlayDoneHook事件
 func (s *BaseSink) Close() {
+	log.Sugar.Debugf("closing the %s sink. id: %s. current session state: %s", s.Protocol, SinkId2String(s.ID), s.State)
+
 	if SessionStateClosed == s.State {
 		return
 	}
@@ -194,7 +197,7 @@ func (s *BaseSink) Close() {
 	}
 
 	// Sink未添加到任何队列, 不做处理
-	if s.State < SessionStateWait {
+	if s.State < SessionStateWaiting {
 		return
 	}
 
@@ -216,7 +219,7 @@ func (s *BaseSink) Close() {
 		if source := SourceManager.Find(s.SourceID); source != nil {
 			source.RemoveSink(s)
 		}
-	} else if state == SessionStateWait {
+	} else if state == SessionStateWaiting {
 		// 从等待队列中删除Sink
 		RemoveSinkFromWaitingQueue(s.SourceID, s.ID)
 		go HookPlayDoneEvent(s)

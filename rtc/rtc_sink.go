@@ -25,8 +25,8 @@ type Sink struct {
 
 func (s *Sink) StartStreaming(transStream stream.TransStream) error {
 	// 创建PeerConnection
-	var videoTrack *webrtc.TrackLocalStaticSample
-	s.setTrackCount(transStream.TrackCount())
+	var remoteTrack *webrtc.TrackLocalStaticSample
+	s.tracks = make([]*webrtc.TrackLocalStaticSample, transStream.TrackCount())
 
 	connection, err := webrtcApi.NewPeerConnection(webrtc.Configuration{})
 	connection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
@@ -64,16 +64,16 @@ func (s *Sink) StartStreaming(transStream stream.TransStream) error {
 			id = "video"
 		}
 
-		videoTrack, err = webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: mimeType}, id, "pion")
+		remoteTrack, err = webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: mimeType}, id, "pion")
 		if err != nil {
-			panic(err)
-		} else if _, err := connection.AddTransceiverFromTrack(videoTrack, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendonly}); err != nil {
 			return err
-		} else if _, err = connection.AddTrack(videoTrack); err != nil {
+		} else if _, err := connection.AddTransceiverFromTrack(remoteTrack, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendonly}); err != nil {
+			return err
+		} else if _, err = connection.AddTrack(remoteTrack); err != nil {
 			return err
 		}
 
-		s.addTrack(index, videoTrack)
+		s.tracks[index] = remoteTrack
 	}
 
 	if len(connection.GetTransceivers()) == 0 {
@@ -93,26 +93,31 @@ func (s *Sink) StartStreaming(transStream stream.TransStream) error {
 	<-complete
 	connection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		s.state = state
-		log.Sugar.Infof("ice state:%v sink:%d source:%s", state.String(), s.GetID(), s.SourceID)
+		log.Sugar.Infof("ice state: %v sink: %d source: %s", state.String(), s.GetID(), s.SourceID)
 
 		if state > webrtc.ICEConnectionStateDisconnected {
-			log.Sugar.Errorf("webrtc peer断开连接 sink: %v source :%s", s.GetID(), s.SourceID)
+			log.Sugar.Errorf("webrtc peer断开连接 sink: %v source: %s", s.GetID(), s.SourceID)
 			s.Close()
 		}
 	})
 
 	s.peer = connection
+
 	// offer的sdp, 应答给http请求
-	s.cb(connection.LocalDescription().SDP)
+	if s.cb != nil {
+		s.cb(connection.LocalDescription().SDP)
+		s.cb = nil
+	}
 	return nil
-}
-func (s *Sink) setTrackCount(count int) {
-	s.tracks = make([]*webrtc.TrackLocalStaticSample, count)
 }
 
-func (s *Sink) addTrack(index int, track *webrtc.TrackLocalStaticSample) error {
-	s.tracks[index] = track
-	return nil
+func (s *Sink) Close() {
+	if s.peer != nil {
+		s.peer.Close()
+		s.peer = nil
+	}
+
+	s.BaseSink.Close()
 }
 
 func (s *Sink) Write(index int, data [][]byte, ts int64) error {

@@ -207,7 +207,7 @@ func (s *PublishSource) SetID(id string) {
 }
 
 func (s *PublishSource) Init(receiveQueueSize int) {
-	s.SetState(SessionStateHandshakeDone)
+	s.SetState(SessionStateHandshakeSuccess)
 
 	// 初始化事件接收管道
 	// -2是为了保证从管道取到流, 到处理完流整个过程安全的, 不会被覆盖
@@ -557,13 +557,13 @@ func (s *PublishSource) SetState(state SessionState) {
 }
 
 func (s *PublishSource) DoClose() {
+	log.Sugar.Debugf("closing the %s source. id: %s. closed flag: %t", s.Type, s.ID, s.closed)
+
 	if s.closed {
 		return
 	}
 
 	s.closed = true
-
-	log.Sugar.Infof("关闭推流源: %s", s.ID)
 
 	if s.TransDeMuxer != nil {
 		s.TransDeMuxer.Close()
@@ -633,7 +633,7 @@ func (s *PublishSource) DoClose() {
 			if SessionStateClosed == sink.GetState() {
 				log.Sugar.Warnf("添加到sink到等待队列失败, sink已经断开连接 %s", sink.String())
 			} else {
-				sink.SetState(SessionStateWait)
+				sink.SetState(SessionStateWaiting)
 				AddSinkToWaitingQueue(s.ID, sink)
 			}
 
