@@ -21,33 +21,69 @@ type TransportConfig struct {
 	Transport string `json:"transport"` //"UDP|TCP"
 }
 
-type RtmpConfig struct {
+type EnableConfig interface {
+	IsEnable() bool
+
+	SetEnable(bool)
+}
+
+type enableConfig struct {
 	Enable bool `json:"enable"`
-	Port   int  `json:"port"`
+}
+
+func (e *enableConfig) IsEnable() bool {
+	return e.Enable
+}
+
+func (e *enableConfig) SetEnable(b bool) {
+	e.Enable = b
+}
+
+type PortConfig interface {
+	GetPort() int
+
+	SetPort(port int)
+}
+
+type portConfig struct {
+	Port int `json:"port"`
+}
+
+func (s *portConfig) GetPort() int {
+	return s.Port
+}
+
+func (s *portConfig) SetPort(port int) {
+	s.Port = port
+}
+
+type RtmpConfig struct {
+	enableConfig
+	portConfig
 }
 
 type HlsConfig struct {
-	Enable         bool   `json:"enable"`
+	enableConfig
 	Dir            string `json:"dir"`
 	Duration       int    `json:"segment_duration"`
 	PlaylistLength int    `json:"playlist_length"`
 }
 
 type JT1078Config struct {
-	Enable bool `json:"enable"`
-	Port   int  `json:"port"`
+	enableConfig
+	portConfig
 }
 
 type RtspConfig struct {
 	TransportConfig
 
-	Enable   bool   `json:"enable"`
+	enableConfig
 	Port     []int  `json:"port"`
 	Password string `json:"password"`
 }
 
 type RecordConfig struct {
-	Enable bool   `json:"enable"`
+	enableConfig
 	Format string `json:"format"`
 	Dir    string `json:"dir"`
 }
@@ -66,13 +102,15 @@ type HttpConfig struct {
 }
 
 type GB28181Config struct {
+	enableConfig
 	TransportConfig
 	Port []int `json:"port"`
 }
 
 type WebRtcConfig struct {
+	enableConfig
 	TransportConfig
-	Port int `json:"port"`
+	portConfig
 }
 
 func (g TransportConfig) IsEnableTCP() bool {
@@ -122,7 +160,7 @@ func (c HlsConfig) TSFormat(sourceId string) string {
 }
 
 type HooksConfig struct {
-	Enable              bool   `json:"enable"`
+	enableConfig
 	Timeout             int64  `json:"timeout"`
 	OnStartedUrl        string `json:"on_started"`         //应用启动后回调
 	OnPublishUrl        string `json:"on_publish"`         //推流回调
@@ -166,15 +204,15 @@ func (hook *HooksConfig) IsEnableOnStarted() bool {
 	return hook.Enable && hook.OnStartedUrl != ""
 }
 
-func GetStreamPlayUrls(sourceId string) []string {
+func GetStreamPlayUrls(source string) []string {
 	var urls []string
 	if AppConfig.Rtmp.Enable {
-		urls = append(urls, fmt.Sprintf("rtmp://%s:%d/%s", AppConfig.PublicIP, AppConfig.Rtmp.Port, sourceId))
+		urls = append(urls, fmt.Sprintf("rtmp://%s:%d/%s", AppConfig.PublicIP, AppConfig.Rtmp.Port, source))
 	}
 
 	if AppConfig.Rtsp.Enable {
-		//不拼接userinfo
-		urls = append(urls, fmt.Sprintf("rtsp://%s:%d/%s", AppConfig.PublicIP, AppConfig.Rtsp.Port[0], sourceId))
+		// 不拼接userinfo
+		urls = append(urls, fmt.Sprintf("rtsp://%s:%d/%s", AppConfig.PublicIP, AppConfig.Rtsp.Port[0], source))
 	}
 
 	//if AppConfig.Http.Enable {
@@ -182,13 +220,12 @@ func GetStreamPlayUrls(sourceId string) []string {
 	//}
 
 	if AppConfig.Hls.Enable {
-		//不拼接userinfo
-		urls = append(urls, fmt.Sprintf("http://%s:%d/%s.m3u8", AppConfig.PublicIP, AppConfig.Http.Port, sourceId))
+		urls = append(urls, fmt.Sprintf("http://%s:%d/%s.m3u8", AppConfig.PublicIP, AppConfig.Http.Port, source))
 	}
 
-	urls = append(urls, fmt.Sprintf("http://%s:%d/%s.flv", AppConfig.PublicIP, AppConfig.Http.Port, sourceId))
-	urls = append(urls, fmt.Sprintf("http://%s:%d/%s.rtc", AppConfig.PublicIP, AppConfig.Http.Port, sourceId))
-	urls = append(urls, fmt.Sprintf("ws://%s:%d/%s.flv", AppConfig.PublicIP, AppConfig.Http.Port, sourceId))
+	urls = append(urls, fmt.Sprintf("http://%s:%d/%s.flv", AppConfig.PublicIP, AppConfig.Http.Port, source))
+	urls = append(urls, fmt.Sprintf("http://%s:%d/%s.rtc", AppConfig.PublicIP, AppConfig.Http.Port, source))
+	urls = append(urls, fmt.Sprintf("ws://%s:%d/%s.flv", AppConfig.PublicIP, AppConfig.Http.Port, source))
 	return urls
 }
 
@@ -264,36 +301,36 @@ func LoadConfigFile(path string) (*AppConfig_, error) {
 		return nil, err
 	}
 
-	config_ := AppConfig_{}
-	if err := json.Unmarshal(file, &config_); err != nil {
+	config := AppConfig_{}
+	if err := json.Unmarshal(file, &config); err != nil {
 		return nil, err
 	}
 
-	return &config_, err
+	return &config, err
 }
 
-func SetDefaultConfig(config_ *AppConfig_) {
-	if !config_.GOPCache {
-		config_.GOPCache = true
-		config_.GOPBufferSize = 8196 * 1024
-		config_.MergeWriteLatency = 350
+func SetDefaultConfig(config *AppConfig_) {
+	if !config.GOPCache {
+		config.GOPCache = true
+		config.GOPBufferSize = 8196 * 1024
+		config.MergeWriteLatency = 350
 		log.Sugar.Warnf("强制开启GOP缓存")
 	}
 
-	config_.GOPBufferSize = limitInt(4096*1024/8, 2048*1024*10, config_.GOPBufferSize) //最低4M码率 最高160M码率
-	config_.MergeWriteLatency = limitInt(350, 2000, config_.MergeWriteLatency)         //最低缓存350毫秒数据才发送 最高缓存2秒数据才发送
-	config_.ProbeTimeout = limitInt(2000, 5000, config_.MergeWriteLatency)             //2-5秒内必须解析完AVStream
-	config_.WriteTimeout = limitInt(2000, 10000, config_.WriteTimeout)
-	config_.WriteBufferCapacity = config_.WriteTimeout/config_.MergeWriteLatency + 1
+	config.GOPBufferSize = limitInt(4096*1024/8, 2048*1024*10, config.GOPBufferSize) // 最低4M码率 最高160M码率
+	config.MergeWriteLatency = limitInt(350, 2000, config.MergeWriteLatency)         // 最低缓存350毫秒数据才发送 最高缓存2秒数据才发送
+	config.ProbeTimeout = limitInt(2000, 5000, config.MergeWriteLatency)             // 2-5秒内必须解析完AVStream
+	config.WriteTimeout = limitInt(2000, 10000, config.WriteTimeout)
+	config.WriteBufferCapacity = config.WriteTimeout/config.MergeWriteLatency + 1
 
-	config_.Log.Level = limitInt(int(zapcore.DebugLevel), int(zapcore.FatalLevel), config_.Log.Level)
-	config_.Log.MaxSize = limitMin(1, config_.Log.MaxSize)
-	config_.Log.MaxBackup = limitMin(1, config_.Log.MaxBackup)
-	config_.Log.MaxAge = limitMin(1, config_.Log.MaxAge)
+	config.Log.Level = limitInt(int(zapcore.DebugLevel), int(zapcore.FatalLevel), config.Log.Level)
+	config.Log.MaxSize = limitMin(1, config.Log.MaxSize)
+	config.Log.MaxBackup = limitMin(1, config.Log.MaxBackup)
+	config.Log.MaxAge = limitMin(1, config.Log.MaxAge)
 
-	config_.IdleTimeout *= int64(time.Second)
-	config_.ReceiveTimeout *= int64(time.Second)
-	config_.Hooks.Timeout *= int64(time.Second)
+	config.IdleTimeout *= int64(time.Second)
+	config.ReceiveTimeout *= int64(time.Second)
+	config.Hooks.Timeout *= int64(time.Second)
 }
 
 func limitMin(min, value int) int {

@@ -34,11 +34,13 @@
   },
 
   "webrtc": {
+    "enable": true,
     "port": 8000,
     "transport": "UDP"
   },
 
   "gb28181": {
+    "enable": true,
     "port": [50000,60000],
     "transport": "UDP|TCP"
   },
@@ -55,7 +57,7 @@
   },
 
   "hooks": {
-    "enable": true,
+    "enable": false,
     "timeout": 10,
 
     "on_started": "http://localhost:9000/api/v1/hook/on_started",
