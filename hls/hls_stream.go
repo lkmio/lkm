@@ -35,7 +35,7 @@ type TransStream struct {
 	duration       int      // 切片时长, 单位秒
 	playlistLength int      // 最大切片文件个数
 
-	m3u8Sinks        map[stream.SinkID]*M3U8Sink // 等待响应m3u8文件的sink
+	m3u8Sinks        map[stream.SinkID]*M3U8Sink // 等待响应m3u8文件的sink队列
 	m3u8StringFormat string                      // 一个协程写, 多个协程读, 不用加锁保护
 }
 
@@ -205,6 +205,13 @@ func (t *TransStream) Close() ([][]byte, int64, error) {
 		err = t.m3u8File.Close()
 		t.m3u8File = nil
 	}
+
+	// 如果关闭HLS输出流时, 没有有效切片(推流数据过少), 通知等待的sink
+	for _, sink := range t.m3u8Sinks {
+		sink.cb(nil)
+	}
+
+	t.m3u8Sinks = nil
 
 	return nil, 0, err
 }

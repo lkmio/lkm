@@ -230,12 +230,6 @@ func (api *ApiServer) onHttpFLV(sourceId string, w http.ResponseWriter, r *http.
 }
 
 func (api *ApiServer) onTS(source string, w http.ResponseWriter, r *http.Request) {
-	if !stream.AppConfig.Hls.Enable {
-		log.Sugar.Warnf("处理m3u8请求失败 server未开启hls request:%s", r.URL.Path)
-		http.Error(w, "hls disable", http.StatusInternalServerError)
-		return
-	}
-
 	sid := r.URL.Query().Get(hls.SessionIdKey)
 	var sink stream.Sink
 	if sid != "" {
@@ -265,24 +259,18 @@ func (api *ApiServer) onTS(source string, w http.ResponseWriter, r *http.Request
 	http.ServeFile(w, r, tsPath)
 }
 
-func (api *ApiServer) onHLS(sourceId string, w http.ResponseWriter, r *http.Request) {
-	if !stream.AppConfig.Hls.Enable {
-		log.Sugar.Warnf("处理hls请求失败 server未开启hls")
-		http.Error(w, "hls disable", http.StatusInternalServerError)
-		return
-	}
-
+func (api *ApiServer) onHLS(source string, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-	//hls_sid是流媒体服务器让播放端, 携带的会话id, 如果没有携带说明是第一次请求播放.
-	//播放端不要使用hls_sid这个key, 否则会一直拉流失败
+
+	// 如果没有携带会话ID, 认为是首次拉流. Server将生成会话ID, 应答给拉流端, 后续拉流请求(.M3U8和.TS的HTTP请求)都将携带该会话ID.
+	// 会话ID的Key为"hls_sid", 为避免冲突, 播放端和hook server不要再使用, 否则会一直拉流失败.
 	sid := r.URL.Query().Get(hls.SessionIdKey)
 	if sid == "" {
-		//让播放端携带会话id
 		sid = utils.RandStringBytes(10)
 
 		query := r.URL.Query()
 		query.Add(hls.SessionIdKey, sid)
-		path := fmt.Sprintf("/%s.m3u8?%s", sourceId, query.Encode())
+		path := fmt.Sprintf("/%s.m3u8?%s", source, query.Encode())
 
 		response := "#EXTM3U\r\n" +
 			"#EXT-X-STREAM-INF:BANDWIDTH=1,AVERAGE-BANDWIDTH=1\r\n" +
@@ -292,33 +280,45 @@ func (api *ApiServer) onHLS(sourceId string, w http.ResponseWriter, r *http.Requ
 	}
 
 	sink := stream.SinkManager.Find(sid)
+	// 更新最近的M3U8文件
 	if sink != nil {
 		w.Write([]byte(sink.(*hls.M3U8Sink).GetM3U8String()))
 		return
 	}
 
+	// 首次拉流
 	context := r.Context()
-	done := make(chan int, 0)
-	sink = hls.NewM3U8Sink(sid, sourceId, func(m3u8 []byte) {
-		w.Write(m3u8)
-		done <- 0
+	m3u8Pipe := make(chan []byte, 1)
+	sink = hls.NewM3U8Sink(sid, source, func(m3u8 []byte) {
+		m3u8Pipe <- m3u8
 	}, sid)
 
 	sink.SetUrlValues(r.URL.Query())
-	_, state := stream.PreparePlaySink(sink)
-	if utils.HookStateOK != state {
-		log.Sugar.Warnf("m3u8 请求失败 sink:%s", sink.String())
+	if _, state := stream.PreparePlaySink(sink); utils.HookStateOK != state {
+		log.Sugar.Warnf("m3u8拉流失败 sink: %s", sink.String())
 
 		w.WriteHeader(http.StatusForbidden)
 		return
-	} else {
-		err := stream.SinkManager.Add(sink)
-		utils.Assert(err == nil)
 	}
 
+	err := stream.SinkManager.Add(sink)
+	utils.Assert(err == nil)
+
 	select {
-	case <-done:
+	case m3u8 := <-m3u8Pipe:
+		// 应答M3U8文件
+		if m3u8 == nil {
+			log.Sugar.Warnf("hls拉流失败 未能生成有效m3u8文件 sink: %s source: %s", sink.GetID(), sink.GetSourceID())
+			w.WriteHeader(http.StatusInternalServerError)
+			sink.Close()
+		} else {
+			w.Write(m3u8)
+		}
+		break
 	case <-context.Done():
+		// 拉流端断开拉流
+		log.Sugar.Infof(stream.CreateSinkDisconnectionMessage(sink))
+		sink.Close()
 		break
 	}
 }

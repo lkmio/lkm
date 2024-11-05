@@ -21,9 +21,29 @@ type M3U8Sink struct {
 	m3u8StringFormat *string
 }
 
+// SendM3U8Data 首次向拉流端应答M3U8文件， 后续更新M3U8文件, 通过调用@see GetM3U8String 函数获取最新的M3U8文件.
 func (s *M3U8Sink) SendM3U8Data(data *string) error {
 	s.m3u8StringFormat = data
 	s.cb([]byte(s.GetM3U8String()))
+
+	// 开启计时器, 长时间没有拉流关闭sink
+	timeout := time.Duration(stream.AppConfig.IdleTimeout)
+	if timeout < time.Second {
+		timeout = time.Duration(stream.AppConfig.Hls.Duration) * 2 * 3 * time.Second
+	}
+
+	s.playTimer = time.AfterFunc(timeout, func() {
+		sub := time.Now().Sub(s.playtime)
+		if sub > timeout {
+			log.Sugar.Errorf("hls拉流超时 sink: %s ", s.ID)
+
+			s.Close()
+			return
+		}
+
+		s.playTimer.Reset(timeout)
+	})
+
 	return nil
 }
 
@@ -39,30 +59,16 @@ func (s *M3U8Sink) StartStreaming(transStream stream.TransStream) error {
 		hls.m3u8Sinks[s.GetID()] = s
 	}
 
-	// 开启拉流超时计时器, 如果拉流端查时间没有拉流, 关闭sink
-	timeout := time.Duration(stream.AppConfig.IdleTimeout)
-	if timeout < time.Second {
-		timeout = time.Duration(stream.AppConfig.Hls.Duration) * 2 * 3 * time.Second
-	}
-
-	s.playTimer = time.AfterFunc(timeout, func() {
-		sub := time.Now().Sub(s.playtime)
-		if sub > timeout {
-			log.Sugar.Errorf("长时间没有拉取TS切片 sink:%d 超时", s.ID)
-			s.Close()
-			return
-		}
-
-		s.playTimer.Reset(timeout)
-	})
-
 	return nil
 }
 
 func (s *M3U8Sink) GetM3U8String() string {
+	// 更新拉流时间
+	//s.RefreshPlayTime()
+
 	param := fmt.Sprintf("?%s=%s", SessionIdKey, s.sessionId)
-	all := strings.ReplaceAll(*s.m3u8StringFormat, "%s", param)
-	return all
+	m3u8 := strings.ReplaceAll(*s.m3u8StringFormat, "%s", param)
+	return m3u8
 }
 
 func (s *M3U8Sink) RefreshPlayTime() {
