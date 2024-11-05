@@ -71,7 +71,7 @@ func Hook(event HookEvent, params string, body interface{}) (*http.Response, err
 }
 
 func NewHookPlayEventInfo(sink Sink) eventInfo {
-	return eventInfo{Stream: sink.GetSourceID(), Protocol: sink.GetProtocol().String(), RemoteAddr: sink.String()}
+	return eventInfo{Stream: sink.GetSourceID(), Protocol: sink.GetProtocol().String(), RemoteAddr: sink.RemoteAddr()}
 }
 
 func NewHookPublishEventInfo(source Source) eventInfo {

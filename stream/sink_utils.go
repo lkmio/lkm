@@ -2,6 +2,7 @@ package stream
 
 import (
 	"encoding/binary"
+	"fmt"
 	"net"
 	"strconv"
 )
@@ -47,4 +48,8 @@ func SinkId2String(id SinkID) string {
 	}
 
 	return id.(string)
+}
+
+func CreateSinkDisconnectionMessage(sink Sink) string {
+	return fmt.Sprintf("%s sink断开连接. id: %s", sink.GetProtocol(), sink.GetID())
 }
