@@ -8,23 +8,23 @@ import (
 	"net"
 )
 
-// Session 负责除连接和断开以外的所有RTMP生命周期处理
+// Session RTMP会话, 解析处理Message
 type Session struct {
-	stack       *librtmp.Stack //rtmp协议栈
-	handle      interface{}    //Publisher/sink, 在publish或play成功后赋值
-	isPublisher bool
+	stack       *librtmp.Stack // rtmp协议栈, 解析message
+	handle      interface{}    // 持有具体会话句柄(推流端/拉流端)， 在@see OnPublish @see OnPlay回调中赋值
+	isPublisher bool           // 是否时推流会话
 
 	conn          net.Conn
-	receiveBuffer *stream.ReceiveBuffer
+	receiveBuffer *stream.ReceiveBuffer // 推流源收流队列
 }
 
-func (s *Session) generateSourceId(app, stream_ string) string {
+func (s *Session) generateSourceID(app, stream string) string {
 	if len(app) == 0 {
-		return stream_
-	} else if len(stream_) == 0 {
+		return stream
+	} else if len(stream) == 0 {
 		return app
 	} else {
-		return app + "/" + stream_
+		return app + "/" + stream
 	}
 }
 
@@ -33,16 +33,16 @@ func (s *Session) OnPublish(app, stream_ string) utils.HookState {
 
 	streamName, values := stream.ParseUrl(stream_)
 
-	sourceId := s.generateSourceId(app, streamName)
+	sourceId := s.generateSourceID(app, streamName)
 	source := NewPublisher(sourceId, s.stack, s.conn)
-	//设置推流的音视频回调
+	// 设置推流的音视频回调
 	s.stack.SetOnPublishHandler(source)
 
-	//初始化放在add source前面, 以防add后再init, 空窗期拉流队列空指针.
+	// 初始化放在add source前面, 以防add后再init, 空窗期拉流队列空指针.
 	source.Init(stream.ReceiveBufferTCPBlockCount)
 	source.SetUrlValues(values)
 
-	//统一处理source推流事件, source是否已经存在, hook回调....
+	// 统一处理source推流事件, source是否已经存在, hook回调....
 	_, state := stream.PreparePublishSource(source, true)
 	if utils.HookStateOK != state {
 		log.Sugar.Errorf("rtmp推流失败 source:%s", sourceId)
@@ -60,15 +60,15 @@ func (s *Session) OnPublish(app, stream_ string) utils.HookState {
 func (s *Session) OnPlay(app, stream_ string) utils.HookState {
 	streamName, values := stream.ParseUrl(stream_)
 
-	sourceId := s.generateSourceId(app, streamName)
+	sourceId := s.generateSourceID(app, streamName)
 	sink := NewSink(stream.NetAddr2SinkId(s.conn.RemoteAddr()), sourceId, s.conn, s.stack)
 	sink.SetUrlValues(values)
 
-	log.Sugar.Infof("rtmp onplay app:%s stream:%s sink:%v conn:%s", app, stream_, sink.GetID(), s.conn.RemoteAddr().String())
+	log.Sugar.Infof("rtmp onplay app: %s stream: %s sink: %v conn: %s", app, stream_, sink.GetID(), s.conn.RemoteAddr().String())
 
 	_, state := stream.PreparePlaySink(sink)
 	if utils.HookStateOK != state {
-		log.Sugar.Errorf("rtmp拉流失败 source:%s sink:%s", sourceId, sink.GetID())
+		log.Sugar.Errorf("rtmp拉流失败 source: %s sink: %s", sourceId, sink.GetID())
 	} else {
 		s.handle = sink
 	}
@@ -77,7 +77,7 @@ func (s *Session) OnPlay(app, stream_ string) utils.HookState {
 }
 
 func (s *Session) Input(conn net.Conn, data []byte) error {
-	//如果是推流，并且握手成功，后续收到的包，都将发送给LoopEvent处理
+	// 推流会话, 收到的包都将交由主协程处理
 	if s.isPublisher {
 		s.handle.(*Publisher).PublishSource.Input(data)
 		return nil
@@ -87,7 +87,7 @@ func (s *Session) Input(conn net.Conn, data []byte) error {
 }
 
 func (s *Session) Close() {
-	//session/conn/stack相互引用, go释放不了...手动赋值为nil
+	// session/conn/stack相互引用, go释放不了...手动赋值为nil
 	s.conn = nil
 
 	defer func() {
@@ -97,7 +97,7 @@ func (s *Session) Close() {
 		}
 	}()
 
-	//还没到publish/play
+	// 还未确定会话类型, 无需处理
 	if s.handle == nil {
 		return
 	}
@@ -107,11 +107,12 @@ func (s *Session) Close() {
 		log.Sugar.Infof("rtmp推流结束 %s", publisher.String())
 
 		if s.isPublisher {
-			s.handle.(*Publisher).Close()
+			publisher.Close()
 			s.receiveBuffer = nil
 		}
 	} else {
 		sink := s.handle.(*Sink)
+
 		log.Sugar.Infof("rtmp拉流结束 %s", sink.String())
 		sink.Close()
 	}

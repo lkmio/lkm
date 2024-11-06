@@ -14,12 +14,6 @@ type Server interface {
 	Close()
 }
 
-func NewServer(password string) Server {
-	return &server{
-		handler: NewHandler(password),
-	}
-}
-
 type server struct {
 	tcp     *transport.TCPServer
 	handler *handler
@@ -28,7 +22,7 @@ type server struct {
 func (s *server) Start(addr net.Addr) error {
 	utils.Assert(s.tcp == nil)
 
-	//监听TCP端口
+	// 监听TCP端口
 	tcp := &transport.TCPServer{
 		ReuseServer: transport.ReuseServer{
 			EnableReuse:      true,
@@ -90,4 +84,10 @@ func (s *server) OnDisConnected(conn net.Conn, err error) {
 	log.Sugar.Debugf("rtsp断开连接 conn:%s", conn.RemoteAddr().String())
 
 	s.closeSession(conn)
+}
+
+func NewServer(password string) Server {
+	return &server{
+		handler: NewHandler(password),
+	}
 }
