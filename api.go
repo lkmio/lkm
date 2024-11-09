@@ -64,7 +64,7 @@ func filterRequestBodyParams[T any](f func(params T, w http.ResponseWriter, req 
 	return func(w http.ResponseWriter, req *http.Request) {
 		if err := HttpDecodeJSONBody(w, req, params); err != nil {
 			log.Sugar.Errorf("处理http请求失败 err: %s path: %s", err.Error(), req.URL.Path)
-			httpResponse2(w, err)
+			httpResponseError(w, err.Error())
 			return
 		}
 
@@ -103,9 +103,11 @@ func startApiServer(addr string) {
 
 	apiServer.router.HandleFunc("/api/v1/streams/statistics", nil) // 统计所有推拉流
 
-	apiServer.router.HandleFunc("/api/v1/gb28181/forward", filterRequestBodyParams(apiServer.OnGBSourceForward, &GBForwardParams{}))     // 设置级联转发目标，停止级联调用sink/close接口，级联断开会走on_play_done事件通知
-	apiServer.router.HandleFunc("/api/v1/gb28181/source/create", filterRequestBodyParams(apiServer.OnGBSourceCreate, &GBSourceParams{})) // 创建国标推流源
-	apiServer.router.HandleFunc("/api/v1/gb28181/source/connect", filterRequestBodyParams(apiServer.OnGBSourceConnect, &GBConnect{}))    // 为国标TCP主动推流，设置连接地址
+	if stream.AppConfig.GB28181.Enable {
+		apiServer.router.HandleFunc("/api/v1/gb28181/forward", filterRequestBodyParams(apiServer.OnGBSourceForward, &GBForwardParams{}))     // 设置级联转发目标，停止级联调用sink/close接口，级联断开会走on_play_done事件通知
+		apiServer.router.HandleFunc("/api/v1/gb28181/source/create", filterRequestBodyParams(apiServer.OnGBSourceCreate, &GBSourceParams{})) // 创建国标推流源
+		apiServer.router.HandleFunc("/api/v1/gb28181/source/connect", filterRequestBodyParams(apiServer.OnGBSourceConnect, &GBConnect{}))    // 为国标TCP主动推流，设置连接地址
+	}
 
 	apiServer.router.HandleFunc("/api/v1/gc/force", func(writer http.ResponseWriter, request *http.Request) {
 		runtime.GC()
@@ -132,7 +134,7 @@ func startApiServer(addr string) {
 	}
 }
 
-func (api *ApiServer) generateSinkId(remoteAddr string) stream.SinkID {
+func (api *ApiServer) generateSinkID(remoteAddr string) stream.SinkID {
 	tcpAddr, err := net.ResolveTCPAddr("tcp", remoteAddr)
 	if err != nil {
 		panic(err)
@@ -167,7 +169,7 @@ func (api *ApiServer) onWSFlv(sourceId string, w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	sink := flv.NewFLVSink(api.generateSinkId(r.RemoteAddr), sourceId, flv.NewWSConn(conn))
+	sink := flv.NewFLVSink(api.generateSinkID(r.RemoteAddr), sourceId, flv.NewWSConn(conn))
 	sink.SetUrlValues(r.URL.Query())
 	log.Sugar.Infof("ws-flv 连接 sink:%s", sink.String())
 
@@ -207,7 +209,7 @@ func (api *ApiServer) onHttpFLV(sourceId string, w http.ResponseWriter, r *http.
 		return
 	}
 
-	sink := flv.NewFLVSink(api.generateSinkId(r.RemoteAddr), sourceId, conn)
+	sink := flv.NewFLVSink(api.generateSinkID(r.RemoteAddr), sourceId, conn)
 	sink.SetUrlValues(r.URL.Query())
 	log.Sugar.Infof("http-flv 连接 sink:%s", sink.String())
 
@@ -344,7 +346,7 @@ func (api *ApiServer) onRtc(sourceId string, w http.ResponseWriter, r *http.Requ
 
 	group := sync.WaitGroup{}
 	group.Add(1)
-	sink := rtc.NewSink(api.generateSinkId(r.RemoteAddr), sourceId, v.SDP, func(sdp string) {
+	sink := rtc.NewSink(api.generateSinkID(r.RemoteAddr), sourceId, v.SDP, func(sdp string) {
 		response := struct {
 			Type string `json:"type"`
 			SDP  string `json:"sdp"`
@@ -442,7 +444,7 @@ func (api *ApiServer) OnSinkList(v *IDS, w http.ResponseWriter, r *http.Request)
 }
 
 func (api *ApiServer) OnSourceClose(v *IDS, w http.ResponseWriter, r *http.Request) {
-	log.Sugar.Infof("close source: %v", v)
+	log.Sugar.Infof("close source: %v", v.Source)
 
 	if source := stream.SourceManager.Find(v.Source); source != nil {
 		source.Close()

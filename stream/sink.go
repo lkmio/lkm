@@ -103,8 +103,8 @@ type BaseSink struct {
 	TCPStreaming bool       // 是否是TCP流式拉流
 	urlValues    url.Values // 拉流时携带的Url参数
 
-	SentPacketCount int // 发包计数
-	Ready           bool
+	SentPacketCount int  // 发包计数
+	Ready           bool // 是否准备好推流. Sink可以通过控制该变量, 达到触发Source推流, 但不立即拉流的目的. 比如rtsp拉流端在信令交互阶段,需要先获取媒体信息,再拉流.
 	createTime      time.Time
 }
 

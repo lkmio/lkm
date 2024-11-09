@@ -34,23 +34,23 @@ func (api *ApiServer) OnGBSourceCreate(v *GBSourceParams, w http.ResponseWriter,
 
 	// 返回收流地址
 	response := &struct {
-		IP   string `json:"ip"`
-		Port int    `json:"port,omitempty"`
+		IP   string   `json:"ip"`
+		Port int      `json:"port,omitempty"`
+		Urls []string `json:"urls"`
 	}{}
 
 	var err error
 	// 响应错误消息
 	defer func() {
 		if err != nil {
-			log.Sugar.Errorf(err.Error())
-			httpResponse2(w, err)
+			log.Sugar.Errorf("创建国标源失败 err: %s", err.Error())
+			httpResponseError(w, err.Error())
 		}
 	}()
 
 	source := stream.SourceManager.Find(v.Source)
 	if source != nil {
-		log.Sugar.Errorf("创建国标源失败, %s已经存在", v.Source)
-		err = &MalformedRequest{Code: http.StatusBadRequest, Msg: fmt.Sprintf("创建国标源失败, %s已经存在", v.Source)}
+		err = fmt.Errorf("%s 源已经存在", v.Source)
 		return
 	}
 
@@ -66,11 +66,11 @@ func (api *ApiServer) OnGBSourceCreate(v *GBSourceParams, w http.ResponseWriter,
 
 	if tcp && active {
 		if !stream.AppConfig.GB28181.IsMultiPort() {
-			err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "创建国标源失败, 单端口模式下不能主动拉流"}
+			err = fmt.Errorf("单端口模式下不能主动拉流")
 		} else if !tcp {
-			err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "创建国标源失败, UDP不能主动拉流"}
+			err = fmt.Errorf("UDP不能主动拉流")
 		} else if !stream.AppConfig.GB28181.IsEnableTCP() {
-			err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "创建国标源失败, 未开启TCP, UDP不能主动拉流"}
+			err = fmt.Errorf("未开启TCP收流服务,UDP不能主动拉流")
 		}
 
 		if err != nil {
@@ -80,12 +80,12 @@ func (api *ApiServer) OnGBSourceCreate(v *GBSourceParams, w http.ResponseWriter,
 
 	_, port, err := gb28181.NewGBSource(v.Source, v.SSRC, tcp, active)
 	if err != nil {
-		err = &MalformedRequest{Code: http.StatusInternalServerError, Msg: fmt.Sprintf("创建国标源失败 err:%s", err.Error())}
 		return
 	}
 
 	response.IP = stream.AppConfig.PublicIP
 	response.Port = port
+	response.Urls = stream.GetStreamPlayUrls(v.Source)
 	httpResponseOK(w, response)
 }
 
@@ -93,54 +93,53 @@ func (api *ApiServer) OnGBSourceConnect(v *GBConnect, w http.ResponseWriter, r *
 	log.Sugar.Infof("设置国标主动拉流连接地址: %v", v)
 
 	var err error
+	// 响应错误消息
 	defer func() {
 		if err != nil {
-			log.Sugar.Errorf(err.Error())
-			httpResponse2(w, err)
+			log.Sugar.Errorf("设置国标主动拉流失败 err: %s", err.Error())
+			httpResponseError(w, err.Error())
 		}
 	}()
 
 	source := stream.SourceManager.Find(v.Source)
 	if source == nil {
-		log.Sugar.Errorf("设置主动拉流失败, %s源不存在", v.Source)
-		err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "gb28181 source 不存在"}
+		err = fmt.Errorf("%s 源不存在", v.Source)
 		return
 	}
 
 	activeSource, ok := source.(*gb28181.ActiveSource)
 	if !ok {
-		log.Sugar.Errorf("设置主动拉流失败, %s源不是Active拉流类型", v.Source)
-		err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "gbsource 不能转为active source"}
+		err = fmt.Errorf("%s 源不是Active拉流类型", v.Source)
 		return
 	}
 
 	addr, err := net.ResolveTCPAddr("tcp", v.RemoteAddr)
 	if err != nil {
-		log.Sugar.Errorf("设置主动拉流失败, err: %s", err.Error())
-		err = &MalformedRequest{Code: http.StatusBadRequest, Msg: "解析连接地址失败"}
 		return
 	}
 
-	err = activeSource.Connect(addr)
-	if err != nil {
-		log.Sugar.Errorf("设置主动拉流失败, err: %s", err.Error())
-		err = &MalformedRequest{Code: http.StatusBadRequest, Msg: fmt.Sprintf("连接Server失败 err:%s", err.Error())}
-		return
+	if err = activeSource.Connect(addr); err == nil {
+		httpResponseOK(w, nil)
 	}
-
-	httpResponseOK(w, nil)
 }
 
 func (api *ApiServer) OnGBSourceForward(v *GBForwardParams, w http.ResponseWriter, r *http.Request) {
 	log.Sugar.Infof("设置国标级联转发: %v", v)
 
+	var err error
+	// 响应错误消息
+	defer func() {
+		if err != nil {
+			log.Sugar.Errorf("设置级联转发失败 err: %s", err.Error())
+			httpResponseError(w, err.Error())
+		}
+	}()
+
 	source := stream.SourceManager.Find(v.Source)
 	if source == nil {
-		log.Sugar.Infof("设置国标级联转发失败 %s源不存在", v.Source)
-		w.WriteHeader(http.StatusNotFound)
+		err = fmt.Errorf("%s 源不存在", v.Source)
 	} else if source.GetType() != stream.SourceType28181 {
-		log.Sugar.Infof("设置国标级联转发失败 %s源不是国标推流类型", v.Source)
-		w.WriteHeader(http.StatusBadRequest)
+		log.Sugar.Infof("%s 源不是国标推流类型", v.Source)
 		return
 	}
 
@@ -168,8 +167,6 @@ func (api *ApiServer) OnGBSourceForward(v *GBForwardParams, w http.ResponseWrite
 
 	sink, port, err := gb28181.NewForwardSink(v.SSRC, v.Addr, setup, sinkId, v.Source)
 	if err != nil {
-		log.Sugar.Errorf("设置国标级联转发 err: %s", err.Error())
-		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
@@ -178,10 +175,10 @@ func (api *ApiServer) OnGBSourceForward(v *GBForwardParams, w http.ResponseWrite
 	log.Sugar.Infof("设置国标级联转发成功 ID: %s", sink.GetID())
 
 	response := struct {
-		ID   string `json:"id"` //sink id
+		Sink string `json:"sink"` //sink id
 		IP   string `json:"ip"`
 		Port int    `json:"port"`
-	}{ID: stream.SinkId2String(sinkId), IP: stream.AppConfig.PublicIP, Port: port}
+	}{Sink: stream.SinkId2String(sinkId), IP: stream.AppConfig.PublicIP, Port: port}
 
-	httpResponse2(w, &response)
+	httpResponseOK(w, &response)
 }
