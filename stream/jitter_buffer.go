@@ -61,14 +61,13 @@ func (j *JitterBuffer) Flush() {
 	}
 }
 
-func (j *JitterBuffer) Close() {
-	j.onPacket = nil
+func (j *JitterBuffer) SetHandler(handler func(packet interface{})) {
+	j.onPacket = handler
 }
 
-func NewJitterBuffer(handler func(packet interface{})) *JitterBuffer {
+func NewJitterBuffer() *JitterBuffer {
 	return &JitterBuffer{
 		queue:         make([]interface{}, 0xFFFF+1),
-		onPacket:      handler,
 		minStartCount: 50,
 		first:         true,
 	}

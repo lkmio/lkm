@@ -10,7 +10,8 @@ import (
 func TestName(t *testing.T) {
 	// 设置随机数种子，确保每次运行程序时都能得到不同的随机序列
 	rand.Seed(time.Now().UnixNano())
-	buffer := NewJitterBuffer(func(packet interface{}) {
+	buffer := NewJitterBuffer()
+	buffer.SetHandler(func(packet interface{}) {
 		println(packet.(string))
 	})
 
@@ -21,5 +22,4 @@ func TestName(t *testing.T) {
 	}
 
 	buffer.Flush()
-	buffer.Close()
 }
