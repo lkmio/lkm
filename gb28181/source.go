@@ -83,7 +83,6 @@ func (source *BaseGBSource) Input(data []byte) error {
 	}
 
 	packet := rtp.Packet{}
-	packet.Marshal()
 	_ = packet.Unmarshal(data)
 	return source.deMuxerCtx.Input(packet.Payload)
 }
@@ -249,6 +248,11 @@ func (source *BaseGBSource) Close() {
 	}
 
 	source.PublishSource.Close()
+
+	if source.deMuxerCtx != nil {
+		source.deMuxerCtx.Close()
+		source.deMuxerCtx = nil
+	}
 }
 
 func (source *BaseGBSource) SetConn(conn net.Conn) {

@@ -221,7 +221,7 @@ func ExtractAudioPacket(codec utils.AVCodecID, extractStream bool, data []byte, 
 }
 
 // StartReceiveDataTimer 启动收流超时计时器
-func StartReceiveDataTimer(source Source) {
+func StartReceiveDataTimer(source Source) *time.Timer {
 	utils.Assert(AppConfig.ReceiveTimeout > 0)
 
 	var receiveDataTimer *time.Timer
@@ -244,10 +244,12 @@ func StartReceiveDataTimer(source Source) {
 		// 对精度没要求
 		receiveDataTimer.Reset(time.Duration(AppConfig.ReceiveTimeout))
 	})
+
+	return receiveDataTimer
 }
 
 // StartIdleTimer 启动拉流空闲计时器
-func StartIdleTimer(source Source) {
+func StartIdleTimer(source Source) *time.Timer {
 	utils.Assert(AppConfig.IdleTimeout > 0)
 
 	var idleTimer *time.Timer
@@ -266,17 +268,42 @@ func StartIdleTimer(source Source) {
 
 		idleTimer.Reset(time.Duration(AppConfig.IdleTimeout))
 	})
+
+	return idleTimer
 }
 
 // LoopEvent 循环读取事件
 func LoopEvent(source Source) {
+	// 将超时计时器放在此处开启, 方便在退出的时候关闭
+	var receiveTimer *time.Timer
+	var idleTimer *time.Timer
+
+	defer func() {
+		log.Sugar.Debugf("主协程执行结束 source: %s", source.GetID())
+
+		// 关闭计时器
+		if receiveTimer != nil {
+			receiveTimer.Stop()
+		}
+		if idleTimer != nil {
+			idleTimer.Stop()
+		}
+	}()
+
+	// 开启收流超时计时器
+	if AppConfig.Hooks.IsEnableOnReceiveTimeout() && AppConfig.ReceiveTimeout > 0 {
+		receiveTimer = StartReceiveDataTimer(source)
+	}
+
+	// 开启拉流空闲超时计时器
+	if AppConfig.Hooks.IsEnableOnIdleTimeout() && AppConfig.IdleTimeout > 0 {
+		idleTimer = StartIdleTimer(source)
+	}
+
 	for {
 		select {
+		// 读取推流数据
 		case data := <-source.StreamPipe():
-			if source.IsClosed() {
-				return
-			}
-
 			if AppConfig.ReceiveTimeout > 0 {
 				source.SetLastPacketTime(time.Now())
 			}
@@ -287,19 +314,13 @@ func LoopEvent(source Source) {
 				return
 			}
 
-			if source.IsClosed() {
-				return
-			}
-
 			break
+		// 切换到主协程,执行该函数. 目的是用于无锁化处理推拉流的连接与断开, 推流源断开, 查询推流源信息等事件. 不要做耗时操作, 否则会影响推拉流.
 		case event := <-source.MainContextEvents():
-			if source.IsClosed() {
-				return
-			}
-
 			event()
 
 			if source.IsClosed() {
+				// 处理推流管道剩余的数据?
 				return
 			}
 

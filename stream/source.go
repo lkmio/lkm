@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/lkmio/avformat/stream"
@@ -105,10 +106,6 @@ type Source interface {
 	// LastStreamEndTime 返回最近结束拉流时间戳
 	LastStreamEndTime() time.Time
 
-	SetReceiveDataTimer(timer *time.Timer)
-
-	SetIdleTimer(timer *time.Timer)
-
 	IsClosed() bool
 
 	StreamPipe() chan []byte
@@ -139,13 +136,11 @@ type PublishSource struct {
 	pktBuffers       [8]collections.MemoryPool // 推流每路的AVPacket缓存, AVPacket的data从该内存池中分配. 在GOP缓存溢出时,释放池中内存.
 	gopBuffer        GOPBuffer                 // GOP缓存, 音频和视频混合使用, 以视频关键帧为界, 缓存第二个视频关键帧时, 释放前一组gop. 如果不存在视频流, 不缓存音频
 
-	closed     bool // source是否已经关闭
-	completed  bool // 所有推流track是否解析完毕, @see writeHeader 函数中赋值为true
-	existVideo bool // 是否存在视频
+	closed     atomic.Bool // source是否已经关闭
+	completed  bool        // 所有推流track是否解析完毕, @see writeHeader 函数中赋值为true
+	existVideo bool        // 是否存在视频
 
-	probeTimer       *time.Timer // track解析超时计时器, 触发时执行@see writeHeader
-	receiveDataTimer *time.Timer // 收流超时计时器
-	idleTimer        *time.Timer // 拉流空闲计时器
+	probeTimer *time.Timer // track解析超时计时器, 触发时执行@see writeHeader
 
 	TransStreams     map[TransStreamID]TransStream     // 所有的输出流, 持有Sink
 	sinks            map[SinkID]Sink                   // 保存所有Sink
@@ -167,7 +162,7 @@ func (s *PublishSource) SetLastPacketTime(time2 time.Time) {
 }
 
 func (s *PublishSource) IsClosed() bool {
-	return s.closed
+	return s.closed.Load()
 }
 
 func (s *PublishSource) StreamPipe() chan []byte {
@@ -176,14 +171,6 @@ func (s *PublishSource) StreamPipe() chan []byte {
 
 func (s *PublishSource) MainContextEvents() chan func() {
 	return s.mainContextEvents
-}
-
-func (s *PublishSource) SetReceiveDataTimer(timer *time.Timer) {
-	s.receiveDataTimer = timer
-}
-
-func (s *PublishSource) SetIdleTimer(timer *time.Timer) {
-	s.idleTimer = timer
 }
 
 func (s *PublishSource) LastStreamEndTime() time.Time {
@@ -448,12 +435,12 @@ func (s *PublishSource) doAddSink(sink Sink) bool {
 		return false
 	}
 
-	// 还没准备好推流, 暂不推流
+	// 还没做好准备(rtsp拉流还在协商sdp中), 暂不推流
 	if !sink.IsReady() {
 		return true
 	}
 
-	// TCP拉流开启异步发包
+	// TCP拉流开启异步发包, 一旦出现网络不好的链路, 其余正常链路不受影响.
 	conn, ok := sink.GetConn().(*transport.Conn)
 	if ok && sink.IsTCPStreaming() && transStream.OutStreamBufferCapacity() > 2 {
 		conn.EnableAsyncWriteMode(transStream.OutStreamBufferCapacity() - 2)
@@ -559,11 +546,11 @@ func (s *PublishSource) SetState(state SessionState) {
 func (s *PublishSource) DoClose() {
 	log.Sugar.Debugf("closing the %s source. id: %s. closed flag: %t", s.Type, s.ID, s.closed)
 
-	if s.closed {
+	if s.closed.Load() {
 		return
 	}
 
-	s.closed = true
+	s.closed.Store(true)
 
 	if s.TransDeMuxer != nil {
 		s.TransDeMuxer.Close()
@@ -584,17 +571,9 @@ func (s *PublishSource) DoClose() {
 		s.gopBuffer = nil
 	}
 
-	// 停止所有计时器
+	// 停止track探测计时器
 	if s.probeTimer != nil {
 		s.probeTimer.Stop()
-	}
-
-	if s.receiveDataTimer != nil {
-		s.receiveDataTimer.Stop()
-	}
-
-	if s.idleTimer != nil {
-		s.idleTimer.Stop()
 	}
 
 	// 关闭录制流
@@ -607,7 +586,9 @@ func (s *PublishSource) DoClose() {
 	// 释放每路转协议流， 将所有sink添加到等待队列
 	_, err := SourceManager.Remove(s.ID)
 	if err != nil {
+		// source不存在, 在创建source时, 未添加到manager中, 目前只有1078流会出现这种情况(tcp连接到端口, 没有推流或推流数据无效, 无法定位到手机号, 以至于无法执行PreparePublishSource函数), 将不再处理后续事情.
 		log.Sugar.Errorf("删除源失败 source:%s err:%s", s.ID, err.Error())
+		return
 	}
 
 	// 关闭所有输出流
@@ -665,9 +646,21 @@ func (s *PublishSource) DoClose() {
 }
 
 func (s *PublishSource) Close() {
+	if s.closed.Load() {
+		return
+	}
+
+	// 同步执行, 确保close后, 主协程已经退出, 不会再处理任何推拉流、查询等任何事情.
+	group := sync.WaitGroup{}
+	group.Add(1)
+
 	s.PostEvent(func() {
 		s.DoClose()
+
+		group.Done()
 	})
+
+	group.Wait()
 }
 
 func (s *PublishSource) OnDiscardPacket(packet utils.AVPacket) {

@@ -24,14 +24,6 @@ func PreparePublishSource(source Source, hook bool) (*http.Response, utils.HookS
 		return nil, utils.HookStateOccupy
 	}
 
-	if AppConfig.Hooks.IsEnableOnReceiveTimeout() && AppConfig.ReceiveTimeout > 0 {
-		StartReceiveDataTimer(source)
-	}
-
-	if AppConfig.Hooks.IsEnableOnIdleTimeout() && AppConfig.IdleTimeout > 0 {
-		StartIdleTimer(source)
-	}
-
 	source.SetCreateTime(time.Now())
 
 	urls := GetStreamPlayUrls(source.GetID())

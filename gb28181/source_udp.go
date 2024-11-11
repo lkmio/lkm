@@ -13,15 +13,6 @@ type UDPSource struct {
 	receiveBuffer *stream.ReceiveBuffer
 }
 
-func NewUDPSource() *UDPSource {
-	u := &UDPSource{
-		receiveBuffer: stream.NewReceiveBuffer(1500, stream.ReceiveBufferUdpBlockCount+50),
-	}
-
-	u.jitterBuffer = stream.NewJitterBuffer(u.OnOrderedRtp)
-	return u
-}
-
 func (u *UDPSource) SetupType() SetupType {
 	return SetupUDP
 }
@@ -43,7 +34,19 @@ func (u *UDPSource) InputRtpPacket(pkt *rtp.Packet) error {
 }
 
 func (u *UDPSource) Close() {
+	// 清空剩余在缓冲区的包
 	u.jitterBuffer.Flush()
-	u.jitterBuffer.Close()
+	u.jitterBuffer.SetHandler(nil)
+
 	u.BaseGBSource.Close()
+}
+
+func NewUDPSource() *UDPSource {
+	u := &UDPSource{
+		receiveBuffer: stream.NewReceiveBuffer(1500, stream.ReceiveBufferUdpBlockCount+50),
+	}
+
+	u.jitterBuffer = stream.NewJitterBuffer()
+	u.jitterBuffer.SetHandler(u.OnOrderedRtp)
+	return u
 }
