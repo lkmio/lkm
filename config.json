@@ -73,6 +73,7 @@
   },
 
   "log": {
+    "file_logging": false,
     "level": -1,
     "name": "./logs/lkm.log",
     "max_size":   10,

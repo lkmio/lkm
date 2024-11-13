@@ -14,20 +14,22 @@ var (
 	Sugar *zap.SugaredLogger
 )
 
-func InitLogger(leve zapcore.LevelEnabler,
+func InitLogger(toFile bool, leve zapcore.LevelEnabler,
 	name string, maxSize, maxBackup, maxAge int, compress bool) {
 	utils.Assert(Sugar == nil)
 
 	var sinks []zapcore.Core
-	writeSyncer := getLogWriter(name, maxSize, maxBackup, maxAge, compress)
 	encoder := getEncoder()
 
-	fileCore := zapcore.NewCore(encoder, writeSyncer, leve)
+	// 保存到文件
+	if toFile {
+		writeSyncer := getLogWriter(name, maxSize, maxBackup, maxAge, compress)
+		fileCore := zapcore.NewCore(encoder, writeSyncer, leve)
+		sinks = append(sinks, fileCore)
+	}
 
-	sinks = append(sinks, fileCore)
-	//打印到控制台
+	// 打印到控制台
 	sinks = append(sinks, zapcore.NewCore(encoder, zapcore.AddSync(os.Stdout), leve))
-
 	core := zapcore.NewTee(sinks...)
 
 	logger := zap.New(core, zap.AddCaller())

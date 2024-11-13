@@ -89,12 +89,13 @@ type RecordConfig struct {
 }
 
 type LogConfig struct {
-	Level     int    `json:"level"`
-	Name      string `json:"name"`
-	MaxSize   int    `json:"max_size"` //单位M
-	MaxBackup int    `json:"max_backup"`
-	MaxAge    int    `json:"max_age"` //天数
-	Compress  bool   `json:"compress"`
+	FileLogging bool   `json:"file_logging"`
+	Level       int    `json:"level"`
+	Name        string `json:"name"`
+	MaxSize     int    `json:"max_size"` //单位M
+	MaxBackup   int    `json:"max_backup"`
+	MaxAge      int    `json:"max_age"` //天数
+	Compress    bool   `json:"compress"`
 }
 
 type HttpConfig struct {
