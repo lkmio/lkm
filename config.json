@@ -51,7 +51,7 @@
   },
 
   "record": {
-    "enable": true,
+    "enable": false,
     "format": "flv",
     "dir": "../record"
   },
