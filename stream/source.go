@@ -348,11 +348,13 @@ func (s *PublishSource) write(sink Sink, index int, data [][]byte, timestamp int
 		//return
 	}
 
-	// 内核发送缓冲区满, 清空sink的发送缓冲区, 等下次关键帧时再尝试发送。
-	//_, ok := err.(*transport.ZeroWindowSizeError)
-	//if ok {
-	//	conn, ok := sink.GetConn().(*transport.Conn)
-	//}
+	// 推流失败, 可能是服务器或拉流端带宽不够、拉流端不读取数据等情况造成内核发送缓冲区满, 进而阻塞.
+	// 直接关闭连接. 当然也可以将sink先挂起, 后续再继续推流.
+	_, ok := err.(*transport.ZeroWindowSizeError)
+	if ok {
+		log.Sugar.Errorf("向sink推流超时,关闭连接. sink: %s", sink.GetID())
+		sink.Close()
+	}
 }
 
 // 创建sink需要的输出流
