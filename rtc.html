@@ -32,7 +32,7 @@
 <body>
 
 <div style="margin-top: 10px; margin-left: 10px;">
-    <input style="width: 100px;" id="url" type="text" value="hls/mystream.rtc"/>
+    <input style="width: 100px;" id="source" type="text" value="hls/mystream"/>
     <button onclick="play()"> 播放</button>
 </div>
 
@@ -48,7 +48,7 @@
 <script>
     async function play() {
         let remote_view = document.getElementById("videoview");
-        let url = document.getElementById("url").value;
+        let source = document.getElementById("source").value;
         let pc = new RTCPeerConnection(null);
        // pc.addTransceiver("audio", {direction: "recvonly"});
         pc.addTransceiver("video", {direction: "recvonly"});
@@ -80,6 +80,7 @@
         }
 
         console.log("offer:" + offer.sdp);
+        let url = source + ".rtc";
         fetch(url, {
             method: 'POST',
             body: JSON.stringify(data),
