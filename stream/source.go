@@ -117,6 +117,8 @@ type Source interface {
 	SetCreateTime(time time.Time)
 
 	Sinks() []Sink
+
+	GetBitrateStatistics() *BitrateStatistics
 }
 
 type PublishSource struct {
@@ -154,7 +156,8 @@ type PublishSource struct {
 	sinkCount         int        // 拉流端计数
 	urlValues         url.Values // 推流url携带的参数
 	timeoutTracks     []int
-	createTime        time.Time // source创建时间
+	createTime        time.Time          // source创建时间
+	statistics        *BitrateStatistics // 码流统计
 }
 
 func (s *PublishSource) SetLastPacketTime(time2 time.Time) {
@@ -204,6 +207,7 @@ func (s *PublishSource) Init(receiveQueueSize int) {
 	s.TransStreams = make(map[TransStreamID]TransStream, 10)
 	s.sinks = make(map[SinkID]Sink, 128)
 	s.TransStreamSinks = make(map[TransStreamID]map[SinkID]Sink, len(transStreamFactories)+1)
+	s.statistics = NewBitrateStatistics()
 }
 
 func (s *PublishSource) CreateDefaultOutStreams() {
@@ -263,6 +267,7 @@ func (s *PublishSource) FindOrCreatePacketBuffer(index int, mediaType utils.AVMe
 
 func (s *PublishSource) Input(data []byte) error {
 	s.streamPipe <- data
+	s.statistics.Input(len(data))
 	return nil
 }
 
@@ -348,7 +353,7 @@ func (s *PublishSource) write(sink Sink, index int, data [][]byte, timestamp int
 		//return
 	}
 
-	// 推流失败, 可能是服务器或拉流端带宽不够、拉流端不读取数据等情况造成内核发送缓冲区满, 进而阻塞.
+	// 推流超时, 可能是服务器或拉流端带宽不够、拉流端不读取数据等情况造成内核发送缓冲区满, 进而阻塞.
 	// 直接关闭连接. 当然也可以将sink先挂起, 后续再继续推流.
 	_, ok := err.(*transport.ZeroWindowSizeError)
 	if ok {
@@ -844,4 +849,8 @@ func (s *PublishSource) Sinks() []Sink {
 
 	group.Wait()
 	return sinks
+}
+
+func (s *PublishSource) GetBitrateStatistics() *BitrateStatistics {
+	return s.statistics
 }

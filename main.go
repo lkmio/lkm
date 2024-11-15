@@ -135,6 +135,7 @@ func init() {
 		"record":  &config.Record,
 	}
 
+	// 读取运行参数
 	disableOptions, enableOptions := readRunArgs()
 	mergeArgs(options, disableOptions, enableOptions)
 

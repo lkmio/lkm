@@ -405,7 +405,7 @@ func (api *ApiServer) OnSourceList(w http.ResponseWriter, r *http.Request) {
 			Protocol:  source.GetType().String(),
 			Time:      source.CreateTime(),
 			SinkCount: source.SinkCount(),
-			Bitrate:   "", // 后续开发
+			Bitrate:   strconv.Itoa(source.GetBitrateStatistics().PreviousSecond()/1024) + "KBS", // 后续开发
 			Tracks:    tracks,
 		})
 	}
