@@ -349,7 +349,7 @@ func (s *PublishSource) write(sink Sink, index int, data [][]byte, timestamp int
 	err := sink.Write(index, data, timestamp)
 	if err == nil {
 		sink.IncreaseSentPacketCount()
-		//return
+		return
 	}
 
 	// 推流超时, 可能是服务器或拉流端带宽不够、拉流端不读取数据等情况造成内核发送缓冲区满, 进而阻塞.
@@ -357,7 +357,7 @@ func (s *PublishSource) write(sink Sink, index int, data [][]byte, timestamp int
 	_, ok := err.(*transport.ZeroWindowSizeError)
 	if ok {
 		log.Sugar.Errorf("向sink推流超时,关闭连接. sink: %s", sink.GetID())
-		sink.Close()
+		go sink.Close()
 	}
 }
 
@@ -486,7 +486,7 @@ func (s *PublishSource) AddSink(sink Sink) {
 			AddSinkToWaitingQueue(sink.GetSourceID(), sink)
 		} else {
 			if !s.doAddSink(sink) {
-				sink.Close()
+				go sink.Close()
 			}
 		}
 	})
@@ -735,7 +735,7 @@ func (s *PublishSource) writeHeader() {
 
 	for _, sink := range sinks {
 		if !s.doAddSink(sink) {
-			sink.Close()
+			go sink.Close()
 		}
 	}
 }
