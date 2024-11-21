@@ -151,11 +151,10 @@ type PublishSource struct {
 	streamPipe        chan []byte // 推流数据管道
 	mainContextEvents chan func() // 切换到主协程执行函数的事件管道
 
-	lastPacketTime    time.Time  // 最近收到推流包的时间
-	lastStreamEndTime time.Time  // 最近拉流端结束拉流的时间
-	sinkCount         int        // 拉流端计数
-	urlValues         url.Values // 推流url携带的参数
-	timeoutTracks     []int
+	lastPacketTime    time.Time          // 最近收到推流包的时间
+	lastStreamEndTime time.Time          // 最近拉流端结束拉流的时间
+	sinkCount         int                // 拉流端计数
+	urlValues         url.Values         // 推流url携带的参数
 	createTime        time.Time          // source创建时间
 	statistics        *BitrateStatistics // 码流统计
 }
@@ -676,7 +675,10 @@ func (s *PublishSource) OnDiscardPacket(packet utils.AVPacket) {
 
 func (s *PublishSource) OnDeMuxStream(stream utils.AVStream) {
 	if s.completed {
-		log.Sugar.Warnf("添加Stream失败 Source: %s已经WriteHeader", s.ID)
+		log.Sugar.Warnf("添加track失败,已经WriteHeader. source: %s", s.ID)
+		return
+	} else if !s.NotTrackAdded(stream.Index()) {
+		log.Sugar.Warnf("添加track失败,已经添加索引为%d的track. source: %s", stream.Index(), s.ID)
 		return
 	}
 
@@ -742,6 +744,7 @@ func (s *PublishSource) IsCompleted() bool {
 	return s.completed
 }
 
+// NotTrackAdded 是否没有添加该index对应的track
 func (s *PublishSource) NotTrackAdded(index int) bool {
 	for _, avStream := range s.originStreams.All() {
 		if avStream.Index() == index {
@@ -752,25 +755,17 @@ func (s *PublishSource) NotTrackAdded(index int) bool {
 	return true
 }
 
-func (s *PublishSource) IsTimeoutTrack(index int) bool {
-	for _, i := range s.timeoutTracks {
-		if i == index {
-			return true
-		}
-	}
-
-	return false
-}
-
-func (s *PublishSource) SetTimeoutTrack(index int) {
-	s.timeoutTracks = append(s.timeoutTracks, index)
-}
-
 func (s *PublishSource) OnDeMuxStreamDone() {
 	s.writeHeader()
 }
 
 func (s *PublishSource) OnDeMuxPacket(packet utils.AVPacket) {
+	// track超时，忽略推流数据
+	if s.NotTrackAdded(packet.Index()) {
+		s.FindOrCreatePacketBuffer(packet.Index(), packet.MediaType()).FreeTail()
+		return
+	}
+
 	if AppConfig.GOPCache && s.existVideo {
 		s.gopBuffer.AddPacket(packet)
 	}

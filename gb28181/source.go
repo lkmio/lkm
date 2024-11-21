@@ -122,15 +122,6 @@ func (source *BaseGBSource) OnCompletePacket(index int, mediaType utils.AVMediaT
 		}
 	}()
 
-	if source.IsCompleted() && source.NotTrackAdded(index) {
-		if !source.IsTimeoutTrack(index) {
-			source.SetTimeoutTrack(index)
-			log.Sugar.Errorf("添加track超时 source:%s", source.GetID())
-		}
-
-		return nil
-	}
-
 	if utils.AVMediaTypeAudio == mediaType {
 		stream_, packet, err = stream.ExtractAudioPacket(codec, source.audioStream == nil, data, pts, dts, index, 90000)
 		if err != nil {
