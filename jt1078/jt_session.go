@@ -16,7 +16,7 @@ const (
 	VideoPFrameMark      = 0b001
 	VideoBFrameMark      = 0b010
 	AudioFrameMark       = 0b011
-	TransmissionDataMark = 0b1000
+	TransmissionDataMark = 0b100
 
 	PTVideoH264 = 98
 	PTVideoH265 = 99
