@@ -17,115 +17,129 @@ const (
 	OverTcpMagic      = 0x24
 )
 
-// TranStream rtsp传输流封装
+// TransStream rtsp传输流封装
 // 低延迟是rtsp特性, 所以不考虑实现GOP缓存
-type TranStream struct {
+type TransStream struct {
 	stream.BaseTransStream
 	addr      net.IPAddr
 	addrType  string
 	urlFormat string
 
-	rtpTracks []*Track
+	RtspTracks []*Track
+	//oldTracks  []*Track
+	oldTracks map[byte]uint16
 	sdp       string
-	buffer    *stream.ReceiveBuffer
+	buffer    *stream.ReceiveBuffer // 保存封装后的rtp包
 }
 
-func (t *TranStream) OverTCP(data []byte, channel int) {
+func (t *TransStream) OverTCP(data []byte, channel int) {
 	data[0] = OverTcpMagic
 	data[1] = byte(channel)
 	binary.BigEndian.PutUint16(data[2:], uint16(len(data)-4))
 }
 
-func (t *TranStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, error) {
+func (t *TransStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, error) {
 	t.ClearOutStreamBuffer()
 
 	var ts uint32
-	track := t.rtpTracks[packet.Index()]
-	track.seq = track.muxer.GetHeader().Seq
+	track := t.RtspTracks[packet.Index()]
 	if utils.AVMediaTypeAudio == packet.MediaType() {
-		ts = uint32(packet.ConvertPts(track.rate))
-		t.PackRtpPayload(track.muxer, packet.Index(), packet.Data(), ts)
+		ts = uint32(packet.ConvertPts(track.Rate))
+		t.PackRtpPayload(track, packet.Index(), packet.Data(), ts)
 	} else if utils.AVMediaTypeVideo == packet.MediaType() {
-		ts = uint32(packet.ConvertPts(track.rate))
-		data := libavc.RemoveStartCode(packet.AnnexBPacketData(t.BaseTransStream.Tracks[packet.Index()]))
-		t.PackRtpPayload(track.muxer, packet.Index(), data, ts)
+		ts = uint32(packet.ConvertPts(track.Rate))
+		data := libavc.RemoveStartCode(packet.AnnexBPacketData(t.BaseTransStream.Tracks[packet.Index()].Stream))
+		t.PackRtpPayload(track, packet.Index(), data, ts)
 	}
 
 	return t.OutBuffer[:t.OutBufferSize], int64(ts), utils.AVMediaTypeVideo == packet.MediaType() && packet.KeyFrame(), nil
 }
 
-func (t *TranStream) ReadExtraData(ts int64) ([][]byte, int64, error) {
+func (t *TransStream) ReadExtraData(ts int64) ([][]byte, int64, error) {
 	// 返回视频编码数据的rtp包
-	for _, track := range t.rtpTracks {
-		if utils.AVMediaTypeVideo != track.mediaType {
+	for _, track := range t.RtspTracks {
+		if utils.AVMediaTypeVideo != track.MediaType {
 			continue
 		}
 
 		// 回滚序号和时间戳
-		index := int(track.seq) - len(track.extraDataBuffer)
-		for i, bytes := range track.extraDataBuffer {
+		index := int(track.StartSeq) - len(track.ExtraDataBuffer)
+		for i, bytes := range track.ExtraDataBuffer {
 			librtp.RollbackSeq(bytes[OverTcpHeaderSize:], index+i+1)
 			binary.BigEndian.PutUint32(bytes[OverTcpHeaderSize+4:], uint32(ts))
 		}
 
-		return track.extraDataBuffer, ts, nil
+		return track.ExtraDataBuffer, ts, nil
 	}
 
 	return nil, ts, nil
 }
 
-func (t *TranStream) PackRtpPayload(muxer librtp.Muxer, channel int, data []byte, timestamp uint32) {
+func (t *TransStream) PackRtpPayload(track *Track, channel int, data []byte, timestamp uint32) {
 	var index int
-	muxer.Input(data, timestamp, func() []byte {
+
+	// 保存开始序号
+	track.StartSeq = track.Muxer.GetHeader().Seq
+	track.Muxer.Input(data, timestamp, func() []byte {
 		index = t.buffer.Index()
 		block := t.buffer.GetBlock()
 		return block[OverTcpHeaderSize:]
 	}, func(bytes []byte) {
+		track.EndSeq = track.Muxer.GetHeader().Seq
+
 		packet := t.buffer.Get(index)[:OverTcpHeaderSize+len(bytes)]
 		t.OverTCP(packet, channel)
 		t.AppendOutStreamBuffer(packet)
 	})
 }
 
-func (t *TranStream) AddTrack(stream utils.AVStream) error {
-	if err := t.BaseTransStream.AddTrack(stream); err != nil {
+func (t *TransStream) AddTrack(track *stream.Track) error {
+	if err := t.BaseTransStream.AddTrack(track); err != nil {
 		return err
 	}
 
-	payloadType, ok := librtp.CodecIdPayloads[stream.CodecId()]
+	payloadType, ok := librtp.CodecIdPayloads[track.Stream.CodecId()]
 	if !ok {
-		return fmt.Errorf("no payload type was found for codecid: %d", stream.CodecId())
+		return fmt.Errorf("no payload type was found for codecid: %d", track.Stream.CodecId())
+	}
+
+	// 恢复上次拉流的序号
+	var startSeq uint16
+	if t.oldTracks != nil {
+		startSeq, ok = t.oldTracks[byte(payloadType.Pt)]
+		utils.Assert(ok)
 	}
 
 	// 创建RTP封装器
 	var muxer librtp.Muxer
-	if utils.AVCodecIdH264 == stream.CodecId() {
-		muxer = librtp.NewH264Muxer(payloadType.Pt, 0, 0xFFFFFFFF)
-	} else if utils.AVCodecIdH265 == stream.CodecId() {
-		muxer = librtp.NewH265Muxer(payloadType.Pt, 0, 0xFFFFFFFF)
-	} else if utils.AVCodecIdAAC == stream.CodecId() {
-		muxer = librtp.NewAACMuxer(payloadType.Pt, 0, 0xFFFFFFFF)
-	} else if utils.AVCodecIdPCMALAW == stream.CodecId() || utils.AVCodecIdPCMMULAW == stream.CodecId() {
-		muxer = librtp.NewMuxer(payloadType.Pt, 0, 0xFFFFFFFF)
+	if utils.AVCodecIdH264 == track.Stream.CodecId() {
+		muxer = librtp.NewH264Muxer(payloadType.Pt, int(startSeq), 0xFFFFFFFF)
+	} else if utils.AVCodecIdH265 == track.Stream.CodecId() {
+		muxer = librtp.NewH265Muxer(payloadType.Pt, int(startSeq), 0xFFFFFFFF)
+	} else if utils.AVCodecIdAAC == track.Stream.CodecId() {
+		muxer = librtp.NewAACMuxer(payloadType.Pt, int(startSeq), 0xFFFFFFFF)
+	} else if utils.AVCodecIdPCMALAW == track.Stream.CodecId() || utils.AVCodecIdPCMMULAW == track.Stream.CodecId() {
+		muxer = librtp.NewMuxer(payloadType.Pt, int(startSeq), 0xFFFFFFFF)
 	}
 
-	t.rtpTracks = append(t.rtpTracks, NewRTSPTrack(muxer, byte(payloadType.Pt), payloadType.ClockRate, stream.Type()))
-	index := len(t.rtpTracks) - 1
+	rtspTrack := NewRTSPTrack(muxer, byte(payloadType.Pt), payloadType.ClockRate, track.Stream.Type())
+	t.RtspTracks = append(t.RtspTracks, rtspTrack)
+	index := len(t.RtspTracks) - 1
 
 	// 将sps和pps按照单一模式打包
 	bufferIndex := t.buffer.Index()
-	if utils.AVMediaTypeVideo == stream.Type() {
-		parameters := stream.CodecParameters()
+	if utils.AVMediaTypeVideo == track.Stream.Type() {
+		parameters := track.Stream.CodecParameters()
 
-		if utils.AVCodecIdH265 == stream.CodecId() {
+		if utils.AVCodecIdH265 == track.Stream.CodecId() {
 			bytes := parameters.(*utils.HEVCCodecData).VPS()
-			t.PackRtpPayload(muxer, index, bytes[0], 0)
+			t.PackRtpPayload(rtspTrack, index, bytes[0], 0)
 		}
 
 		spsBytes := parameters.SPS()
 		ppsBytes := parameters.PPS()
-		t.PackRtpPayload(muxer, index, spsBytes[0], 0)
-		t.PackRtpPayload(muxer, index, ppsBytes[0], 0)
+		t.PackRtpPayload(rtspTrack, index, spsBytes[0], 0)
+		t.PackRtpPayload(rtspTrack, index, ppsBytes[0], 0)
 
 		// 拷贝扩展数据的rtp包
 		size := t.buffer.Index() - bufferIndex
@@ -137,14 +151,14 @@ func (t *TranStream) AddTrack(stream utils.AVStream) error {
 			extraRtpBuffer[i] = dst[:OverTcpHeaderSize+binary.BigEndian.Uint16(dst[2:])]
 		}
 
-		t.rtpTracks[index].extraDataBuffer = extraRtpBuffer
+		t.RtspTracks[index].ExtraDataBuffer = extraRtpBuffer
 	}
 
 	return nil
 }
 
-func (t *TranStream) Close() ([][]byte, int64, error) {
-	for _, track := range t.rtpTracks {
+func (t *TransStream) Close() ([][]byte, int64, error) {
+	for _, track := range t.RtspTracks {
 		if track != nil {
 			track.Close()
 		}
@@ -153,7 +167,7 @@ func (t *TranStream) Close() ([][]byte, int64, error) {
 	return nil, 0, nil
 }
 
-func (t *TranStream) WriteHeader() error {
+func (t *TransStream) WriteHeader() error {
 	description := sdp.SessionDescription{
 		Version: 0,
 		Origin: sdp.Origin{
@@ -177,7 +191,7 @@ func (t *TranStream) WriteHeader() error {
 	}
 
 	for i, track := range t.Tracks {
-		payloadType, _ := librtp.CodecIdPayloads[track.CodecId()]
+		payloadType, _ := librtp.CodecIdPayloads[track.Stream.CodecId()]
 		mediaDescription := sdp.MediaDescription{
 			ConnectionInformation: &sdp.ConnectionInformation{
 				NetworkType: "IN",
@@ -195,10 +209,10 @@ func (t *TranStream) WriteHeader() error {
 		mediaDescription.MediaName.Protos = []string{"RTP", "AVP"}
 		mediaDescription.MediaName.Formats = []string{strconv.Itoa(payloadType.Pt)}
 
-		if utils.AVMediaTypeAudio == track.Type() {
+		if utils.AVMediaTypeAudio == track.Stream.Type() {
 			mediaDescription.MediaName.Media = "audio"
 
-			if utils.AVCodecIdAAC == track.CodecId() {
+			if utils.AVCodecIdAAC == track.Stream.CodecId() {
 				//[14496-3], [RFC6416] profile-level-id:
 				//1 : Main Audio Profile Level 1
 				//9 : Speech Audio Profile Level 1
@@ -237,12 +251,13 @@ func (t *TranStream) WriteHeader() error {
 	return nil
 }
 
-func NewTransStream(addr net.IPAddr, urlFormat string) stream.TransStream {
-	t := &TranStream{
+func NewTransStream(addr net.IPAddr, urlFormat string, oldTracks map[byte]uint16) stream.TransStream {
+	t := &TransStream{
 		addr:      addr,
 		urlFormat: urlFormat,
 		// 在将AVPacket打包rtp时, 会使用多个buffer块, 回环覆盖多个rtp块, 如果是TCP拉流并且网络不好, 推流的数据会错乱.
-		buffer: stream.NewReceiveBuffer(1500, 1024),
+		buffer:    stream.NewReceiveBuffer(1500, 1024),
+		oldTracks: oldTracks,
 	}
 
 	if addr.IP.To4() != nil {
@@ -254,10 +269,15 @@ func NewTransStream(addr net.IPAddr, urlFormat string) stream.TransStream {
 	return t
 }
 
-func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtocol, streams []utils.AVStream) (stream.TransStream, error) {
+func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtocol, tracks []*stream.Track) (stream.TransStream, error) {
 	trackFormat := "?track=%d"
+	var oldTracks map[byte]uint16
+	if endInfo := source.GetStreamEndInfo(); endInfo != nil {
+		oldTracks = endInfo.RtspTracks
+	}
+
 	return NewTransStream(net.IPAddr{
 		IP:   net.ParseIP(stream.AppConfig.PublicIP),
 		Zone: "",
-	}, trackFormat), nil
+	}, trackFormat, oldTracks), nil
 }

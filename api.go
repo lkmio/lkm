@@ -232,7 +232,7 @@ func (api *ApiServer) onHttpFLV(sourceId string, w http.ResponseWriter, r *http.
 }
 
 func (api *ApiServer) onTS(source string, w http.ResponseWriter, r *http.Request) {
-	sid := r.URL.Query().Get(hls.SessionIdKey)
+	sid := r.URL.Query().Get(hls.SessionIDKey)
 	var sink stream.Sink
 	if sid != "" {
 		sink = stream.SinkManager.Find(stream.SinkID(sid))
@@ -266,12 +266,12 @@ func (api *ApiServer) onHLS(source string, w http.ResponseWriter, r *http.Reques
 
 	// 如果没有携带会话ID, 认为是首次拉流. Server将生成会话ID, 应答给拉流端, 后续拉流请求(.M3U8和.TS的HTTP请求)都将携带该会话ID.
 	// 会话ID的Key为"hls_sid", 为避免冲突, 播放端和hook server不要再使用, 否则会一直拉流失败.
-	sid := r.URL.Query().Get(hls.SessionIdKey)
+	sid := r.URL.Query().Get(hls.SessionIDKey)
 	if sid == "" {
 		sid = utils.RandStringBytes(10)
 
 		query := r.URL.Query()
-		query.Add(hls.SessionIdKey, sid)
+		query.Add(hls.SessionIDKey, sid)
 		path := fmt.Sprintf("/%s.m3u8?%s", source, query.Encode())
 
 		response := "#EXTM3U\r\n" +
@@ -284,7 +284,7 @@ func (api *ApiServer) onHLS(source string, w http.ResponseWriter, r *http.Reques
 	sink := stream.SinkManager.Find(sid)
 	// 更新最近的M3U8文件
 	if sink != nil {
-		w.Write([]byte(sink.(*hls.M3U8Sink).GetM3U8String()))
+		w.Write([]byte(sink.(*hls.M3U8Sink).GetPlaylist()))
 		return
 	}
 
@@ -394,10 +394,10 @@ func (api *ApiServer) OnSourceList(w http.ResponseWriter, r *http.Request) {
 
 	var details []SourceDetails
 	for _, source := range sources {
-		var tracks []string
-		streams := source.OriginStreams()
-		for _, avStream := range streams {
-			tracks = append(tracks, avStream.CodecId().String())
+		var codecs []string
+		tracks := source.OriginTracks()
+		for _, track := range tracks {
+			codecs = append(codecs, track.Stream.CodecId().String())
 		}
 
 		details = append(details, SourceDetails{
@@ -406,7 +406,7 @@ func (api *ApiServer) OnSourceList(w http.ResponseWriter, r *http.Request) {
 			Time:      source.CreateTime(),
 			SinkCount: source.SinkCount(),
 			Bitrate:   strconv.Itoa(source.GetBitrateStatistics().PreviousSecond()/1024) + "KBS", // 后续开发
-			Tracks:    tracks,
+			Tracks:    codecs,
 		})
 	}
 

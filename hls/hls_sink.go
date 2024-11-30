@@ -9,22 +9,22 @@ import (
 )
 
 const (
-	SessionIdKey = "hls_sid"
+	SessionIDKey = "hls_sid"
 )
 
 type M3U8Sink struct {
 	stream.BaseSink
-	cb               func(m3u8 []byte) // 生成m3u8文件的发送回调
-	sessionId        string
-	playtime         time.Time
-	playTimer        *time.Timer
-	m3u8StringFormat *string
+	cb             func(m3u8 []byte) // 生成m3u8文件的发送回调
+	sessionId      string            // 拉流会话ID
+	playtime       time.Time
+	playTimer      *time.Timer
+	playlistFormat *string
 }
 
-// SendM3U8Data 首次向拉流端应答M3U8文件， 后续更新M3U8文件, 通过调用@see GetM3U8String 函数获取最新的M3U8文件.
+// SendM3U8Data 首次向拉流端应答M3U8文件， 后续更新M3U8文件, 通过调用@see GetPlaylist 函数获取最新的M3U8文件.
 func (s *M3U8Sink) SendM3U8Data(data *string) error {
-	s.m3u8StringFormat = data
-	s.cb([]byte(s.GetM3U8String()))
+	s.playlistFormat = data
+	s.cb([]byte(s.GetPlaylist()))
 
 	// 开启计时器, 长时间没有拉流关闭sink
 	timeout := time.Duration(stream.AppConfig.IdleTimeout)
@@ -50,8 +50,8 @@ func (s *M3U8Sink) SendM3U8Data(data *string) error {
 func (s *M3U8Sink) StartStreaming(transStream stream.TransStream) error {
 	hls := transStream.(*TransStream)
 
-	if hls.m3u8.Size() > 0 {
-		if err := s.SendM3U8Data(&hls.m3u8StringFormat); err != nil {
+	if hls.M3U8Writer.Size() > 0 {
+		if err := s.SendM3U8Data(hls.PlaylistFormat); err != nil {
 			return err
 		}
 	} else {
@@ -62,13 +62,14 @@ func (s *M3U8Sink) StartStreaming(transStream stream.TransStream) error {
 	return nil
 }
 
-func (s *M3U8Sink) GetM3U8String() string {
+func (s *M3U8Sink) GetPlaylist() string {
 	// 更新拉流时间
 	//s.RefreshPlayTime()
 
-	param := fmt.Sprintf("?%s=%s", SessionIdKey, s.sessionId)
-	m3u8 := strings.ReplaceAll(*s.m3u8StringFormat, "%s", param)
-	return m3u8
+	// 替换每个sink唯一的拉流会话ID
+	param := fmt.Sprintf("?%s=%s", SessionIDKey, s.sessionId)
+	playlist := strings.ReplaceAll(*s.playlistFormat, "%s", param)
+	return playlist
 }
 
 func (s *M3U8Sink) RefreshPlayTime() {

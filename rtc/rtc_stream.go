@@ -23,11 +23,11 @@ func (t *transStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, error
 		t.AppendOutStreamBuffer(packet.Data())
 	} else if utils.AVMediaTypeVideo == packet.MediaType() {
 		if packet.KeyFrame() {
-			extra := t.BaseTransStream.Tracks[packet.Index()].CodecParameters().AnnexBExtraData()
+			extra := t.BaseTransStream.Tracks[packet.Index()].Stream.CodecParameters().AnnexBExtraData()
 			t.AppendOutStreamBuffer(extra)
 		}
 
-		t.AppendOutStreamBuffer(packet.AnnexBPacketData(t.BaseTransStream.Tracks[packet.Index()]))
+		t.AppendOutStreamBuffer(packet.AnnexBPacketData(t.BaseTransStream.Tracks[packet.Index()].Stream))
 	}
 
 	return t.OutBuffer[:t.OutBufferSize], int64(uint32(packet.Duration(1000))), utils.AVMediaTypeVideo == packet.MediaType() && packet.KeyFrame(), nil
@@ -74,6 +74,6 @@ func NewTransStream() stream.TransStream {
 	return t
 }
 
-func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtocol, streams []utils.AVStream) (stream.TransStream, error) {
+func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtocol, tracks []*stream.Track) (stream.TransStream, error) {
 	return NewTransStream(), nil
 }

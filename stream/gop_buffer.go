@@ -1,8 +1,8 @@
 package stream
 
 import (
+	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/avformat/utils"
-	"github.com/lkmio/lkm/collections"
 )
 
 // GOPBuffer GOP缓存

@@ -1,8 +1,8 @@
 package stream
 
 import (
+	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/avformat/utils"
-	"github.com/lkmio/lkm/collections"
 )
 
 // MergeWritingBuffer 实现针对RTMP/FLV/HLS等基于TCP传输流的合并写缓存

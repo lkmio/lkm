@@ -32,7 +32,7 @@ func (s *Sink) StartStreaming(transStream stream.TransStream) error {
 
 	// sdp回调给sink, sink应答给describe请求
 	if s.sdpCb != nil {
-		s.sdpCb(transStream.(*TranStream).sdp)
+		s.sdpCb(transStream.(*TransStream).sdp)
 		s.sdpCb = nil
 	}
 
@@ -126,6 +126,7 @@ func (s *Sink) Write(index int, data [][]byte, rtpTime int64) error {
 func (s *Sink) isConnected(index int) bool {
 	return s.TCPStreaming || (s.senders[index] != nil && s.senders[index].RtpConn != nil)
 }
+
 func (s *Sink) Close() {
 	s.BaseSink.Close()
 

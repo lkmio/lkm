@@ -2,10 +2,9 @@ package stream
 
 import (
 	"fmt"
-	"github.com/lkmio/avformat/utils"
 )
 
-type TransStreamFactory func(source Source, protocol TransStreamProtocol, streams []utils.AVStream) (TransStream, error)
+type TransStreamFactory func(source Source, protocol TransStreamProtocol, tracks []*Track) (TransStream, error)
 
 type RecordStreamFactory func(source string) (Sink, string, error)
 
@@ -36,13 +35,13 @@ func FindTransStreamFactory(protocol TransStreamProtocol) (TransStreamFactory, e
 	return f, nil
 }
 
-func CreateTransStream(source Source, protocol TransStreamProtocol, streams []utils.AVStream) (TransStream, error) {
+func CreateTransStream(source Source, protocol TransStreamProtocol, tracks []*Track) (TransStream, error) {
 	factory, err := FindTransStreamFactory(protocol)
 	if err != nil {
 		return nil, err
 	}
 
-	return factory(source, protocol, streams)
+	return factory(source, protocol, tracks)
 }
 
 func SetRecordStreamFactory(factory RecordStreamFactory) {

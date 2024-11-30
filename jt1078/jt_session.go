@@ -3,9 +3,9 @@ package jt1078
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/avformat/transport"
 	"github.com/lkmio/avformat/utils"
-	"github.com/lkmio/lkm/collections"
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
 	"net"

@@ -37,28 +37,29 @@ func (s *Sink) StartStreaming(transStream stream.TransStream) error {
 	for index, track := range tracks {
 		var mimeType string
 		var id string
-		if utils.AVCodecIdH264 == track.CodecId() {
+		codecId := track.Stream.CodecId()
+		if utils.AVCodecIdH264 == codecId {
 			mimeType = webrtc.MimeTypeH264
-		} else if utils.AVCodecIdH265 == track.CodecId() {
+		} else if utils.AVCodecIdH265 == codecId {
 			mimeType = webrtc.MimeTypeH265
-		} else if utils.AVCodecIdAV1 == track.CodecId() {
+		} else if utils.AVCodecIdAV1 == codecId {
 			mimeType = webrtc.MimeTypeAV1
-		} else if utils.AVCodecIdVP8 == track.CodecId() {
+		} else if utils.AVCodecIdVP8 == codecId {
 			mimeType = webrtc.MimeTypeVP8
-		} else if utils.AVCodecIdVP9 == track.CodecId() {
+		} else if utils.AVCodecIdVP9 == codecId {
 			mimeType = webrtc.MimeTypeVP9
-		} else if utils.AVCodecIdOPUS == track.CodecId() {
+		} else if utils.AVCodecIdOPUS == codecId {
 			mimeType = webrtc.MimeTypeOpus
-		} else if utils.AVCodecIdPCMALAW == track.CodecId() {
+		} else if utils.AVCodecIdPCMALAW == codecId {
 			mimeType = webrtc.MimeTypePCMA
-		} else if utils.AVCodecIdPCMMULAW == track.CodecId() {
+		} else if utils.AVCodecIdPCMMULAW == codecId {
 			mimeType = webrtc.MimeTypePCMU
 		} else {
-			log.Sugar.Errorf("codec %s not compatible with webrtc", track.CodecId())
+			log.Sugar.Errorf("codec %s not compatible with webrtc", codecId)
 			continue
 		}
 
-		if utils.AVMediaTypeAudio == track.Type() {
+		if utils.AVMediaTypeAudio == track.Stream.Type() {
 			id = "audio"
 		} else {
 			id = "video"

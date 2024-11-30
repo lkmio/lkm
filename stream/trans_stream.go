@@ -12,11 +12,11 @@ type TransStream interface {
 
 	Input(packet utils.AVPacket) ([][]byte, int64, bool, error)
 
-	AddTrack(stream utils.AVStream) error
+	AddTrack(track *Track) error
 
 	TrackCount() int
 
-	GetTracks() []utils.AVStream
+	GetTracks() []*Track
 
 	WriteHeader() error
 
@@ -39,17 +39,18 @@ type TransStream interface {
 	OutStreamBufferCapacity() int
 
 	IsExistVideo() bool
+
+	SetTransStreamProtocol(protocol TransStreamProtocol)
 }
 
 type BaseTransStream struct {
-	//muxer      stream.Muxer
 	ID         TransStreamID
-	Tracks     []utils.AVStream
+	Tracks     []*Track
 	Completed  bool
 	ExistVideo bool
 	Protocol   TransStreamProtocol
 
-	OutBuffer     [][]byte // 完成封装的输出流队列
+	OutBuffer     [][]byte // 输出流的返回队列
 	OutBufferSize int
 }
 
@@ -65,9 +66,9 @@ func (t *BaseTransStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, e
 	return nil, -1, false, nil
 }
 
-func (t *BaseTransStream) AddTrack(stream utils.AVStream) error {
-	t.Tracks = append(t.Tracks, stream)
-	if utils.AVMediaTypeVideo == stream.Type() {
+func (t *BaseTransStream) AddTrack(track *Track) error {
+	t.Tracks = append(t.Tracks, track)
+	if utils.AVMediaTypeVideo == track.Stream.Type() {
 		t.ExistVideo = true
 	}
 	return nil
@@ -109,7 +110,7 @@ func (t *BaseTransStream) TrackCount() int {
 	return len(t.Tracks)
 }
 
-func (t *BaseTransStream) GetTracks() []utils.AVStream {
+func (t *BaseTransStream) GetTracks() []*Track {
 	return t.Tracks
 }
 
@@ -123,6 +124,10 @@ func (t *BaseTransStream) ReadExtraData(timestamp int64) ([][]byte, int64, error
 
 func (t *BaseTransStream) ReadKeyFrameBuffer() ([][]byte, int64, error) {
 	return nil, 0, nil
+}
+
+func (t *BaseTransStream) SetTransStreamProtocol(protocol TransStreamProtocol) {
+	t.Protocol = protocol
 }
 
 type TCPTransStream struct {

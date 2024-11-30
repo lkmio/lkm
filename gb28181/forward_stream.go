@@ -2,7 +2,6 @@ package gb28181
 
 import (
 	"encoding/binary"
-	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/stream"
 )
 
@@ -34,6 +33,6 @@ func NewTransStream() (stream.TransStream, error) {
 	}, nil
 }
 
-func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtocol, streams []utils.AVStream) (stream.TransStream, error) {
+func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtocol, tracks []*stream.Track) (stream.TransStream, error) {
 	return NewTransStream()
 }

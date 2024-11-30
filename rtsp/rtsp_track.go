@@ -7,13 +7,14 @@ import (
 
 // Track RtspTrack 对rtsp每路输出流的封装
 type Track struct {
-	pt        byte
-	rate      int
-	mediaType utils.AVMediaType
-	seq       uint16
+	PT        byte
+	Rate      int
+	MediaType utils.AVMediaType
+	StartSeq  uint16
+	EndSeq    uint16
 
-	muxer           librtp.Muxer
-	extraDataBuffer [][]byte // 缓存带有编码信息的rtp包, 对所有sink通用
+	Muxer           librtp.Muxer
+	ExtraDataBuffer [][]byte // 缓存带有编码信息的rtp包, 对所有sink通用
 }
 
 func (r *Track) Close() {
@@ -21,10 +22,10 @@ func (r *Track) Close() {
 
 func NewRTSPTrack(muxer librtp.Muxer, pt byte, rate int, mediaType utils.AVMediaType) *Track {
 	stream := &Track{
-		pt:        pt,
-		rate:      rate,
-		muxer:     muxer,
-		mediaType: mediaType,
+		PT:        pt,
+		Rate:      rate,
+		Muxer:     muxer,
+		MediaType: mediaType,
 	}
 
 	return stream

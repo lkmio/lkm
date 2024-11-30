@@ -148,7 +148,7 @@ func (source *BaseGBSource) OnCompletePacket(index int, mediaType utils.AVMediaT
 
 	if stream_ != nil {
 		source.OnDeMuxStream(stream_)
-		if len(source.OriginStreams()) >= source.deMuxerCtx.TrackCount() {
+		if len(source.OriginTracks()) >= source.deMuxerCtx.TrackCount() {
 			source.OnDeMuxStreamDone()
 		}
 	}
@@ -196,7 +196,7 @@ func (source *BaseGBSource) correctTimestamp(packet utils.AVPacket, dts, pts int
 		packet.SetDuration(duration)
 		duration = packet.Duration(90000)
 		if duration < 0 || duration < 750 {
-			log.Sugar.Errorf("推流时间戳不正确, 使用系统时钟. ssrc:%d", source.ssrc)
+			log.Sugar.Errorf("推流时间戳不正确, 使用系统时钟. source: %s ssrc: %d", source.ID, source.ssrc)
 			source.isSystemClock = true
 		}
 	}

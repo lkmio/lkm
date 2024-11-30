@@ -223,6 +223,11 @@ func (s *BaseSink) Close() {
 		// 从等待队列中删除Sink
 		RemoveSinkFromWaitingQueue(s.SourceID, s.ID)
 		go HookPlayDoneEvent(s)
+
+		// 等待队列为空, 不再保留推流源信息
+		if !ExistSourceInWaitingQueue(s.SourceID) {
+			streamEndInfoManager.Remove(s.SourceID)
+		}
 	}
 }
 
@@ -251,7 +256,7 @@ func (s *BaseSink) StartStreaming(stream TransStream) error {
 }
 
 func (s *BaseSink) StopStreaming(stream TransStream) {
-
+	s.SentPacketCount = 0
 }
 
 func (s *BaseSink) GetConn() net.Conn {

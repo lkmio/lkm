@@ -76,6 +76,14 @@ func ExistSinkInWaitingQueue(sourceId string, sinkId SinkID) bool {
 	return ok
 }
 
+func ExistSourceInWaitingQueue(id string) bool {
+	mutex.RLock()
+	defer mutex.RUnlock()
+
+	_, ok := waitingSinks[id]
+	return ok
+}
+
 func ExistSink(sourceId string, sinkId SinkID) bool {
 	if sourceId != "" {
 		if exist := ExistSinkInWaitingQueue(sourceId, sinkId); exist {

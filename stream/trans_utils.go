@@ -49,18 +49,18 @@ func init() {
 }*/
 
 // GenerateTransStreamID 根据输出流协议和输出流包含的音视频编码器ID生成流ID
-func GenerateTransStreamID(protocol TransStreamProtocol, ids ...utils.AVStream) TransStreamID {
-	len_ := len(ids)
+func GenerateTransStreamID(protocol TransStreamProtocol, tracks ...*Track) TransStreamID {
+	len_ := len(tracks)
 	utils.Assert(len_ > 0 && len_ < 8)
 
 	var streamId uint64
 	streamId = uint64(protocol) << 56
 
-	for i, id := range ids {
-		bId, ok := narrowCodecIds[int(id.CodecId())]
+	for i, track := range tracks {
+		id, ok := narrowCodecIds[int(track.Stream.CodecId())]
 		utils.Assert(ok)
 
-		streamId |= uint64(bId) << (48 - i*8)
+		streamId |= uint64(id) << (48 - i*8)
 	}
 
 	return TransStreamID(streamId)

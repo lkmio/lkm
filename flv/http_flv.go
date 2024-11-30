@@ -81,18 +81,18 @@ func (t *TransStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, error
 	return t.OutBuffer[:t.OutBufferSize], 0, true, nil
 }
 
-func (t *TransStream) AddTrack(stream utils.AVStream) error {
-	if err := t.BaseTransStream.AddTrack(stream); err != nil {
+func (t *TransStream) AddTrack(track *stream.Track) error {
+	if err := t.BaseTransStream.AddTrack(track); err != nil {
 		return err
 	}
 
-	if utils.AVMediaTypeAudio == stream.Type() {
-		t.muxer.AddAudioTrack(stream.CodecId(), 0, 0, 0)
-	} else if utils.AVMediaTypeVideo == stream.Type() {
-		t.muxer.AddVideoTrack(stream.CodecId())
+	if utils.AVMediaTypeAudio == track.Stream.Type() {
+		t.muxer.AddAudioTrack(track.Stream.CodecId(), 0, 0, 0)
+	} else if utils.AVMediaTypeVideo == track.Stream.Type() {
+		t.muxer.AddVideoTrack(track.Stream.CodecId())
 
-		t.muxer.AddProperty("width", stream.CodecParameters().Width())
-		t.muxer.AddProperty("height", stream.CodecParameters().Height())
+		t.muxer.AddProperty("width", track.Stream.CodecParameters().Width())
+		t.muxer.AddProperty("height", track.Stream.CodecParameters().Height())
 	}
 	return nil
 }
@@ -102,13 +102,13 @@ func (t *TransStream) WriteHeader() error {
 
 	for _, track := range t.BaseTransStream.Tracks {
 		var data []byte
-		if utils.AVMediaTypeAudio == track.Type() {
-			data = track.Extra()
-		} else if utils.AVMediaTypeVideo == track.Type() {
-			data = track.CodecParameters().MP4ExtraData()
+		if utils.AVMediaTypeAudio == track.Stream.Type() {
+			data = track.Stream.Extra()
+		} else if utils.AVMediaTypeVideo == track.Stream.Type() {
+			data = track.Stream.CodecParameters().MP4ExtraData()
 		}
 
-		n := t.muxer.Input(t.header[t.headerSize:], track.Type(), len(data), 0, 0, false, true)
+		n := t.muxer.Input(t.header[t.headerSize:], track.Stream.Type(), len(data), 0, 0, false, true)
 		t.headerSize += n
 		copy(t.header[t.headerSize:], data)
 		t.headerSize += len(data)
@@ -226,6 +226,6 @@ func NewHttpTransStream() stream.TransStream {
 	}
 }
 
-func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtocol, streams []utils.AVStream) (stream.TransStream, error) {
+func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtocol, tracks []*stream.Track) (stream.TransStream, error) {
 	return NewHttpTransStream(), nil
 }

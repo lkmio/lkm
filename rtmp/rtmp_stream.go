@@ -123,12 +123,12 @@ func (t *transStream) WriteHeader() error {
 	var videoCodecId utils.AVCodecID
 
 	for _, track := range t.Tracks {
-		if utils.AVMediaTypeAudio == track.Type() {
-			audioStream = track
+		if utils.AVMediaTypeAudio == track.Stream.Type() {
+			audioStream = track.Stream
 			audioCodecId = audioStream.CodecId()
 			t.audioChunk = librtmp.NewAudioChunk()
-		} else if utils.AVMediaTypeVideo == track.Type() {
-			videoStream = track
+		} else if utils.AVMediaTypeVideo == track.Stream.Type() {
+			videoStream = track.Stream
 			videoCodecId = videoStream.CodecId()
 			t.videoChunk = librtmp.NewVideoChunk()
 		}
@@ -193,6 +193,6 @@ func NewTransStream(chunkSize int) stream.TransStream {
 	return &transStream{chunkSize: chunkSize}
 }
 
-func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtocol, streams []utils.AVStream) (stream.TransStream, error) {
+func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtocol, tracks []*stream.Track) (stream.TransStream, error) {
 	return NewTransStream(librtmp.ChunkSize), nil
 }
