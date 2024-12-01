@@ -2,6 +2,7 @@ package hls
 
 import (
 	"fmt"
+	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
 	"strings"
@@ -23,6 +24,9 @@ type M3U8Sink struct {
 
 // SendM3U8Data 首次向拉流端应答M3U8文件， 后续更新M3U8文件, 通过调用@see GetPlaylist 函数获取最新的M3U8文件.
 func (s *M3U8Sink) SendM3U8Data(data *string) error {
+	utils.Assert(data != nil)
+	utils.Assert(s.playlistFormat == nil)
+
 	s.playlistFormat = data
 	s.cb([]byte(s.GetPlaylist()))
 
@@ -48,9 +52,12 @@ func (s *M3U8Sink) SendM3U8Data(data *string) error {
 }
 
 func (s *M3U8Sink) StartStreaming(transStream stream.TransStream) error {
-	hls := transStream.(*TransStream)
+	if s.playlistFormat != nil {
+		return nil
+	}
 
-	if hls.M3U8Writer.Size() > 0 {
+	hls := transStream.(*TransStream)
+	if hls.M3U8Writer.Size() > 0 && s.playlistFormat == nil {
 		if err := s.SendM3U8Data(hls.PlaylistFormat); err != nil {
 			return err
 		}

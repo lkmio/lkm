@@ -22,20 +22,20 @@ type Sink struct {
 	stream.BaseSink
 
 	senders []*librtp.RtpSender // 一个rtsp源, 可能存在多个流, 每个流都需要拉取
-	sdpCb   func(sdp string)    // sdp回调, 响应describe
+	cb      func(sdp string)    // sdp回调, 响应describe
 }
 
 func (s *Sink) StartStreaming(transStream stream.TransStream) error {
-	if s.senders == nil {
-		s.senders = make([]*librtp.RtpSender, transStream.TrackCount())
+	utils.Assert(transStream.TrackCount() > 0)
+	if s.senders != nil {
+		return nil
 	}
 
+	s.senders = make([]*librtp.RtpSender, transStream.TrackCount())
 	// sdp回调给sink, sink应答给describe请求
-	if s.sdpCb != nil {
-		s.sdpCb(transStream.(*TransStream).sdp)
-		s.sdpCb = nil
+	if s.cb != nil {
+		s.cb(transStream.(*TransStream).sdp)
 	}
-
 	return nil
 }
 

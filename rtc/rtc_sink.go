@@ -24,6 +24,10 @@ type Sink struct {
 }
 
 func (s *Sink) StartStreaming(transStream stream.TransStream) error {
+	if s.peer != nil {
+		return nil
+	}
+
 	// 创建PeerConnection
 	var remoteTrack *webrtc.TrackLocalStaticSample
 	s.tracks = make([]*webrtc.TrackLocalStaticSample, transStream.TrackCount())
@@ -107,7 +111,6 @@ func (s *Sink) StartStreaming(transStream stream.TransStream) error {
 	// offer的sdp, 应答给http请求
 	if s.cb != nil {
 		s.cb(connection.LocalDescription().SDP)
-		s.cb = nil
 	}
 	return nil
 }
