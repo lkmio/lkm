@@ -17,7 +17,7 @@ func TestPublish(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	err = client.Connect(nil, addr)
+	_, err = client.Connect(nil, addr)
 	if err != nil {
 		panic(err)
 	}

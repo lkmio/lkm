@@ -9,6 +9,7 @@ import (
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
 	"net"
+	"strconv"
 )
 
 const (
@@ -49,11 +50,12 @@ type Session struct {
 }
 
 type RtpPacket struct {
-	pt         byte
-	packetType byte
-	ts         uint64
-	subMark    byte
-	simNumber  string
+	pt            byte
+	packetType    byte
+	ts            uint64
+	subMark       byte
+	simNumber     string
+	channelNumber byte
 
 	payload []byte
 }
@@ -71,14 +73,14 @@ func (s *Session) OnJtPTPPacket(data []byte) {
 
 	// 首包处理, hook通知
 	if s.rtpPacket == nil {
-		s.SetID(packet.simNumber)
+		s.SetID(packet.simNumber + "/" + strconv.Itoa(int(packet.channelNumber)))
 		s.rtpPacket = &RtpPacket{}
 		*s.rtpPacket = packet
 
 		go func() {
 			_, state := stream.PreparePublishSource(s, true)
 			if utils.HookStateOK != state {
-				log.Sugar.Errorf("1078推流失败 source:%s", s.phone)
+				log.Sugar.Errorf("1078推流失败 source: %s", s.phone)
 
 				if s.Conn != nil {
 					s.Conn.Close()
@@ -262,7 +264,7 @@ func read1078RTPPacket(data []byte) (RtpPacket, error) {
 	}
 
 	// channel
-	_ = data[10]
+	channelNumber := data[10]
 	// subMark
 	subMark := data[11] & 0x0F
 	// 时间戳,单位ms
@@ -286,7 +288,7 @@ func read1078RTPPacket(data []byte) (RtpPacket, error) {
 	_ = binary.BigEndian.Uint16(data[n:])
 	n += 2
 
-	return RtpPacket{pt: pt, packetType: packetType, ts: ts, simNumber: simNumber, subMark: subMark, payload: data[n:]}, nil
+	return RtpPacket{pt: pt, packetType: packetType, ts: ts, simNumber: simNumber, channelNumber: channelNumber, subMark: subMark, payload: data[n:]}, nil
 }
 
 func NewSession(conn net.Conn) *Session {
