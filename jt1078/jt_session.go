@@ -144,15 +144,7 @@ func (s *Session) Input(data []byte) error {
 }
 
 func (s *Session) Close() {
-	log.Sugar.Infof("1078推流结束 phone number:%s %s", s.phone, s.PublishSource.String())
-
-	if s.audioBuffer != nil {
-		s.audioBuffer.Clear()
-	}
-
-	if s.videoBuffer != nil {
-		s.videoBuffer.Clear()
-	}
+	log.Sugar.Infof("1078推流结束 %s", s.String())
 
 	if s.Conn != nil {
 		s.Conn.Close()
