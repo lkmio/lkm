@@ -298,7 +298,7 @@ func IsSupportMux(protocol TransStreamProtocol, audioCodecId, videoCodecId utils
 }
 
 func (s *PublishSource) CreateTransStream(id TransStreamID, protocol TransStreamProtocol, tracks []*Track) (TransStream, error) {
-	log.Sugar.Debugf("创建%s-stream source: %s", protocol.String(), s.ID)
+	log.Sugar.Infof("创建%s-stream source: %s", protocol.String(), s.ID)
 
 	transStream, err := CreateTransStream(s, protocol, tracks)
 	if err != nil {
@@ -323,9 +323,11 @@ func (s *PublishSource) CreateTransStream(id TransStreamID, protocol TransStream
 }
 
 func (s *PublishSource) DispatchGOPBuffer(transStream TransStream) {
-	s.gopBuffer.PeekAll(func(packet utils.AVPacket) {
-		s.DispatchPacket(transStream, packet)
-	})
+	if s.gopBuffer != nil {
+		s.gopBuffer.PeekAll(func(packet utils.AVPacket) {
+			s.DispatchPacket(transStream, packet)
+		})
+	}
 }
 
 // DispatchPacket 分发AVPacket
@@ -563,7 +565,7 @@ func (s *PublishSource) SetState(state SessionState) {
 }
 
 func (s *PublishSource) DoClose() {
-	log.Sugar.Debugf("closing the %s source. id: %s. closed flag: %t", s.Type, s.ID, s.closed)
+	log.Sugar.Debugf("closing the %s source. id: %s. closed flag: %t", s.Type, s.ID, s.closed.Load())
 
 	if s.closed.Load() {
 		return
@@ -758,7 +760,7 @@ func (s *PublishSource) writeHeader() {
 	}
 
 	// 纠正GOP中的时间戳
-	if s.gopBuffer.Size() != 0 {
+	if s.gopBuffer != nil && s.gopBuffer.Size() != 0 {
 		s.gopBuffer.PeekAll(func(packet utils.AVPacket) {
 			s.CorrectTimestamp(packet)
 		})
