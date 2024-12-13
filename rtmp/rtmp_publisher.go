@@ -16,7 +16,7 @@ type Publisher struct {
 }
 
 func (p *Publisher) Input(data []byte) error {
-	return p.stack.Input(nil, data)
+	return p.stack.Input(data)
 }
 
 func (p *Publisher) OnDeMuxStream(stream utils.AVStream) {

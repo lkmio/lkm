@@ -76,13 +76,12 @@ func (s *Session) OnPlay(app, stream_ string) utils.HookState {
 	return state
 }
 
-func (s *Session) Input(conn net.Conn, data []byte) error {
+func (s *Session) Input(data []byte) error {
 	// 推流会话, 收到的包都将交由主协程处理
 	if s.isPublisher {
-		s.handle.(*Publisher).PublishSource.Input(data)
-		return nil
+		return s.handle.(*Publisher).PublishSource.Input(data)
 	} else {
-		return s.stack.Input(conn, data)
+		return s.stack.Input(data)
 	}
 }
 
@@ -121,7 +120,7 @@ func (s *Session) Close() {
 func NewSession(conn net.Conn) *Session {
 	session := &Session{}
 
-	stack := librtmp.NewStack(session)
+	stack := librtmp.NewStack(conn, session)
 	session.stack = stack
 	session.conn = conn
 	return session

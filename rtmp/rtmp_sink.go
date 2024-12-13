@@ -13,11 +13,11 @@ type Sink struct {
 }
 
 func (s *Sink) StartStreaming(_ stream.TransStream) error {
-	return s.stack.SendStreamBeginChunk(s.Conn)
+	return s.stack.SendStreamBeginChunk()
 }
 
 func (s *Sink) StopStreaming(_ stream.TransStream) {
-	_ = s.stack.SendStreamEOFChunk(s.Conn)
+	_ = s.stack.SendStreamEOFChunk()
 }
 
 func (s *Sink) Close() {

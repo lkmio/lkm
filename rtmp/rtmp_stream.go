@@ -75,7 +75,7 @@ func (t *transStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, error
 	// 写chunk header
 	chunk.Length = payloadSize
 	chunk.Timestamp = uint32(dts)
-	n := chunk.ToBytes(allocate)
+	n := chunk.MarshalHeader(allocate)
 
 	// 写flv
 	if videoPkt {
@@ -84,7 +84,7 @@ func (t *transStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, error
 		n += t.muxer.WriteAudioData(allocate[n:], false)
 	}
 
-	n += chunk.WriteData(allocate[n:], data, t.chunkSize, chunkPayloadOffset)
+	n += chunk.WriteBody(allocate[n:], data, t.chunkSize, chunkPayloadOffset)
 	utils.Assert(len(allocate) == n)
 
 	// 合并写满了再发
@@ -157,7 +157,7 @@ func (t *transStream) WriteHeader() error {
 		n += len(extra)
 
 		t.audioChunk.Length = n
-		t.audioChunk.ToBytes(t.header)
+		t.audioChunk.MarshalHeader(t.header)
 		n += 12
 	}
 
@@ -169,7 +169,7 @@ func (t *transStream) WriteHeader() error {
 		n += len(extra)
 
 		t.videoChunk.Length = 5 + len(extra)
-		t.videoChunk.ToBytes(t.header[tmp:])
+		t.videoChunk.MarshalHeader(t.header[tmp:])
 		n += 12
 	}
 

@@ -58,7 +58,7 @@ func (s *server) OnPacket(conn net.Conn, data []byte) []byte {
 	s.StreamServer.OnPacket(conn, data)
 
 	session := conn.(*transport.Conn).Data.(*Session)
-	err := session.Input(conn, data)
+	err := session.Input(data)
 
 	if err != nil {
 		log.Sugar.Errorf("处理rtmp包失败 err:%s conn:%s", err.Error(), conn.RemoteAddr().String())
