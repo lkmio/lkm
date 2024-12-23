@@ -16,8 +16,9 @@ func (s *Sink) StartStreaming(_ stream.TransStream) error {
 	return s.stack.SendStreamBeginChunk()
 }
 
-func (s *Sink) StopStreaming(_ stream.TransStream) {
+func (s *Sink) StopStreaming(stream stream.TransStream) {
 	_ = s.stack.SendStreamEOFChunk()
+	s.BaseSink.StopStreaming(stream)
 }
 
 func (s *Sink) Close() {
