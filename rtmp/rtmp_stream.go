@@ -18,6 +18,7 @@ type transStream struct {
 	muxer      libflv.Muxer
 	audioChunk librtmp.Chunk
 	videoChunk librtmp.Chunk
+	metaData   *libflv.AMF0Object // 推流方携带的元数据
 }
 
 func (t *transStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, error) {
@@ -138,8 +139,7 @@ func (t *transStream) WriteHeader() error {
 
 	// 初始化
 	t.BaseTransStream.Completed = true
-	t.header = make([]byte, 1024)
-	t.muxer = libflv.NewMuxer()
+	t.muxer = libflv.NewMuxer(t.metaData)
 	if utils.AVCodecIdNONE != audioCodecId {
 		t.muxer.AddAudioTrack(audioCodecId, 0, 0, 0)
 	}
@@ -148,8 +148,10 @@ func (t *transStream) WriteHeader() error {
 		t.muxer.AddVideoTrack(videoCodecId)
 	}
 
-	// 生成推流的数据头(chunk+sequence header)
 	var n int
+	t.header = make([]byte, 4096)
+
+	// 生成推流的数据头(chunk+sequence header)
 	if audioStream != nil {
 		n += t.muxer.WriteAudioData(t.header[12:], true)
 		extra := audioStream.Extra()
@@ -173,6 +175,30 @@ func (t *transStream) WriteHeader() error {
 		n += 12
 	}
 
+	// 创建元数据chunk
+	var body [1024]byte
+	amf0 := libflv.AMF0{}
+	amf0.AddString("onMetaData")
+	amf0.Add(t.muxer.MetaData())
+	length, _ := amf0.Marshal(body[:])
+
+	metaData := librtmp.Chunk{
+		Type:           librtmp.ChunkType0,
+		ChunkStreamID_: 5,
+		Timestamp:      0,
+		TypeID:         librtmp.MessageTypeIDDataAMF0,
+		StreamID:       1,
+		Body:           body[:length],
+		Length:         length,
+	}
+
+	var tmp [1600]byte
+	size := metaData.Marshal(tmp[:], librtmp.ChunkSize)
+	// metadata 放在sequence之前
+	copy(t.header[size:], t.header[:n])
+	copy(t.header, tmp[:][:size])
+
+	n += size
 	t.headerSize = n
 	t.MWBuffer = stream.NewMergeWritingBuffer(t.ExistVideo)
 	return nil
@@ -181,18 +207,23 @@ func (t *transStream) WriteHeader() error {
 func (t *transStream) Close() ([][]byte, int64, error) {
 	t.ClearOutStreamBuffer()
 
-	//发送剩余的流
-	if segment := t.MWBuffer.FlushSegment(); len(segment) > 0 {
+	// 发送剩余的流
+	if segment, _ := t.MWBuffer.FlushSegment(); len(segment) > 0 {
 		t.AppendOutStreamBuffer(segment)
 	}
 
 	return t.OutBuffer[:t.OutBufferSize], 0, nil
 }
 
-func NewTransStream(chunkSize int) stream.TransStream {
-	return &transStream{chunkSize: chunkSize}
+func NewTransStream(chunkSize int, metaData *libflv.AMF0Object) stream.TransStream {
+	return &transStream{chunkSize: chunkSize, metaData: metaData}
 }
 
 func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtocol, tracks []*stream.Track) (stream.TransStream, error) {
-	return NewTransStream(librtmp.ChunkSize), nil
+	// 获取推流的元数据
+	var metaData *libflv.AMF0Object
+	if stream.SourceTypeRtmp == source.GetType() {
+		metaData = source.(*Publisher).stack.MetaData()
+	}
+	return NewTransStream(librtmp.ChunkSize, metaData), nil
 }
