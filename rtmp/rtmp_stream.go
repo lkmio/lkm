@@ -34,6 +34,7 @@ func (t *transStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, error
 	var chunkPayloadOffset int
 	var dts int64
 	var pts int64
+	var keyBuffer bool
 
 	dts = packet.ConvertDts(1000)
 	pts = packet.ConvertPts(1000)
@@ -55,15 +56,15 @@ func (t *transStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, error
 
 	// 遇到视频关键帧, 发送剩余的流, 创建新切片
 	if videoKey {
-		if segment := t.MWBuffer.FlushSegment(); len(segment) > 0 {
+		if segment, key := t.MWBuffer.FlushSegment(); len(segment) > 0 {
+			keyBuffer = key
 			t.AppendOutStreamBuffer(segment)
 		}
 	}
 
-	// 分配内存
-	// 固定type0
+	// type为0的header大小
 	chunkHeaderSize := 12
-	// type3chunk数量
+	// type为3的chunk数量
 	numChunks := (payloadSize - 1) / t.chunkSize
 	rtmpMsgSize := chunkHeaderSize + payloadSize + numChunks
 	// 如果时间戳超过3字节, 每个chunk都需要多4字节的扩展时间戳
@@ -71,29 +72,32 @@ func (t *transStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, error
 		rtmpMsgSize += (1 + numChunks) * 4
 	}
 
+	// 分配指定大小的内存
 	allocate := t.MWBuffer.Allocate(rtmpMsgSize, dts, videoKey)
 
-	// 写chunk header
+	// 写第一个type为0的chunk header
 	chunk.Length = payloadSize
 	chunk.Timestamp = uint32(dts)
 	n := chunk.MarshalHeader(allocate)
 
-	// 写flv
+	// 封装成flv
 	if videoPkt {
 		n += t.muxer.WriteVideoData(allocate[n:], uint32(ct), packet.KeyFrame(), false)
 	} else {
 		n += t.muxer.WriteAudioData(allocate[n:], false)
 	}
 
+	// 将flv data写入chunk body
 	n += chunk.WriteBody(allocate[n:], data, t.chunkSize, chunkPayloadOffset)
 	utils.Assert(len(allocate) == n)
 
 	// 合并写满了再发
-	if segment := t.MWBuffer.PeekCompletedSegment(); len(segment) > 0 {
+	if segment, key := t.MWBuffer.PeekCompletedSegment(); len(segment) > 0 {
+		keyBuffer = key
 		t.AppendOutStreamBuffer(segment)
 	}
 
-	return t.OutBuffer[:t.OutBufferSize], 0, true, nil
+	return t.OutBuffer[:t.OutBufferSize], 0, keyBuffer, nil
 }
 
 func (t *transStream) ReadExtraData(_ int64) ([][]byte, int64, error) {

@@ -30,7 +30,7 @@ func (s *Sink) StartStreaming(transStream stream.TransStream) error {
 
 	// 创建PeerConnection
 	var remoteTrack *webrtc.TrackLocalStaticSample
-	s.tracks = make([]*webrtc.TrackLocalStaticSample, transStream.TrackCount())
+	s.tracks = make([]*webrtc.TrackLocalStaticSample, transStream.TrackSize())
 
 	connection, err := webrtcApi.NewPeerConnection(webrtc.Configuration{})
 	connection.OnICECandidate(func(candidate *webrtc.ICECandidate) {

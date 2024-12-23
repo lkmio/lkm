@@ -11,21 +11,22 @@ import (
 type MergeWritingBuffer interface {
 	Allocate(size int, ts int64, videoKey bool) []byte
 
-	// PeekCompletedSegment 返回当前完整切片, 如果不满, 返回nil.
-	PeekCompletedSegment() []byte
+	// PeekCompletedSegment 返回当前完整切片, 以及是否是关键帧切片, 未满返回nil.
+	PeekCompletedSegment() ([]byte, bool)
 
-	// FlushSegment 保存当前切片, 创建新的切片
-	FlushSegment() []byte
+	// FlushSegment 生成并返回当前切片, 以及是否是关键帧切片.
+	FlushSegment() ([]byte, bool)
 
+	// IsFull 当前切片已满
 	IsFull(ts int64) bool
 
-	// IsNewSegment 新切片, 还未写数据
+	// IsNewSegment 当前切片是否还未写数据
 	IsNewSegment() bool
 
 	// Reserve 从当前切片中预留指定长度数据
-	Reserve(number int)
+	Reserve(length int)
 
-	// ReadSegmentsFromKeyFrameIndex 从最近的关键帧读取切片
+	// ReadSegmentsFromKeyFrameIndex 返回最近的关键帧切片
 	ReadSegmentsFromKeyFrameIndex(cb func([]byte))
 
 	Capacity() int
@@ -36,6 +37,7 @@ type mwBlock struct {
 	keyVideo  bool
 	buffer    collections.MemoryPool
 	completed bool
+	Time      int64
 }
 
 type mergeWritingBuffer struct {
@@ -45,7 +47,7 @@ type mergeWritingBuffer struct {
 	startTS  int64 // 当前切片的开始时间
 	duration int   // 当前切片时长
 
-	lastKeyFrameIndex int  // 最新关键帧所在切片的索引
+	lastKeyFrameIndex int  // 最近的关键帧所在切片的索引
 	keyFrameCount     int  // 关键帧计数
 	existVideo        bool // 是否存在视频
 
@@ -55,9 +57,9 @@ type mergeWritingBuffer struct {
 
 func (m *mergeWritingBuffer) createMWBlock(videoKey bool) mwBlock {
 	if videoKey {
-		return mwBlock{true, videoKey, collections.NewDirectMemoryPool(m.keyFrameBufferMaxLength), false}
+		return mwBlock{true, videoKey, collections.NewDirectMemoryPool(m.keyFrameBufferMaxLength), false, 0}
 	} else {
-		return mwBlock{true, false, collections.NewDirectMemoryPool(m.nonKeyFrameBufferMaxLength), false}
+		return mwBlock{true, false, collections.NewDirectMemoryPool(m.nonKeyFrameBufferMaxLength), false, 0}
 	}
 }
 
@@ -77,17 +79,18 @@ func (m *mergeWritingBuffer) Allocate(size int, ts int64, videoKey bool) []byte 
 
 	utils.Assert(ts != -1)
 
-	//新的切片
+	// 新的切片
 	if m.startTS == -1 {
 		m.startTS = ts
 
 		if m.mwBlocks[m.index].buffer == nil {
-			//创建内存块
+			// 创建内存块
 			m.mwBlocks[m.index] = m.createMWBlock(videoKey)
 		} else {
-			//循环使用
+			// 循环使用
 			m.mwBlocks[m.index].buffer.Clear()
 
+			// 关键帧被覆盖, 减少计数
 			if m.mwBlocks[m.index].keyVideo {
 				m.keyFrameCount--
 			}
@@ -96,14 +99,15 @@ func (m *mergeWritingBuffer) Allocate(size int, ts int64, videoKey bool) []byte 
 		m.mwBlocks[m.index].free = false
 		m.mwBlocks[m.index].completed = false
 		m.mwBlocks[m.index].keyVideo = videoKey
+		m.mwBlocks[m.index].Time = ts
 	}
 
 	if videoKey {
-		//请务必确保关键帧帧从新的切片开始
-		//外部遇到关键帧请先调用FlushSegment
+		// 请务必确保关键帧帧从新的切片开始
+		// 外部遇到关键帧请先调用FlushSegment
 		utils.Assert(m.mwBlocks[m.index].buffer.IsEmpty())
-		m.lastKeyFrameIndex = m.index
-		m.keyFrameCount++
+		//m.lastKeyFrameIndex = m.index
+		//m.keyFrameCount++
 	}
 
 	if ts < m.startTS {
@@ -114,49 +118,61 @@ func (m *mergeWritingBuffer) Allocate(size int, ts int64, videoKey bool) []byte 
 	return m.mwBlocks[m.index].buffer.Allocate(size)
 }
 
-func (m *mergeWritingBuffer) FlushSegment() []byte {
+func (m *mergeWritingBuffer) FlushSegment() ([]byte, bool) {
 	if !AppConfig.GOPCache || !m.existVideo {
-		return nil
+		return nil, false
 	} else if m.mwBlocks[m.index].buffer == nil || m.mwBlocks[m.index].free {
-		return nil
+		return nil, false
 	}
 
 	data, _ := m.mwBlocks[m.index].buffer.Data()
 	if len(data) == 0 {
-		return nil
+		return nil, false
 	}
 
-	//更新缓冲长度
+	key := m.mwBlocks[m.index].keyVideo
+	if key {
+		m.lastKeyFrameIndex = m.index
+		m.keyFrameCount++
+	}
+
+	// 计算最大切片数据长度，后续创建新切片按照最大长度分配内存空间
 	if m.lastKeyFrameIndex == m.index && m.keyFrameBufferMaxLength < len(data) {
 		m.keyFrameBufferMaxLength = len(data) * 3 / 2
 	} else if m.lastKeyFrameIndex != m.index && m.nonKeyFrameBufferMaxLength < len(data) {
 		m.nonKeyFrameBufferMaxLength = len(data) * 3 / 2
 	}
 
+	// 设置当前切片的完整性
+	m.mwBlocks[m.index].completed = true
+
+	// 分配下一个切片
 	capacity := cap(m.mwBlocks)
 	if m.index+1 == capacity && m.keyFrameCount == 1 {
 		m.grow()
+		capacity = cap(m.mwBlocks)
 	}
 
+	// 计算下一个切片索引
 	m.index = (m.index + 1) % capacity
-	m.mwBlocks[m.index].completed = true
 
+	// 清空下一个切片的标记
 	m.startTS = -1
 	m.duration = 0
 	m.mwBlocks[m.index].free = true
 	m.mwBlocks[m.index].completed = false
-	return data
+	return data, key
 }
 
-func (m *mergeWritingBuffer) PeekCompletedSegment() []byte {
+func (m *mergeWritingBuffer) PeekCompletedSegment() ([]byte, bool) {
 	if !AppConfig.GOPCache || !m.existVideo {
 		data, _ := m.mwBlocks[0].buffer.Data()
 		m.mwBlocks[0].buffer.Clear()
-		return data
+		return data, false
 	}
 
 	if m.duration < AppConfig.MergeWriteLatency {
-		return nil
+		return nil, false
 	}
 
 	return m.FlushSegment()
@@ -174,10 +190,10 @@ func (m *mergeWritingBuffer) IsNewSegment() bool {
 	return m.mwBlocks[m.index].buffer == nil || m.mwBlocks[m.index].free
 }
 
-func (m *mergeWritingBuffer) Reserve(number int) {
+func (m *mergeWritingBuffer) Reserve(length int) {
 	utils.Assert(m.mwBlocks[m.index].buffer != nil)
 
-	_ = m.mwBlocks[m.index].buffer.Allocate(number)
+	_ = m.mwBlocks[m.index].buffer.Allocate(length)
 }
 
 func (m *mergeWritingBuffer) ReadSegmentsFromKeyFrameIndex(cb func([]byte)) {
@@ -185,18 +201,25 @@ func (m *mergeWritingBuffer) ReadSegmentsFromKeyFrameIndex(cb func([]byte)) {
 		return
 	}
 
-	for i := m.lastKeyFrameIndex; i < cap(m.mwBlocks); i++ {
-		if m.mwBlocks[i].buffer == nil || !m.mwBlocks[i].completed {
-			continue
-		}
+	ranges := [2][2]int{{-1, -1}, {-1, -1}}
+	if m.lastKeyFrameIndex <= m.index {
+		ranges[0][0] = m.lastKeyFrameIndex
+		ranges[0][1] = m.index + 1
+	} else {
+		// 回环, 先遍历后面和前面的数据
+		ranges[0][0] = m.lastKeyFrameIndex
+		ranges[0][1] = cap(m.mwBlocks)
 
-		data, _ := m.mwBlocks[i].buffer.Data()
-		cb(data)
+		ranges[1][0] = 0
+		ranges[1][1] = m.index + 1
 	}
 
-	//回调循环使用的头部数据
-	if m.index < m.lastKeyFrameIndex {
-		for i := 0; i < m.index; i++ {
+	for _, index := range ranges {
+		for i := index[0]; i > -1 && i < index[1]; i++ {
+			if m.mwBlocks[i].buffer == nil || !m.mwBlocks[i].completed {
+				break
+			}
+
 			data, _ := m.mwBlocks[i].buffer.Data()
 			cb(data)
 		}
@@ -217,7 +240,7 @@ func NewMergeWritingBuffer(existVideo bool) MergeWritingBuffer {
 	}
 
 	if !existVideo || !AppConfig.GOPCache {
-		blocks[0] = mwBlock{true, false, collections.NewDirectMemoryPool(1024 * 100), false}
+		blocks[0] = mwBlock{true, false, collections.NewDirectMemoryPool(1024 * 100), false, 0}
 	}
 
 	return &mergeWritingBuffer{

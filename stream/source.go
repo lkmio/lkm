@@ -300,7 +300,9 @@ func IsSupportMux(protocol TransStreamProtocol, audioCodecId, videoCodecId utils
 func (s *PublishSource) CreateTransStream(id TransStreamID, protocol TransStreamProtocol, tracks []*Track) (TransStream, error) {
 	log.Sugar.Infof("创建%s-stream source: %s", protocol.String(), s.ID)
 
-	transStream, err := CreateTransStream(s, protocol, tracks)
+	source := SourceManager.Find(s.ID)
+	utils.Assert(source != nil)
+	transStream, err := CreateTransStream(source, protocol, tracks)
 	if err != nil {
 		log.Sugar.Errorf("创建传输流失败 err: %s source: %s", err.Error(), s.ID)
 		return nil, err
@@ -313,7 +315,7 @@ func (s *PublishSource) CreateTransStream(id TransStreamID, protocol TransStream
 	}
 
 	transStream.SetID(id)
-	transStream.SetTransStreamProtocol(protocol)
+	transStream.SetProtocol(protocol)
 
 	// 创建输出流对应的拉流队列
 	s.TransStreamSinks[id] = make(map[SinkID]Sink, 128)
@@ -461,6 +463,15 @@ func (s *PublishSource) doAddSink(sink Sink) bool {
 		return true
 	}
 
+	// 累加拉流计数
+	if s.recordSink != sink {
+		s.sinkCount++
+		log.Sugar.Infof("sink count: %d source: %s", s.sinkCount, s.ID)
+	}
+
+	s.sinks[sink.GetID()] = sink
+	s.TransStreamSinks[transStreamId][sink.GetID()] = sink
+
 	// TCP拉流开启异步发包, 一旦出现网络不好的链路, 其余正常链路不受影响.
 	conn, ok := sink.GetConn().(*transport.Conn)
 	if ok && sink.IsTCPStreaming() && transStream.OutStreamBufferCapacity() > 2 {
@@ -477,15 +488,6 @@ func (s *PublishSource) doAddSink(sink Sink) bool {
 
 		s.write(sink, 0, data, timestamp)
 	}
-
-	// 累加拉流计数
-	if s.recordSink != sink {
-		s.sinkCount++
-		log.Sugar.Infof("sink count: %d source: %s", s.sinkCount, s.ID)
-	}
-
-	s.sinks[sink.GetID()] = sink
-	s.TransStreamSinks[transStreamId][sink.GetID()] = sink
 
 	// 新建传输流，发送已经缓存的音视频帧
 	if !exist && AppConfig.GOPCache && s.existVideo {

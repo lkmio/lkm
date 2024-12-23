@@ -26,12 +26,12 @@ type Sink struct {
 }
 
 func (s *Sink) StartStreaming(transStream stream.TransStream) error {
-	utils.Assert(transStream.TrackCount() > 0)
+	utils.Assert(transStream.TrackSize() > 0)
 	if s.senders != nil {
 		return nil
 	}
 
-	s.senders = make([]*librtp.RtpSender, transStream.TrackCount())
+	s.senders = make([]*librtp.RtpSender, transStream.TrackSize())
 	// sdp回调给sink, sink应答给describe请求
 	if s.cb != nil {
 		s.cb(transStream.(*TransStream).sdp)

@@ -10,37 +10,42 @@ type TransStream interface {
 
 	SetID(id TransStreamID)
 
+	// Input 封装传输流, 返回合并写块、时间戳、合并写块是否包含视频关键帧
 	Input(packet utils.AVPacket) ([][]byte, int64, bool, error)
 
 	AddTrack(track *Track) error
 
-	TrackCount() int
+	TrackSize() int
 
 	GetTracks() []*Track
 
+	// WriteHeader track添加完毕, 通过调用此函数告知
 	WriteHeader() error
 
 	// GetProtocol 返回输出流协议
 	GetProtocol() TransStreamProtocol
 
-	// ReadExtraData 获取封装后的编码器扩展数据
+	SetProtocol(protocol TransStreamProtocol)
+
+	// ReadExtraData 读取传输流的编码器扩展数据
 	ReadExtraData(timestamp int64) ([][]byte, int64, error)
 
-	// ReadKeyFrameBuffer 读取已经缓存的包含关键视频帧的输出流
+	// ReadKeyFrameBuffer 读取最近的包含视频关键帧的合并写队列
 	ReadKeyFrameBuffer() ([][]byte, int64, error)
 
+	// Close 关闭传输流, 返回还未flush的合并写块
 	Close() ([][]byte, int64, error)
 
+	// ClearOutStreamBuffer 清空传输流的合并写块队列
 	ClearOutStreamBuffer()
 
+	// AppendOutStreamBuffer 添加合并写块到队列
 	AppendOutStreamBuffer(buffer []byte)
 
-	// OutStreamBufferCapacity 返回输出流缓冲区的容量大小, 输出流缓冲区同时作为向sink推流的发送缓冲区, 容量大小决定向sink异步推流的队列大小;
+	// OutStreamBufferCapacity 返回合并写块队列容量大小, 作为sink异步推流的队列大小;
 	OutStreamBufferCapacity() int
 
 	IsExistVideo() bool
-
-	SetTransStreamProtocol(protocol TransStreamProtocol)
 }
 
 type BaseTransStream struct {
@@ -50,8 +55,8 @@ type BaseTransStream struct {
 	ExistVideo bool
 	Protocol   TransStreamProtocol
 
-	OutBuffer     [][]byte // 输出流的返回队列
-	OutBufferSize int
+	OutBuffer     [][]byte // 传输流的合并写块队列
+	OutBufferSize int      // 传输流返合并写块队列大小
 }
 
 func (t *BaseTransStream) GetID() TransStreamID {
@@ -82,6 +87,10 @@ func (t *BaseTransStream) GetProtocol() TransStreamProtocol {
 	return t.Protocol
 }
 
+func (t *BaseTransStream) SetProtocol(protocol TransStreamProtocol) {
+	t.Protocol = protocol
+}
+
 func (t *BaseTransStream) ClearOutStreamBuffer() {
 	t.OutBufferSize = 0
 }
@@ -106,7 +115,7 @@ func (t *BaseTransStream) OutStreamBufferCapacity() int {
 	return 0
 }
 
-func (t *BaseTransStream) TrackCount() int {
+func (t *BaseTransStream) TrackSize() int {
 	return len(t.Tracks)
 }
 
@@ -124,10 +133,6 @@ func (t *BaseTransStream) ReadExtraData(timestamp int64) ([][]byte, int64, error
 
 func (t *BaseTransStream) ReadKeyFrameBuffer() ([][]byte, int64, error) {
 	return nil, 0, nil
-}
-
-func (t *BaseTransStream) SetTransStreamProtocol(protocol TransStreamProtocol) {
-	t.Protocol = protocol
 }
 
 type TCPTransStream struct {
