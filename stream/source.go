@@ -809,23 +809,23 @@ func (s *PublishSource) CorrectTimestamp(packet utils.AVPacket) {
 		s.timestampModeDecided = true
 
 		timestamps := s.streamEndInfo.Timestamps[packet.CodecId()]
-		if packet.Dts() < timestamps[0] || packet.Pts() < timestamps[1] {
-			s.accumulateTimestamps = true
-			log.Sugar.Infof("累加时间戳 上次推流dts: %d, pts: %d", timestamps[0], timestamps[1])
-		}
+		s.accumulateTimestamps = true
+		log.Sugar.Infof("累加时间戳 上次推流dts: %d, pts: %d", timestamps[0], timestamps[1])
 	}
 
-	// 累加时间戳
-	if s.accumulateTimestamps {
-		timestamps := s.streamEndInfo.Timestamps[packet.CodecId()]
-		packet.SetDts(timestamps[0] + packet.Dts())
-		packet.SetPts(timestamps[1] + packet.Pts())
-	}
-
-	// 更新track最近的时间戳
 	track := s.originTracks.Find(packet.CodecId())
+	duration := packet.Duration(packet.Timebase())
+
+	// 根据duration来累加时间戳
+	if s.accumulateTimestamps {
+		offset := packet.Pts() - packet.Dts()
+		packet.SetDts(track.Dts + duration)
+		packet.SetPts(packet.Dts() + offset)
+	}
+
 	track.Dts = packet.Dts()
 	track.Pts = packet.Pts()
+	track.FrameDuration = int(duration)
 }
 
 func (s *PublishSource) OnDeMuxPacket(packet utils.AVPacket) {

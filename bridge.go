@@ -24,8 +24,8 @@ func NewStreamEndInfo(source stream.Source) *stream.StreamEndInfo {
 
 	for _, track := range tracks {
 		var timestamp [2]int64
-		timestamp[0] = track.Dts
-		timestamp[1] = track.Pts
+		timestamp[0] = track.Dts + int64(track.FrameDuration)
+		timestamp[1] = track.Pts + int64(track.FrameDuration)
 
 		info.Timestamps[track.Stream.CodecId()] = timestamp
 	}

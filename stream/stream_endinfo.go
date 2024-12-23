@@ -19,7 +19,7 @@ func init() {
 // 如果在此之前，陆续有拉流端断开，直至sink计数为0，则会不再保留该信息。
 type StreamEndInfo struct {
 	ID             string
-	Timestamps     map[utils.AVCodecID][2]int64 // 每路track最后的时间戳
+	Timestamps     map[utils.AVCodecID][2]int64 // 每路track结束时间戳
 	M3U8Writer     libhls.M3U8Writer
 	PlaylistFormat *string
 	RtspTracks     map[byte]uint16
