@@ -227,7 +227,7 @@ func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtoco
 	// 获取推流的元数据
 	var metaData *libflv.AMF0Object
 	if stream.SourceTypeRtmp == source.GetType() {
-		metaData = source.(*Publisher).stack.MetaData()
+		metaData = source.(*Publisher).Stack.MetaData()
 	}
 	return NewTransStream(librtmp.ChunkSize, metaData), nil
 }

@@ -173,59 +173,26 @@ func (t *TransStream) flushSegment() ([]byte, bool) {
 	return FormatSegment(segment), key
 }
 
-// GetHttpFLVBlock 跳过头部的无效数据，返回http-flv块
-func (t *TransStream) GetHttpFLVBlock(data []byte) []byte {
-	return data[t.computeSkipBytesSize(data):]
-}
-
-// FormatSegment 为切片添加包长和换行符
-func (t *TransStream) FormatSegment(segment []byte) []byte {
-	t.writeSeparator(segment)
-	return t.GetHttpFLVBlock(segment)
-}
-
-func (t *TransStream) computeSkipBytesSize(data []byte) int {
-	return int(6 + binary.BigEndian.Uint16(data[4:]))
-}
-
-// 为http-flv数据块添加长度和换行符
-// @dst http-flv数据块, 头部需要空出HttpFlvBlockLengthSize字节长度, 末尾空出2字节换行符
-func (t *TransStream) writeSeparator(dst []byte) {
-	// http-flv: length\r\n|flv data\r\n
-	// http-flv-block: |block size[4]|skip count[2]|length\r\n|flv data\r\n
-
-	// 写block size
-	binary.BigEndian.PutUint32(dst, uint32(len(dst)-4))
-
-	// 写flv实际长度字符串, 16进制表达
-	flvSize := len(dst) - HttpFlvBlockHeaderSize - 2
-	hexStr := fmt.Sprintf("%X", flvSize)
-	// +2是跳过length后的换行符
-	n := len(hexStr) + 2
-	copy(dst[HttpFlvBlockHeaderSize-n:], hexStr)
-
-	// 写跳过字节数量
-	// -6是block size和skip count字段合计长度
-	skipCount := HttpFlvBlockHeaderSize - n - 6
-	binary.BigEndian.PutUint16(dst[4:], uint16(skipCount))
-
-	// flv length字段和flv数据之间的换行符
-	dst[HttpFlvBlockHeaderSize-2] = 0x0D
-	dst[HttpFlvBlockHeaderSize-1] = 0x0A
-
-	// 末尾换行符
-	dst[len(dst)-2] = 0x0D
-	dst[len(dst)-1] = 0x0A
-}
-
-func NewHttpTransStream() stream.TransStream {
+func NewHttpTransStream(metadata *libflv.AMF0Object, prevTagSize uint32) stream.TransStream {
 	return &TransStream{
-		muxer:      libflv.NewMuxer(nil),
-		header:     make([]byte, 1024),
-		headerSize: HttpFlvBlockHeaderSize,
+		Muxer:             libflv.NewMuxerWithPrevTagSize(metadata, prevTagSize),
+		flvHeaderBlock:    make([]byte, 31),
+		flvExtraDataBlock: make([]byte, 4096),
 	}
 }
 
 func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtocol, tracks []*stream.Track) (stream.TransStream, error) {
-	return NewHttpTransStream(), nil
+	var prevTagSize uint32
+	var metaData *libflv.AMF0Object
+
+	endInfo := source.GetStreamEndInfo()
+	if endInfo != nil {
+		prevTagSize = endInfo.FLVPrevTagSize
+	}
+
+	if stream.SourceTypeRtmp == source.GetType() {
+		metaData = source.(*rtmp.Publisher).Stack.MetaData()
+	}
+
+	return NewHttpTransStream(metaData, prevTagSize), nil
 }

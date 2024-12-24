@@ -12,11 +12,11 @@ import (
 type Publisher struct {
 	stream.PublishSource
 
-	stack *librtmp.Stack
+	Stack *librtmp.Stack
 }
 
 func (p *Publisher) Input(data []byte) error {
-	return p.stack.Input(data)
+	return p.Stack.Input(data)
 }
 
 func (p *Publisher) OnDeMuxStream(stream utils.AVStream) {
@@ -49,12 +49,12 @@ func (p *Publisher) OnPartPacket(index int, mediaType utils.AVMediaType, data []
 
 func (p *Publisher) Close() {
 	p.PublishSource.Close()
-	p.stack = nil
+	p.Stack = nil
 }
 
 func NewPublisher(source string, stack *librtmp.Stack, conn net.Conn) *Publisher {
 	deMuxer := libflv.NewDeMuxer()
-	publisher := &Publisher{PublishSource: stream.PublishSource{ID: source, Type: stream.SourceTypeRtmp, TransDeMuxer: deMuxer, Conn: conn}, stack: stack}
+	publisher := &Publisher{PublishSource: stream.PublishSource{ID: source, Type: stream.SourceTypeRtmp, TransDeMuxer: deMuxer, Conn: conn}, Stack: stack}
 	// 设置回调, 接受从DeMuxer解析出来的音视频包
 	deMuxer.SetHandler(publisher)
 	return publisher
