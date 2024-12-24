@@ -20,9 +20,10 @@ func init() {
 type StreamEndInfo struct {
 	ID             string
 	Timestamps     map[utils.AVCodecID][2]int64 // 每路track结束时间戳
-	M3U8Writer     libhls.M3U8Writer
-	PlaylistFormat *string
-	RtspTracks     map[byte]uint16
+	M3U8Writer     libhls.M3U8Writer            // 保存M3U8生成器
+	PlaylistFormat *string                      // M3U8播放列表
+	RtspTracks     map[byte]uint16              // rtsp每路track的结束序号
+	FLVPrevTagSize uint32                       // flv的最后一个tag大小, 下次生成flv时作为prev tag size
 }
 
 func EqualsTracks(info *StreamEndInfo, tracks []*Track) bool {

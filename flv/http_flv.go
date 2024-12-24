@@ -2,33 +2,25 @@ package flv
 
 import (
 	"encoding/binary"
-	"fmt"
 	"github.com/lkmio/avformat/libflv"
 	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/lkm/rtmp"
 	"github.com/lkmio/lkm/stream"
-)
-
-const (
-	// HttpFlvBlockHeaderSize 在每块http-flv流的头部，预留指定大小的数据, 用于描述flv数据块的长度信息
-	// http-flv是以文件流的形式传输http流, 格式如下: length\r\n|flv data\r\n
-	// 我们对http-flv-block的封装: |block size[4]|skip count[2]|length\r\n|flv data\r\n
-	// skip count是因为length长度不固定, 需要一个字段说明, 跳过多少字节才是http-flv数据
-	HttpFlvBlockHeaderSize = 20
 )
 
 type TransStream struct {
 	stream.TCPTransStream
 
-	muxer         libflv.Muxer
-	header        []byte
-	headerSize    int
-	headerTagSize int
+	Muxer               libflv.Muxer
+	flvHeaderBlock      []byte // 单独保存9个字节长的flv头, 只发一次, 后续恢复推流不再发送
+	flvExtraDataBlock   []byte // metadata和sequence header
+	flvExtraDataTagSize int    // 整个flv tag大小
 }
 
 func (t *TransStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, error) {
 	t.ClearOutStreamBuffer()
 
-	var flvSize int
+	var flvTagSize int
 	var data []byte
 	var videoKey bool
 	var dts int64
@@ -38,10 +30,10 @@ func (t *TransStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, error
 	dts = packet.ConvertDts(1000)
 	pts = packet.ConvertPts(1000)
 	if utils.AVMediaTypeAudio == packet.MediaType() {
-		flvSize = 17 + len(packet.Data())
+		flvTagSize = 17 + len(packet.Data())
 		data = packet.Data()
 	} else if utils.AVMediaTypeVideo == packet.MediaType() {
-		flvSize = t.muxer.ComputeVideoDataSize(uint32(pts-dts)) + libflv.TagHeaderSize + len(packet.AVCCPacketData())
+		flvTagSize = t.Muxer.ComputeVideoDataSize(uint32(pts-dts)) + libflv.TagHeaderSize + len(packet.AVCCPacketData())
 
 		data = packet.AVCCPacketData()
 		videoKey = packet.KeyFrame()
@@ -49,7 +41,7 @@ func (t *TransStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, error
 
 	// 关键帧都放在切片头部，所以遇到关键帧创建新切片, 发送当前切片剩余流
 	if videoKey && !t.MWBuffer.IsNewSegment() {
-		segment, key := t.forceFlushSegment()
+		segment, key := t.flushSegment()
 		t.AppendOutStreamBuffer(segment)
 		keyBuffer = key
 	}
@@ -69,16 +61,17 @@ func (t *TransStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, error
 		separatorSize += 2
 	}
 
-	// 分配flv block
-	bytes := t.MWBuffer.Allocate(separatorSize+flvSize, dts, videoKey)
-	n += t.muxer.Input(bytes[n:], packet.MediaType(), len(data), dts, pts, packet.KeyFrame(), false)
+	// 分配block
+	bytes := t.MWBuffer.Allocate(separatorSize+flvTagSize, dts, videoKey)
+	// 写flv tag
+	n += t.Muxer.Input(bytes[n:], packet.MediaType(), len(data), dts, pts, packet.KeyFrame(), false)
 	copy(bytes[n:], data)
 
 	// 合并写满再发
 	if segment, key := t.MWBuffer.PeekCompletedSegment(); len(segment) > 0 {
-		// 已经分配末尾换行符内存
 		keyBuffer = key
-		t.AppendOutStreamBuffer(t.FormatSegment(segment))
+		// 已经分配末尾换行符内存, 直接添加
+		t.AppendOutStreamBuffer(FormatSegment(segment))
 	}
 
 	return t.OutBuffer[:t.OutBufferSize], 0, keyBuffer, nil
@@ -90,19 +83,24 @@ func (t *TransStream) AddTrack(track *stream.Track) error {
 	}
 
 	if utils.AVMediaTypeAudio == track.Stream.Type() {
-		t.muxer.AddAudioTrack(track.Stream.CodecId(), 0, 0, 0)
+		t.Muxer.AddAudioTrack(track.Stream.CodecId(), 0, 0, 0)
 	} else if utils.AVMediaTypeVideo == track.Stream.Type() {
-		t.muxer.AddVideoTrack(track.Stream.CodecId())
+		t.Muxer.AddVideoTrack(track.Stream.CodecId())
 
-		t.muxer.MetaData().AddNumberProperty("width", float64(track.Stream.CodecParameters().Width()))
-		t.muxer.MetaData().AddNumberProperty("height", float64(track.Stream.CodecParameters().Height()))
+		t.Muxer.MetaData().AddNumberProperty("width", float64(track.Stream.CodecParameters().Width()))
+		t.Muxer.MetaData().AddNumberProperty("height", float64(track.Stream.CodecParameters().Height()))
 	}
 	return nil
 }
 
 func (t *TransStream) WriteHeader() error {
-	t.headerSize += t.muxer.WriteHeader(t.header[HttpFlvBlockHeaderSize:])
+	var header [4096]byte
+	var extraDataSize int
+	size := t.Muxer.WriteHeader(header[:])
+	copy(t.flvHeaderBlock[HttpFlvBlockHeaderSize:], header[:9])
+	copy(t.flvExtraDataBlock[HttpFlvBlockHeaderSize:], header[9:size])
 
+	extraDataSize = HttpFlvBlockHeaderSize + (size - 9)
 	for _, track := range t.BaseTransStream.Tracks {
 		var data []byte
 		if utils.AVMediaTypeAudio == track.Stream.Type() {
@@ -111,26 +109,25 @@ func (t *TransStream) WriteHeader() error {
 			data = track.Stream.CodecParameters().MP4ExtraData()
 		}
 
-		n := t.muxer.Input(t.header[t.headerSize:], track.Stream.Type(), len(data), 0, 0, false, true)
-		t.headerSize += n
-		copy(t.header[t.headerSize:], data)
-		t.headerSize += len(data)
-
-		t.headerTagSize = n - 15 + len(data) + 11
+		n := t.Muxer.Input(t.flvExtraDataBlock[extraDataSize:], track.Stream.Type(), len(data), 0, 0, false, true)
+		extraDataSize += n
+		copy(t.flvExtraDataBlock[extraDataSize:], data)
+		extraDataSize += len(data)
+		t.flvExtraDataTagSize = n - 15 + len(data) + 11
 	}
 
 	// 加上末尾换行符
-	t.headerSize += 2
-	t.writeSeparator(t.header[:t.headerSize])
+	extraDataSize += 2
+	t.flvExtraDataBlock = t.flvExtraDataBlock[:extraDataSize]
+	writeSeparator(t.flvHeaderBlock)
+	writeSeparator(t.flvExtraDataBlock)
 
 	t.MWBuffer = stream.NewMergeWritingBuffer(t.ExistVideo)
 	return nil
 }
 
 func (t *TransStream) ReadExtraData(_ int64) ([][]byte, int64, error) {
-	utils.Assert(t.headerSize > 0)
-	// 发送sequence header
-	return [][]byte{t.GetHttpFLVBlock(t.header[:t.headerSize])}, 0, nil
+	return [][]byte{GetHttpFLVBlock(t.flvHeaderBlock), GetHttpFLVBlock(t.flvExtraDataBlock)}, 0, nil
 }
 
 func (t *TransStream) ReadKeyFrameBuffer() ([][]byte, int64, error) {
@@ -139,15 +136,15 @@ func (t *TransStream) ReadKeyFrameBuffer() ([][]byte, int64, error) {
 	// 发送当前内存池已有的合并写切片
 	t.MWBuffer.ReadSegmentsFromKeyFrameIndex(func(bytes []byte) {
 		if t.OutBufferSize < 1 {
-			// 修改第一个flv tag的pre tag size
-			binary.BigEndian.PutUint32(bytes[HttpFlvBlockHeaderSize:], uint32(t.headerTagSize))
+			// 修改第一个flv tag的pre tag size为sequence header tag size
+			binary.BigEndian.PutUint32(bytes[HttpFlvBlockHeaderSize:], uint32(t.flvExtraDataTagSize))
 		}
 
 		// 遍历发送合并写切片
 		var index int
 		for ; index < len(bytes); index += 4 {
 			size := binary.BigEndian.Uint32(bytes[index:])
-			t.AppendOutStreamBuffer(t.GetHttpFLVBlock(bytes[index : index+4+int(size)]))
+			t.AppendOutStreamBuffer(GetHttpFLVBlock(bytes[index : index+4+int(size)]))
 			index += int(size)
 		}
 	})
@@ -160,7 +157,7 @@ func (t *TransStream) Close() ([][]byte, int64, error) {
 
 	// 发送剩余的流
 	if !t.MWBuffer.IsNewSegment() {
-		if segment, _ := t.forceFlushSegment(); len(segment) > 0 {
+		if segment, _ := t.flushSegment(); len(segment) > 0 {
 			t.AppendOutStreamBuffer(segment)
 		}
 	}
@@ -169,11 +166,11 @@ func (t *TransStream) Close() ([][]byte, int64, error) {
 }
 
 // 保存为完整的http-flv切片
-func (t *TransStream) forceFlushSegment() ([]byte, bool) {
+func (t *TransStream) flushSegment() ([]byte, bool) {
 	// 预览末尾换行符
 	t.MWBuffer.Reserve(2)
 	segment, key := t.MWBuffer.FlushSegment()
-	return t.FormatSegment(segment), key
+	return FormatSegment(segment), key
 }
 
 // GetHttpFLVBlock 跳过头部的无效数据，返回http-flv块

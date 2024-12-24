@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/lkm/flv"
 	"github.com/lkmio/lkm/hls"
 	"github.com/lkmio/lkm/rtsp"
 	"github.com/lkmio/lkm/stream"
@@ -44,6 +45,9 @@ func NewStreamEndInfo(source stream.Source) *stream.StreamEndInfo {
 					info.RtspTracks[track.PT] = track.EndSeq
 				}
 			}
+		} else if stream.TransStreamFlv == transStream.GetProtocol() {
+			stream := transStream.(*flv.TransStream)
+			info.FLVPrevTagSize = stream.Muxer.PrevTagSize()
 		}
 	}
 
