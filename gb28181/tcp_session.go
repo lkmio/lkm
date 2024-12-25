@@ -17,19 +17,8 @@ type TCPSession struct {
 	receiveBuffer *stream.ReceiveBuffer
 }
 
-// Input 解析携带包长的粘包数据
-func (t *TCPSession) Input(data []byte) error {
-	if err := t.decoder.Input(data); err != nil {
-		log.Sugar.Errorf("解析粘包数据失败 err:%s", err)
-		t.conn.Close()
-	}
-
-	return nil
-}
-
 func (t *TCPSession) Init(source GBSource) {
 	t.source = source
-	t.source.SetConn(t.conn)
 	// 创建收流缓冲区
 	t.receiveBuffer = stream.NewTCPReceiveBuffer()
 }
@@ -61,7 +50,7 @@ func NewTCPSession(conn net.Conn, filter Filter) *TCPSession {
 	session.decoder = transport.NewLengthFieldFrameDecoder(0xFFFF, 2, func(bytes []byte) {
 		packet := rtp.Packet{}
 		if err := packet.Unmarshal(bytes); err != nil {
-			log.Sugar.Errorf("解析rtp失败 err:%s conn:%s data:%s", err.Error(), conn.RemoteAddr().String(), hex.EncodeToString(bytes))
+			log.Sugar.Errorf("解析rtp失败 err: %s conn: %s data: %s", err.Error(), conn.RemoteAddr().String(), hex.EncodeToString(bytes))
 			conn.Close()
 			return
 		}
@@ -71,7 +60,7 @@ func NewTCPSession(conn net.Conn, filter Filter) *TCPSession {
 			source := filter.FindSource(packet.SSRC)
 			if source == nil {
 				// 匹配不到Source, 直接关闭连接
-				log.Sugar.Errorf("gb28181推流失败 ssrc:%x配置不到source conn:%s  data:%s", packet.SSRC, session.conn.RemoteAddr().String(), hex.EncodeToString(bytes))
+				log.Sugar.Errorf("gb28181推流失败 ssrc: %x 匹配不到source conn: %s  data: %s", packet.SSRC, session.conn.RemoteAddr().String(), hex.EncodeToString(bytes))
 				conn.Close()
 				return
 			}
@@ -80,11 +69,14 @@ func NewTCPSession(conn net.Conn, filter Filter) *TCPSession {
 		}
 
 		if stream.SessionStateHandshakeSuccess == session.source.State() {
-			session.source.PreparePublish(conn, packet.SSRC, session.source)
+			session.source.PreparePublish(session.conn, packet.SSRC, session.source)
 		}
 
-		// 已经在主协程, 直接由BaseGBSource.Input处理
-		session.source.Input(bytes)
+		if session.source.SetupType() == SetupPassive {
+			session.source.(*PassiveSource).PublishSource.Input(bytes)
+		} else {
+			session.source.(*ActiveSource).PublishSource.Input(bytes)
+		}
 	})
 
 	return session

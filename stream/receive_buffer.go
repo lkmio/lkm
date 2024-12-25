@@ -11,10 +11,10 @@ const (
 // rtmp和1078推流直接使用ReceiveBuffer
 // 国标推流,UDP收流都要经过jitter buffer处理, 还是需要拷贝一次, 没必要使用ReceiveBuffer. TCP全都使用ReceiveBuffer, 区别在于多端口模式, 第一包传给source, 单端口模式先解析出ssrc, 找到source. 后续再传给source.
 type ReceiveBuffer struct {
-	blockSize  int //单个缓存块大小
-	blockCount int //缓存块数据流. 应当和Source的数据输入管道容量保持一致.
-	data       []byte
-	index      int
+	blockCapacity int    // 单个内存块的容量
+	blockCount    int    // 内存块数量
+	data          []byte // 由一块大内存分割成多个块使用
+	index         int    // 使用到第几块的索引
 }
 
 func (r *ReceiveBuffer) Index() int {
@@ -22,13 +22,13 @@ func (r *ReceiveBuffer) Index() int {
 }
 
 func (r *ReceiveBuffer) Get(index int) []byte {
-	return r.data[index*r.blockSize : (index+1)*r.blockSize]
+	return r.data[index*r.blockCapacity : (index+1)*r.blockCapacity]
 }
 
 func (r *ReceiveBuffer) GetBlock() []byte {
-	bytes := r.data[r.index*r.blockSize:]
+	bytes := r.data[r.index*r.blockCapacity:]
 	r.index = (r.index + 1) % r.blockCount
-	return bytes[:r.blockSize]
+	return bytes[:r.blockCapacity]
 }
 
 func (r *ReceiveBuffer) BlockCount() int {
@@ -36,7 +36,7 @@ func (r *ReceiveBuffer) BlockCount() int {
 }
 
 func NewReceiveBuffer(blockSize, blockCount int) *ReceiveBuffer {
-	return &ReceiveBuffer{blockSize: blockSize, blockCount: blockCount, data: make([]byte, blockSize*blockCount), index: 0}
+	return &ReceiveBuffer{blockCapacity: blockSize, blockCount: blockCount, data: make([]byte, blockSize*blockCount), index: 0}
 }
 
 func NewUDPReceiveBuffer() *ReceiveBuffer {

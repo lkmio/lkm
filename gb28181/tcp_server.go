@@ -2,6 +2,7 @@ package gb28181
 
 import (
 	"github.com/lkmio/avformat/transport"
+	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
 	"net"
 	"runtime"
@@ -46,13 +47,9 @@ func (T *TCPServer) OnPacket(conn net.Conn, data []byte) []byte {
 	T.StreamServer.OnPacket(conn, data)
 	session := conn.(*transport.Conn).Data.(*TCPSession)
 
-	// 在Session未绑定到Source时(单端口收流), 先解析出SSRC找到Source.
-	if session.source == nil {
-		session.Input(data)
-	} else {
-
-		// 将流交给Source的主协程处理，主协程最终会调用TCPSession.Input函数处理
-		session.source.(*PassiveSource).PublishSource.Input(data)
+	if err := session.decoder.Input(data); err != nil {
+		log.Sugar.Errorf("解析粘包数据失败 err: %s", err.Error())
+		conn.Close()
 	}
 
 	// 绑定Source后, 使用ReceiveBuffer读取网络包, 减少拷贝
