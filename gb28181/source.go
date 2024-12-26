@@ -182,10 +182,10 @@ func (source *BaseGBSource) correctTimestamp(packet utils.AVPacket, dts, pts int
 		if pts < lastTimestamp {
 			duration = 0x1FFFFFFFF - lastTimestamp + pts
 			if duration < 90000 {
-				//处理正常溢出
+				// 处理正常溢出
 				packet.SetDuration(duration)
 			} else {
-				//时间戳不正确
+				// 时间戳不正确
 				log.Sugar.Errorf("推流时间戳不正确, 使用系统时钟. ssrc:%d", source.ssrc)
 				source.isSystemClock = true
 			}
@@ -196,7 +196,7 @@ func (source *BaseGBSource) correctTimestamp(packet utils.AVPacket, dts, pts int
 		packet.SetDuration(duration)
 		duration = packet.Duration(90000)
 		if duration < 0 || duration < 750 {
-			log.Sugar.Errorf("推流时间戳不正确, 使用系统时钟. source: %s ssrc: %d", source.ID, source.ssrc)
+			log.Sugar.Errorf("推流时间戳不正确, 使用系统时钟. ts: %d duration: %d source: %s ssrc: %d", pts, duration, source.ID, source.ssrc)
 			source.isSystemClock = true
 		}
 	}

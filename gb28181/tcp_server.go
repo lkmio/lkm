@@ -47,9 +47,20 @@ func (T *TCPServer) OnPacket(conn net.Conn, data []byte) []byte {
 	T.StreamServer.OnPacket(conn, data)
 	session := conn.(*transport.Conn).Data.(*TCPSession)
 
-	if err := session.decoder.Input(data); err != nil {
-		log.Sugar.Errorf("解析粘包数据失败 err: %s", err.Error())
-		conn.Close()
+	// 单端口推流时, 先解析出SSRC找到GBSource. 后序将推流数据交给stream.Source处理
+	if session.source == nil {
+		if err := session.decoder.Input(data); err != nil {
+			log.Sugar.Errorf("解析粘包数据失败 err: %s", err.Error())
+			conn.Close()
+		}
+
+	} else {
+		// 将流交给Source的主协程处理，主协程最终会调用PassiveSource的Input函数处理
+		if session.source.SetupType() == SetupPassive {
+			session.source.(*PassiveSource).PublishSource.Input(data)
+		} else {
+			session.source.(*ActiveSource).PublishSource.Input(data)
+		}
 	}
 
 	// 绑定Source后, 使用ReceiveBuffer读取网络包, 减少拷贝
