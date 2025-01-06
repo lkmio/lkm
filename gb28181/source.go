@@ -10,6 +10,7 @@ import (
 	"github.com/pion/rtp"
 	"math"
 	"net"
+	"strings"
 )
 
 type SetupType int
@@ -84,7 +85,16 @@ func (source *BaseGBSource) Input(data []byte) error {
 
 	packet := rtp.Packet{}
 	_ = packet.Unmarshal(data)
-	return source.deMuxerCtx.Input(packet.Payload)
+	err := source.deMuxerCtx.Input(packet.Payload)
+
+	// 非解析缓冲区满的错误, 继续解析
+	if err != nil {
+		log.Sugar.Errorf("解析ps流发生err: %s source: %s", err.Error(), source.GetID())
+		if strings.HasPrefix(err.Error(), "probe") {
+			return err
+		}
+	}
+	return nil
 }
 
 // OnPartPacket 部分es流回调
