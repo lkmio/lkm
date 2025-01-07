@@ -432,7 +432,7 @@ func (s *PublishSource) doAddSink(sink Sink) bool {
 		var err error
 		transStream, err = s.CreateTransStream(transStreamId, sink.GetProtocol(), tracks)
 		if err != nil {
-			log.Sugar.Errorf("创建传输流失败 err: %s source: %s", err.Error(), s.ID)
+			log.Sugar.Errorf("添加sink失败,创建传输流发生err: %s source: %s", err.Error(), s.ID)
 			return false
 		}
 
@@ -441,21 +441,21 @@ func (s *PublishSource) doAddSink(sink Sink) bool {
 
 	sink.SetTransStreamID(transStreamId)
 
+	err := sink.StartStreaming(transStream)
+	if err != nil {
+		log.Sugar.Errorf("添加sink失败,开始推流发生err: %s sink: %s source: %s ", err.Error(), SinkId2String(sink.GetID()), s.ID)
+		return false
+	}
+
 	{
 		sink.Lock()
 		defer sink.UnLock()
 
 		if SessionStateClosed == sink.GetState() {
-			log.Sugar.Warnf("AddSink失败, sink已经断开连接 %s", sink.String())
+			log.Sugar.Warnf("添加sink失败, sink已经断开连接 %s", sink.String())
 		} else {
 			sink.SetState(SessionStateTransferring)
 		}
-	}
-
-	err := sink.StartStreaming(transStream)
-	if err != nil {
-		log.Sugar.Errorf("开始推流失败 err: %s", err.Error())
-		return false
 	}
 
 	// 还没做好准备(rtsp拉流还在协商sdp中), 暂不推流
@@ -699,10 +699,10 @@ func (s *PublishSource) OnDiscardPacket(packet utils.AVPacket) {
 
 func (s *PublishSource) OnDeMuxStream(stream utils.AVStream) {
 	if s.completed {
-		log.Sugar.Warnf("添加track失败,已经WriteHeader. source: %s", s.ID)
+		log.Sugar.Warnf("添加%s track失败,已经WriteHeader. source: %s", stream.Type().ToString(), s.ID)
 		return
 	} else if !s.NotTrackAdded(stream.Index()) {
-		log.Sugar.Warnf("添加track失败,已经添加索引为%d的track. source: %s", stream.Index(), s.ID)
+		log.Sugar.Warnf("添加%s track失败,已经添加索引为%d的track. source: %s", stream.Type().ToString(), stream.Index(), s.ID)
 		return
 	}
 

@@ -27,5 +27,5 @@ func (s *Sink) Write(index int, data [][]byte, ts int64) error {
 }
 
 func NewFLVSink(id stream.SinkID, sourceId string, conn net.Conn) stream.Sink {
-	return &Sink{BaseSink: stream.BaseSink{ID: id, SourceID: sourceId, Protocol: stream.TransStreamFlv, Conn: transport.NewConn(conn), TCPStreaming: true}}
+	return &Sink{BaseSink: stream.BaseSink{ID: id, SourceID: sourceId, State: stream.SessionStateCreated, Protocol: stream.TransStreamFlv, Conn: transport.NewConn(conn), TCPStreaming: true}}
 }

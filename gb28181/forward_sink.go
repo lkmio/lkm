@@ -75,7 +75,7 @@ func (f *ForwardSink) Close() {
 // NewForwardSink 创建国标级联转发流Sink
 // 返回监听的端口和Sink
 func NewForwardSink(ssrc uint32, serverAddr string, setup SetupType, sinkId stream.SinkID, sourceId string) (stream.Sink, int, error) {
-	sink := &ForwardSink{BaseSink: stream.BaseSink{ID: sinkId, SourceID: sourceId, Protocol: stream.TransStreamGBStreamForward}, ssrc: ssrc, setup: setup}
+	sink := &ForwardSink{BaseSink: stream.BaseSink{ID: sinkId, SourceID: sourceId, State: stream.SessionStateCreated, Protocol: stream.TransStreamGBStreamForward}, ssrc: ssrc, setup: setup}
 
 	if SetupUDP == setup {
 		remoteAddr, err := net.ResolveUDPAddr("udp", serverAddr)

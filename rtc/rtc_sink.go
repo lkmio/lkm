@@ -144,5 +144,5 @@ func (s *Sink) Write(index int, data [][]byte, ts int64) error {
 }
 
 func NewSink(id stream.SinkID, sourceId string, offer string, cb func(sdp string)) stream.Sink {
-	return &Sink{stream.BaseSink{ID: id, SourceID: sourceId, Protocol: stream.TransStreamRtc, TCPStreaming: false}, offer, "", nil, nil, webrtc.ICEConnectionStateNew, cb}
+	return &Sink{stream.BaseSink{ID: id, SourceID: sourceId, State: stream.SessionStateCreated, Protocol: stream.TransStreamRtc, TCPStreaming: false}, offer, "", nil, nil, webrtc.ICEConnectionStateNew, cb}
 }
