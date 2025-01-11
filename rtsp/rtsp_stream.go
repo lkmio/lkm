@@ -133,13 +133,13 @@ func (t *TransStream) AddTrack(track *stream.Track) error {
 
 		if utils.AVCodecIdH265 == track.Stream.CodecId() {
 			bytes := parameters.(*utils.HEVCCodecData).VPS()
-			t.PackRtpPayload(rtspTrack, index, bytes[0], 0)
+			t.PackRtpPayload(rtspTrack, index, libavc.RemoveStartCode(bytes[0]), 0)
 		}
 
 		spsBytes := parameters.SPS()
 		ppsBytes := parameters.PPS()
-		t.PackRtpPayload(rtspTrack, index, spsBytes[0], 0)
-		t.PackRtpPayload(rtspTrack, index, ppsBytes[0], 0)
+		t.PackRtpPayload(rtspTrack, index, libavc.RemoveStartCode(spsBytes[0]), 0)
+		t.PackRtpPayload(rtspTrack, index, libavc.RemoveStartCode(ppsBytes[0]), 0)
 
 		// 拷贝扩展数据的rtp包
 		size := t.buffer.Index() - bufferIndex
