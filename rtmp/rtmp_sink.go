@@ -22,8 +22,8 @@ func (s *Sink) StopStreaming(stream stream.TransStream) {
 }
 
 func (s *Sink) Close() {
-	s.stack = nil
 	s.BaseSink.Close()
+	s.stack = nil
 }
 
 func NewSink(id stream.SinkID, sourceId string, conn net.Conn, stack *librtmp.Stack) stream.Sink {

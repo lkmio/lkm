@@ -19,7 +19,6 @@ type SourceType byte
 type TransStreamProtocol uint32
 
 // SessionState 推拉流Session的状态
-// 包含握手和Hook授权阶段
 type SessionState uint32
 
 const (

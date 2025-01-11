@@ -84,13 +84,13 @@ func (s *M3U8Sink) RefreshPlayTime() {
 }
 
 func (s *M3U8Sink) Close() {
+	s.BaseSink.Close()
+	stream.SinkManager.Remove(s.ID)
+
 	if s.playTimer != nil {
 		s.playTimer.Stop()
 		s.playTimer = nil
 	}
-
-	stream.SinkManager.Remove(s.ID)
-	s.BaseSink.Close()
 }
 
 func NewM3U8Sink(id stream.SinkID, sourceId string, cb func(m3u8 []byte), sessionId string) stream.Sink {

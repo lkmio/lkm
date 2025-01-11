@@ -187,40 +187,28 @@ func (s *BaseSink) DesiredVideoCodecId() utils.AVCodecID {
 func (s *BaseSink) Close() {
 	log.Sugar.Debugf("closing the %s sink. id: %s. current session state: %s", s.Protocol, SinkId2String(s.ID), s.State)
 
-	if SessionStateClosed == s.State {
-		return
-	}
-
-	if s.Conn != nil {
-		s.Conn.Close()
-		s.Conn = nil
-	}
-
-	// Sink未添加到任何队列, 不做处理
-	if s.State < SessionStateWaiting {
-		return
-	}
-
-	// 更新Sink状态
-	var state SessionState
-	{
-		s.Lock()
-		defer s.UnLock()
-		if s.State == SessionStateClosed {
-			return
-		}
-
-		state = s.State
+	s.Lock()
+	defer func() {
 		s.State = SessionStateClosed
-	}
+		s.UnLock()
 
-	if state == SessionStateTransferring {
+		// 最后断开网络连接, 确保从source删除sink之前, 推流是安全的.
+		if s.Conn != nil {
+			s.Conn.Close()
+			s.Conn = nil
+		}
+	}()
+
+	// 已经关闭或Sink未添加到任何队列, 不做处理
+	if SessionStateClosed == s.State || s.State < SessionStateWaiting {
+		return
+	} else if s.State == SessionStateTransferring {
 		// 从source中删除sink, 如果source为nil, 已经结束推流.
 		if source := SourceManager.Find(s.SourceID); source != nil {
 			source.RemoveSink(s)
 		}
-	} else if state == SessionStateWaiting {
-		// 从等待队列中删除Sink
+	} else if s.State == SessionStateWaiting {
+		// 从等待队列中删除sink
 		RemoveSinkFromWaitingQueue(s.SourceID, s.ID)
 		go HookPlayDoneEvent(s)
 

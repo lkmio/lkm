@@ -132,12 +132,12 @@ func (s *Sink) StartStreaming(transStream stream.TransStream) error {
 }
 
 func (s *Sink) Close() {
+	s.BaseSink.Close()
+
 	if s.peer != nil {
 		s.peer.Close()
 		s.peer = nil
 	}
-
-	s.BaseSink.Close()
 }
 
 func (s *Sink) Write(index int, data [][]byte, ts int64) error {

@@ -45,7 +45,7 @@ type Source interface {
 	// 匹配拉流期望的编码器, 创建TransStream或向已经存在TransStream添加Sink
 	AddSink(sink Sink)
 
-	// RemoveSink 删除Sink
+	// RemoveSink 同步删除Sink
 	RemoveSink(sink Sink)
 
 	RemoveSinkWithID(id SinkID)
@@ -441,18 +441,13 @@ func (s *PublishSource) doAddSink(sink Sink) bool {
 
 	sink.SetTransStreamID(transStreamId)
 
-	err := sink.StartStreaming(transStream)
-	if err != nil {
-		log.Sugar.Errorf("添加sink失败,开始推流发生err: %s sink: %s source: %s ", err.Error(), SinkId2String(sink.GetID()), s.ID)
-		return false
-	}
-
 	{
 		sink.Lock()
 		defer sink.UnLock()
 
 		if SessionStateClosed == sink.GetState() {
 			log.Sugar.Warnf("添加sink失败, sink已经断开连接 %s", sink.String())
+			return false
 		} else {
 			sink.SetState(SessionStateTransferring)
 		}
@@ -467,6 +462,12 @@ func (s *PublishSource) doAddSink(sink Sink) bool {
 	if s.recordSink != sink {
 		s.sinkCount++
 		log.Sugar.Infof("sink count: %d source: %s", s.sinkCount, s.ID)
+	}
+
+	err := sink.StartStreaming(transStream)
+	if err != nil {
+		log.Sugar.Errorf("添加sink失败,开始推流发生err: %s sink: %s source: %s ", err.Error(), SinkId2String(sink.GetID()), s.ID)
+		return false
 	}
 
 	s.sinks[sink.GetID()] = sink
@@ -510,9 +511,16 @@ func (s *PublishSource) AddSink(sink Sink) {
 }
 
 func (s *PublishSource) RemoveSink(sink Sink) {
+	group := sync.WaitGroup{}
+	group.Add(1)
+
 	s.PostEvent(func() {
 		s.doRemoveSink(sink)
+
+		group.Done()
 	})
+
+	group.Wait()
 }
 
 func (s *PublishSource) RemoveSinkWithID(id SinkID) {
