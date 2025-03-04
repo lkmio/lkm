@@ -390,6 +390,7 @@ func (api *ApiServer) OnSourceList(w http.ResponseWriter, r *http.Request) {
 		SinkCount int       `json:"sink_count"` // 播放端计数
 		Bitrate   string    `json:"bitrate"`    // 码率统计
 		Tracks    []string  `json:"tracks"`     // 每路流编码器ID
+		Urls      []string  `json:"urls"`       // 拉流地址
 	}
 
 	var details []SourceDetails
@@ -407,6 +408,7 @@ func (api *ApiServer) OnSourceList(w http.ResponseWriter, r *http.Request) {
 			SinkCount: source.SinkCount(),
 			Bitrate:   strconv.Itoa(source.GetBitrateStatistics().PreviousSecond()/1024) + "KBS", // 后续开发
 			Tracks:    codecs,
+			Urls:      stream.GetStreamPlayUrls(source.GetID()),
 		})
 	}
 
