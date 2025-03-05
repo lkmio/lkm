@@ -5,13 +5,16 @@ import (
 	"github.com/lkmio/avformat/utils"
 )
 
+const (
+	DefaultMBBufferSize = 20
+)
+
 // MergeWritingBuffer 实现针对RTMP/FLV/HLS等基于TCP传输流的合并写缓存
 // 包含多个合并写块, 循环使用, 至少需要等到第二个I帧才开始循环. webrtcI帧间隔可能会高达几十秒,
-// 容量根据write_timeout发送超时和合并写时间来计算, write_timeout/mw_latency.如果I帧间隔大于发送超时时间, 则需要创建新的块.
 type MergeWritingBuffer interface {
 	Allocate(size int, ts int64, videoKey bool) []byte
 
-	// PeekCompletedSegment 返回当前完整切片, 以及是否是关键帧切片, 未满返回nil.
+	// PeekCompletedSegment 返回当前完整切片, 以及是否是关键帧切片, 非完整切片返回nil.
 	PeekCompletedSegment() ([]byte, bool)
 
 	// FlushSegment 生成并返回当前切片, 以及是否是关键帧切片.
@@ -42,7 +45,6 @@ type mwBlock struct {
 
 type mergeWritingBuffer struct {
 	mwBlocks []mwBlock
-
 	index    int   // 当前切片位于mwBlocks的索引
 	startTS  int64 // 当前切片的开始时间
 	duration int   // 当前切片时长
@@ -231,10 +233,9 @@ func (m *mergeWritingBuffer) Capacity() int {
 }
 
 func NewMergeWritingBuffer(existVideo bool) MergeWritingBuffer {
-	// 开启GOP缓存, 输出流也缓存整个GOP
 	var blocks []mwBlock
 	if existVideo {
-		blocks = make([]mwBlock, AppConfig.WriteBufferCapacity)
+		blocks = make([]mwBlock, DefaultMBBufferSize)
 	} else {
 		blocks = make([]mwBlock, 1)
 	}

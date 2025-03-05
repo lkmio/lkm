@@ -31,22 +31,18 @@ type streamBuffer struct {
 	discardHandler     func(packet utils.AVPacket)
 }
 
-func NewStreamBuffer() GOPBuffer {
-	return &streamBuffer{buffer: collections.NewRingBuffer(1000), existVideoKeyFrame: false}
-}
-
 func (s *streamBuffer) AddPacket(packet utils.AVPacket) bool {
-	//缓存满,清空
+	// 缓存满,清空
 	if s.Size()+1 == s.buffer.Capacity() {
 		s.Clear()
 	}
 
-	//丢弃首帧视频非关键帧
+	// 丢弃首帧视频非关键帧
 	if utils.AVMediaTypeVideo == packet.MediaType() && !s.existVideoKeyFrame && !packet.KeyFrame() {
 		return false
 	}
 
-	//丢弃前一组GOP
+	// 丢弃前一组GOP
 	videoKeyFrame := utils.AVMediaTypeVideo == packet.MediaType() && packet.KeyFrame()
 	if videoKeyFrame {
 		if s.existVideoKeyFrame {
@@ -90,18 +86,16 @@ func (s *streamBuffer) Peek(index int) utils.AVPacket {
 func (s *streamBuffer) PeekAll(handler func(packet utils.AVPacket)) {
 	head, tail := s.buffer.Data()
 
-	if head == nil {
-		return
-	}
-	for _, value := range head {
-		handler(value.(utils.AVPacket))
+	if head != nil {
+		for _, value := range head {
+			handler(value.(utils.AVPacket))
+		}
 	}
 
-	if tail == nil {
-		return
-	}
-	for _, value := range tail {
-		handler(value.(utils.AVPacket))
+	if tail != nil {
+		for _, value := range tail {
+			handler(value.(utils.AVPacket))
+		}
 	}
 }
 
@@ -115,4 +109,8 @@ func (s *streamBuffer) Clear() {
 
 func (s *streamBuffer) Close() {
 	s.discardHandler = nil
+}
+
+func NewStreamBuffer() GOPBuffer {
+	return &streamBuffer{buffer: collections.NewRingBuffer(1000), existVideoKeyFrame: false}
 }
