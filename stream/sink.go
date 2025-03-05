@@ -1,12 +1,15 @@
 package stream
 
 import (
+	"context"
 	"fmt"
+	"github.com/lkmio/avformat/transport"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/log"
 	"net"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -84,6 +87,15 @@ type Sink interface {
 	CreateTime() time.Time
 
 	SetCreateTime(time time.Time)
+
+	// EnableAsyncWriteMode 开启异步发送
+	EnableAsyncWriteMode(queueSize int)
+
+	// Pause 暂停推流
+	Pause()
+
+	// IsExited 异步发送协程是否退出, 如果还没有退出(write阻塞)不恢复推流
+	IsExited() bool
 }
 
 type BaseSink struct {
@@ -106,6 +118,11 @@ type BaseSink struct {
 	SentPacketCount int  // 发包计数
 	Ready           bool // 是否准备好推流. Sink可以通过控制该变量, 达到触发Source推流, 但不立即拉流的目的. 比如rtsp拉流端在信令交互阶段,需要先获取媒体信息,再拉流.
 	createTime      time.Time
+
+	existed          atomic.Bool
+	pendingSendQueue chan []byte // 等待发送的数据队列
+	cancelFunc       func()
+	cancelCtx        context.Context
 }
 
 func (s *BaseSink) GetID() SinkID {
@@ -116,9 +133,52 @@ func (s *BaseSink) SetID(id SinkID) {
 	s.ID = id
 }
 
+func (s *BaseSink) doAsyncWrite() {
+	for {
+		select {
+		case <-s.cancelCtx.Done():
+			return
+		case data := <-s.pendingSendQueue:
+			s.Conn.Write(data)
+			break
+		}
+	}
+
+	s.existed.Store(true)
+}
+
+func (s *BaseSink) EnableAsyncWriteMode(queueSize int) {
+	utils.Assert(s.Conn != nil)
+	s.existed.Store(false)
+	s.pendingSendQueue = make(chan []byte, queueSize)
+	s.cancelCtx, s.cancelFunc = context.WithCancel(context.Background())
+	go s.doAsyncWrite()
+}
+
+func (s *BaseSink) Pause() {
+	if s.cancelCtx != nil {
+		s.cancelFunc()
+	}
+}
+
+func (s *BaseSink) IsExited() bool {
+	return s.existed.Load()
+}
+
 func (s *BaseSink) Write(index int, data [][]byte, ts int64) error {
-	if s.Conn != nil {
-		for _, bytes := range data {
+	if s.Conn == nil {
+		return nil
+	}
+
+	for _, bytes := range data {
+		if s.cancelCtx != nil {
+			select {
+			case s.pendingSendQueue <- bytes:
+				break
+			default:
+				return transport.ZeroWindowSizeError{}
+			}
+		} else {
 			_, err := s.Conn.Write(bytes)
 			if err != nil {
 				return err

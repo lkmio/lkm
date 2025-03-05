@@ -154,6 +154,7 @@ type PublishSource struct {
 
 	TransStreams         map[TransStreamID]TransStream     // 所有的输出流, 持有Sink
 	sinks                map[SinkID]Sink                   // 保存所有Sink
+	slowSinks            map[SinkID]Sink                   // 因推流慢被挂起的sink队列
 	TransStreamSinks     map[TransStreamID]map[SinkID]Sink // 输出流对应的Sink
 	streamEndInfo        *StreamEndInfo                    // 之前推流源信息
 	accumulateTimestamps bool                              // 是否累加时间戳
@@ -216,6 +217,7 @@ func (s *PublishSource) Init(receiveQueueSize int) {
 
 	s.TransStreams = make(map[TransStreamID]TransStream, 10)
 	s.sinks = make(map[SinkID]Sink, 128)
+	s.slowSinks = make(map[SinkID]Sink, 12)
 	s.TransStreamSinks = make(map[TransStreamID]map[SinkID]Sink, len(transStreamFactories)+1)
 	s.statistics = NewBitrateStatistics()
 }
@@ -375,8 +377,33 @@ func (s *PublishSource) write(sink Sink, index int, data [][]byte, timestamp int
 	// 直接关闭连接. 当然也可以将sink先挂起, 后续再继续推流.
 	_, ok := err.(*transport.ZeroWindowSizeError)
 	if ok {
-		log.Sugar.Errorf("向sink推流超时,关闭连接. sink: %s", sink.GetID())
-		go sink.Close()
+		if s.existVideo {
+			log.Sugar.Errorf("向sink推流超时,挂起%s-sink: %s source: %s", sink.GetProtocol().String(), sink.GetID(), s.ID)
+			// 等待下个关键帧恢复推流
+			s.PauseStreaming(sink)
+		} else {
+			log.Sugar.Errorf("向sink推流超时,关闭连接. %s-sink: %s source: %s", sink.GetProtocol().String(), sink.GetID(), s.ID)
+			go sink.Close()
+		}
+	}
+}
+
+func (s *PublishSource) PauseStreaming(sink Sink) {
+	s.cleanupSinkStreaming(sink)
+	s.slowSinks[sink.GetID()] = sink
+}
+
+func (s *PublishSource) ResumeStreaming() {
+	for id, sink := range s.sinks {
+		if !sink.IsExited() {
+			continue
+		}
+
+		delete(s.slowSinks, id)
+		ok := s.doAddSink(sink)
+		if ok {
+			go sink.Close()
+		}
 	}
 }
 
@@ -474,9 +501,11 @@ func (s *PublishSource) doAddSink(sink Sink) bool {
 	s.TransStreamSinks[transStreamId][sink.GetID()] = sink
 
 	// TCP拉流开启异步发包, 一旦出现网络不好的链路, 其余正常链路不受影响.
-	conn, ok := sink.GetConn().(*transport.Conn)
+	_, ok := sink.GetConn().(*transport.Conn)
 	if ok && sink.IsTCPStreaming() && transStream.OutStreamBufferCapacity() > 2 {
-		conn.EnableAsyncWriteMode(transStream.OutStreamBufferCapacity() - 2)
+		length := transStream.OutStreamBufferCapacity() - 2
+		fmt.Printf("发送缓冲区容量: %d\r\n", length)
+		sink.EnableAsyncWriteMode(length)
 	}
 
 	// 发送已有的缓存数据
@@ -550,15 +579,10 @@ func (s *PublishSource) FindSink(id SinkID) Sink {
 	return result
 }
 
-func (s *PublishSource) doRemoveSink(sink Sink) bool {
+func (s *PublishSource) cleanupSinkStreaming(sink Sink) {
 	transStreamSinks := s.TransStreamSinks[sink.GetTransStreamID()]
-	delete(s.sinks, sink.GetID())
 	delete(transStreamSinks, sink.GetID())
-
-	s.sinkCount--
 	s.lastStreamEndTime = time.Now()
-
-	log.Sugar.Infof("sink count: %d source: %s", s.sinkCount, s.ID)
 
 	if sink.GetProtocol() == TransStreamHls {
 		// 从HLS拉流队列删除Sink
@@ -566,6 +590,16 @@ func (s *PublishSource) doRemoveSink(sink Sink) bool {
 	}
 
 	sink.StopStreaming(s.TransStreams[sink.GetTransStreamID()])
+}
+
+func (s *PublishSource) doRemoveSink(sink Sink) bool {
+	s.cleanupSinkStreaming(sink)
+	delete(s.sinks, sink.GetID())
+	delete(s.slowSinks, sink.GetID())
+
+	s.sinkCount--
+	log.Sugar.Infof("sink count: %d source: %s", s.sinkCount, s.ID)
+
 	HookPlayDoneEvent(sink)
 	return true
 }
@@ -846,6 +880,11 @@ func (s *PublishSource) OnDeMuxPacket(packet utils.AVPacket) {
 	// 保存到GOP缓存
 	if AppConfig.GOPCache && s.existVideo {
 		s.gopBuffer.AddPacket(packet)
+	}
+
+	// 遇到关键帧, 恢复推流
+	if utils.AVMediaTypeVideo == packet.MediaType() && packet.KeyFrame() && len(s.slowSinks) > 0 {
+		s.ResumeStreaming()
 	}
 
 	// track解析完毕后，才能生成传输流
