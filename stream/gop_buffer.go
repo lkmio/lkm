@@ -12,65 +12,34 @@ type GOPBuffer interface {
 	// AddPacket Return bool 缓存帧是否成功, 如果首帧非关键帧, 缓存失败
 	AddPacket(packet *avformat.AVPacket) bool
 
-	// SetDiscardHandler 设置丢弃帧时的回调
-	SetDiscardHandler(handler func(packet *avformat.AVPacket))
-
 	PeekAll(handler func(packet *avformat.AVPacket))
 
 	Peek(index int) *avformat.AVPacket
 
+	PopAll(handler func(packet *avformat.AVPacket))
+
+	RequiresClear(nextPacket *avformat.AVPacket) bool
+
 	Size() int
-
-	Clear()
-
-	Close()
 }
 
 type streamBuffer struct {
-	buffer             collections.RingBuffer[*avformat.AVPacket]
-	existVideoKeyFrame bool
-	discardHandler     func(packet *avformat.AVPacket)
+	buffer           collections.RingBuffer[*avformat.AVPacket]
+	hasVideoKeyFrame bool
 }
 
 func (s *streamBuffer) AddPacket(packet *avformat.AVPacket) bool {
-	// 缓存满,清空
-	if s.Size()+1 == s.buffer.Capacity() {
-		s.Clear()
-	}
-
-	// 丢弃首帧视频非关键帧
-	if utils.AVMediaTypeVideo == packet.MediaType && !s.existVideoKeyFrame && !packet.Key {
-		return false
-	}
-
-	// 丢弃前一组GOP
-	videoKeyFrame := utils.AVMediaTypeVideo == packet.MediaType && packet.Key
-	if videoKeyFrame {
-		if s.existVideoKeyFrame {
-			s.discard()
+	if utils.AVMediaTypeVideo == packet.MediaType {
+		if packet.Key {
+			s.hasVideoKeyFrame = true
+		} else if !s.hasVideoKeyFrame {
+			// 丢弃首帧视频非关键帧
+			return false
 		}
-
-		s.existVideoKeyFrame = true
 	}
 
 	s.buffer.Push(packet)
 	return true
-}
-
-func (s *streamBuffer) SetDiscardHandler(handler func(packet *avformat.AVPacket)) {
-	s.discardHandler = handler
-}
-
-func (s *streamBuffer) discard() {
-	for s.buffer.Size() > 0 {
-		pkt := s.buffer.Pop()
-
-		if s.discardHandler != nil {
-			s.discardHandler(pkt)
-		}
-	}
-
-	s.existVideoKeyFrame = false
 }
 
 func (s *streamBuffer) Peek(index int) *avformat.AVPacket {
@@ -104,14 +73,19 @@ func (s *streamBuffer) Size() int {
 	return s.buffer.Size()
 }
 
-func (s *streamBuffer) Clear() {
-	s.discard()
+func (s *streamBuffer) PopAll(handler func(packet *avformat.AVPacket)) {
+	for s.buffer.Size() > 0 {
+		pkt := s.buffer.Pop()
+		handler(pkt)
+	}
+
+	s.hasVideoKeyFrame = false
 }
 
-func (s *streamBuffer) Close() {
-	s.discardHandler = nil
+func (s *streamBuffer) RequiresClear(nextPacket *avformat.AVPacket) bool {
+	return s.Size()+1 == s.buffer.Capacity() || (s.hasVideoKeyFrame && utils.AVMediaTypeVideo == nextPacket.MediaType && nextPacket.Key)
 }
 
 func NewStreamBuffer() GOPBuffer {
-	return &streamBuffer{buffer: collections.NewRingBuffer[*avformat.AVPacket](1000), existVideoKeyFrame: false}
+	return &streamBuffer{buffer: collections.NewRingBuffer[*avformat.AVPacket](1000), hasVideoKeyFrame: false}
 }
