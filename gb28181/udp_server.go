@@ -1,9 +1,9 @@
 package gb28181
 
 import (
-	"github.com/lkmio/avformat/transport"
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
+	"github.com/lkmio/transport"
 	"github.com/pion/rtp"
 	"net"
 	"runtime"
@@ -64,7 +64,7 @@ func NewUDPServer(filter Filter) (*UDPServer, error) {
 	var udp *transport.UDPServer
 	var err error
 	if stream.AppConfig.GB28181.IsMultiPort() {
-		udp, err = TransportManger.NewUDPServer(stream.AppConfig.ListenIP)
+		udp, err = TransportManger.NewUDPServer()
 		if err != nil {
 			return nil, err
 		}

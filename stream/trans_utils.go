@@ -57,7 +57,7 @@ func GenerateTransStreamID(protocol TransStreamProtocol, tracks ...*Track) Trans
 	streamId = uint64(protocol) << 56
 
 	for i, track := range tracks {
-		id, ok := narrowCodecIds[int(track.Stream.CodecId())]
+		id, ok := narrowCodecIds[int(track.Stream.CodecID)]
 		utils.Assert(ok)
 
 		streamId |= uint64(id) << (48 - i*8)

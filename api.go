@@ -43,7 +43,7 @@ func init() {
 
 func filterSourceID(f func(sourceId string, w http.ResponseWriter, req *http.Request), suffix string) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, req *http.Request) {
-		source, err := stream.Path2SourceId(req.URL.Path, suffix)
+		source, err := stream.Path2SourceID(req.URL.Path, suffix)
 		if err != nil {
 			log.Sugar.Errorf("拉流失败 解析流id发生err: %s path: %s", err.Error(), req.URL.Path)
 			httpResponse(w, http.StatusBadRequest, err.Error())
@@ -398,7 +398,7 @@ func (api *ApiServer) OnSourceList(w http.ResponseWriter, r *http.Request) {
 		var codecs []string
 		tracks := source.OriginTracks()
 		for _, track := range tracks {
-			codecs = append(codecs, track.Stream.CodecId().String())
+			codecs = append(codecs, track.Stream.CodecID.String())
 		}
 
 		details = append(details, SourceDetails{

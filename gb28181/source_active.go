@@ -1,6 +1,7 @@
 package gb28181
 
 import (
+	"github.com/lkmio/transport"
 	"net"
 )
 
@@ -12,8 +13,8 @@ type ActiveSource struct {
 	tcp        *TCPClient
 }
 
-func (a ActiveSource) Connect(remoteAddr *net.TCPAddr) error {
-	client, err := NewTCPClient(a.port, remoteAddr, &a)
+func (a *ActiveSource) Connect(remoteAddr *net.TCPAddr) error {
+	client, err := NewTCPClient(a.port, remoteAddr, a)
 	if err != nil {
 		return err
 	}
@@ -22,7 +23,7 @@ func (a ActiveSource) Connect(remoteAddr *net.TCPAddr) error {
 	return nil
 }
 
-func (a ActiveSource) SetupType() SetupType {
+func (a *ActiveSource) SetupType() SetupType {
 	return SetupActive
 }
 
@@ -33,5 +34,10 @@ func NewActiveSource() (*ActiveSource, int, error) {
 		return nil
 	})
 
-	return &ActiveSource{port: port}, port, nil
+	return &ActiveSource{
+		PassiveSource: PassiveSource{
+			decoder: transport.NewLengthFieldFrameDecoder(0xFFFF, 2),
+		},
+		port: port,
+	}, port, nil
 }

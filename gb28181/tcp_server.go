@@ -1,9 +1,10 @@
 package gb28181
 
 import (
-	"github.com/lkmio/avformat/transport"
+	"encoding/hex"
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
+	"github.com/lkmio/transport"
 	"net"
 	"runtime"
 )
@@ -49,11 +50,16 @@ func (T *TCPServer) OnPacket(conn net.Conn, data []byte) []byte {
 
 	// 单端口推流时, 先解析出SSRC找到GBSource. 后序将推流数据交给stream.Source处理
 	if session.source == nil {
-		if err := session.decoder.Input(data); err != nil {
-			log.Sugar.Errorf("解析粘包数据失败 err: %s", err.Error())
-			conn.Close()
+		source, err := DecodeGBRTPOverTCPPacket(data, nil, session.decoder, T.filter, conn)
+		if err != nil {
+			log.Sugar.Errorf("解析rtp失败 err: %s conn: %s data: %s", err.Error(), conn.RemoteAddr().String(), hex.EncodeToString(data))
+			_ = conn.Close()
+			return nil
 		}
 
+		if source != nil {
+			session.Init(source)
+		}
 	} else {
 		// 将流交给Source的主协程处理，主协程最终会调用PassiveSource的Input函数处理
 		if session.source.SetupType() == SetupPassive {
@@ -80,7 +86,7 @@ func NewTCPServer(filter Filter) (*TCPServer, error) {
 	var err error
 	if stream.AppConfig.GB28181.IsMultiPort() {
 		tcp = &transport.TCPServer{}
-		tcp, err = TransportManger.NewTCPServer(stream.AppConfig.ListenIP)
+		tcp, err = TransportManger.NewTCPServer()
 		if err != nil {
 			return nil, err
 		}

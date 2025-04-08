@@ -1,16 +1,16 @@
 package rtmp
 
 import (
-	"github.com/lkmio/avformat/librtmp"
-	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/avformat"
 	"github.com/lkmio/lkm/stream"
+	"github.com/lkmio/rtmp"
 	"net"
 	"testing"
 )
 
-func CreateTransStream(source stream.Source, protocol stream.TransStreamProtocol, streams []utils.AVStream) stream.TransStream {
+func CreateTransStream(source stream.Source, protocol stream.TransStreamProtocol, streams []*avformat.AVStream) stream.TransStream {
 	if stream.TransStreamRtmp == protocol {
-		return NewTransStream(librtmp.ChunkSize)
+		return NewTransStream(rtmp.MaxChunkSize, nil)
 	}
 
 	return nil

@@ -42,7 +42,7 @@ func (s *Sink) StartStreaming(transStream stream.TransStream) error {
 	for index, track := range tracks {
 		var mimeType string
 		var id string
-		codecId := track.Stream.CodecId()
+		codecId := track.Stream.CodecID
 		if utils.AVCodecIdH264 == codecId {
 			mimeType = webrtc.MimeTypeH264
 		} else if utils.AVCodecIdH265 == codecId {
@@ -64,7 +64,7 @@ func (s *Sink) StartStreaming(transStream stream.TransStream) error {
 			continue
 		}
 
-		if utils.AVMediaTypeAudio == track.Stream.Type() {
+		if utils.AVMediaTypeAudio == track.Stream.MediaType {
 			id = "audio"
 		} else {
 			id = "video"

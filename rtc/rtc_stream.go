@@ -1,6 +1,7 @@
 package rtc
 
 import (
+	"github.com/lkmio/avformat"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/stream"
 	"github.com/pion/interceptor"
@@ -16,21 +17,23 @@ type transStream struct {
 	stream.BaseTransStream
 }
 
-func (t *transStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, error) {
+func (t *transStream) Input(packet *avformat.AVPacket) ([][]byte, int64, bool, error) {
 	t.ClearOutStreamBuffer()
 
-	if utils.AVMediaTypeAudio == packet.MediaType() {
-		t.AppendOutStreamBuffer(packet.Data())
-	} else if utils.AVMediaTypeVideo == packet.MediaType() {
-		if packet.KeyFrame() {
-			extra := t.BaseTransStream.Tracks[packet.Index()].Stream.CodecParameters().AnnexBExtraData()
+	if utils.AVMediaTypeAudio == packet.MediaType {
+		t.AppendOutStreamBuffer(packet.Data)
+	} else if utils.AVMediaTypeVideo == packet.MediaType {
+		avStream := t.BaseTransStream.Tracks[packet.Index].Stream
+		if packet.Key {
+			extra := avStream.CodecParameters.AnnexBExtraData()
 			t.AppendOutStreamBuffer(extra)
 		}
 
-		t.AppendOutStreamBuffer(packet.AnnexBPacketData(t.BaseTransStream.Tracks[packet.Index()].Stream))
+		data := avformat.AVCCPacket2AnnexB(avStream, packet)
+		t.AppendOutStreamBuffer(data)
 	}
 
-	return t.OutBuffer[:t.OutBufferSize], int64(uint32(packet.Duration(1000))), utils.AVMediaTypeVideo == packet.MediaType() && packet.KeyFrame(), nil
+	return t.OutBuffer[:t.OutBufferSize], int64(uint32(packet.GetDuration(1000))), utils.AVMediaTypeVideo == packet.MediaType && packet.Key, nil
 }
 
 func (t *transStream) WriteHeader() error {

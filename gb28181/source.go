@@ -2,11 +2,12 @@ package gb28181
 
 import (
 	"fmt"
-	"github.com/lkmio/avformat/libmpeg"
-	"github.com/lkmio/avformat/transport"
+	"github.com/lkmio/avformat"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
+	"github.com/lkmio/mpeg"
+	"github.com/lkmio/transport"
 	"github.com/pion/rtp"
 	"math"
 	"net"
@@ -49,12 +50,10 @@ type GBSource interface {
 type BaseGBSource struct {
 	stream.PublishSource
 
-	deMuxerCtx  *libmpeg.PSDeMuxerContext
-	audioStream utils.AVStream
-	videoStream utils.AVStream
+	probeBuffer *mpeg.PSProbeBuffer
 
 	ssrc      uint32
-	transport transport.ITransport
+	transport transport.Transport
 
 	audioTimestamp         int64
 	videoTimestamp         int64
@@ -64,9 +63,13 @@ type BaseGBSource struct {
 }
 
 func (source *BaseGBSource) Init(receiveQueueSize int) {
-	source.deMuxerCtx = libmpeg.NewPSDeMuxerContext(make([]byte, PsProbeBufferSize))
-	source.deMuxerCtx.SetHandler(source)
+	source.TransDemuxer = mpeg.NewPSDemuxer(false)
+	source.TransDemuxer.SetHandler(source)
+	source.TransDemuxer.SetOnPreprocessPacketHandler(func(packet *avformat.AVPacket) {
+		source.correctTimestamp(packet, packet.Dts, packet.Pts)
+	})
 	source.SetType(stream.SourceType28181)
+	source.probeBuffer = mpeg.NewProbeBuffer(PsProbeBufferSize)
 	source.PublishSource.Init(receiveQueueSize)
 }
 
@@ -85,7 +88,14 @@ func (source *BaseGBSource) Input(data []byte) error {
 
 	packet := rtp.Packet{}
 	_ = packet.Unmarshal(data)
-	err := source.deMuxerCtx.Input(packet.Payload)
+
+	var bytes []byte
+	var n int
+	var err error
+	bytes, err = source.probeBuffer.Input(packet.Payload)
+	if err == nil {
+		n, err = source.TransDemuxer.Input(bytes)
+	}
 
 	// 非解析缓冲区满的错误, 继续解析
 	if err != nil {
@@ -94,94 +104,25 @@ func (source *BaseGBSource) Input(data []byte) error {
 			return err
 		}
 	}
-	return nil
-}
 
-// OnPartPacket 部分es流回调
-func (source *BaseGBSource) OnPartPacket(index int, mediaType utils.AVMediaType, codec utils.AVCodecID, data []byte, first bool) {
-	buffer := source.FindOrCreatePacketBuffer(index, mediaType)
-
-	// 第一个es包, 标记内存起始位置
-	if first {
-		buffer.Mark()
-	}
-
-	buffer.Write(data)
-}
-
-// OnLossPacket 非完整es包丢弃回调, 直接释放内存块
-func (source *BaseGBSource) OnLossPacket(index int, mediaType utils.AVMediaType, codec utils.AVCodecID) {
-	buffer := source.FindOrCreatePacketBuffer(index, mediaType)
-
-	buffer.Fetch()
-	buffer.FreeTail()
-}
-
-// OnCompletePacket 完整帧回调
-func (source *BaseGBSource) OnCompletePacket(index int, mediaType utils.AVMediaType, codec utils.AVCodecID, dts int64, pts int64, key bool) error {
-	buffer := source.FindOrCreatePacketBuffer(index, mediaType)
-	data := buffer.Fetch()
-
-	var packet utils.AVPacket
-	var stream_ utils.AVStream
-	var err error
-
-	defer func() {
-		if packet == nil {
-			buffer.FreeTail()
-		}
-	}()
-
-	if utils.AVMediaTypeAudio == mediaType {
-		stream_, packet, err = stream.ExtractAudioPacket(codec, source.audioStream == nil, data, pts, dts, index, 90000)
-		if err != nil {
-			return err
-		}
-
-		if stream_ != nil {
-			source.audioStream = stream_
-		}
-	} else {
-		if source.videoStream == nil && !key {
-			log.Sugar.Errorf("skip non keyframes conn:%s", source.Conn.RemoteAddr())
-			return nil
-		}
-
-		stream_, packet, err = stream.ExtractVideoPacket(codec, key, source.videoStream == nil, data, pts, dts, index, 90000)
-		if err != nil {
-			return err
-		}
-		if stream_ != nil {
-			source.videoStream = stream_
-		}
-	}
-
-	if stream_ != nil {
-		source.OnDeMuxStream(stream_)
-		if len(source.OriginTracks()) >= source.deMuxerCtx.TrackCount() {
-			source.OnDeMuxStreamDone()
-		}
-	}
-
-	source.correctTimestamp(packet, dts, pts)
-	source.OnDeMuxPacket(packet)
+	source.probeBuffer.Reset(n)
 	return nil
 }
 
 // 纠正国标推流的时间戳
-func (source *BaseGBSource) correctTimestamp(packet utils.AVPacket, dts, pts int64) {
+func (source *BaseGBSource) correctTimestamp(packet *avformat.AVPacket, dts, pts int64) {
 	// dts和pts保持一致
 	pts = int64(math.Max(float64(dts), float64(pts)))
 	dts = pts
-	packet.SetPts(pts)
-	packet.SetDts(dts)
+	packet.Pts = pts
+	packet.Dts = dts
 
 	var lastTimestamp int64
 	var lastCreatedTime int64
-	if utils.AVMediaTypeAudio == packet.MediaType() {
+	if utils.AVMediaTypeAudio == packet.MediaType {
 		lastTimestamp = source.audioTimestamp
 		lastCreatedTime = source.audioPacketCreatedTime
-	} else if utils.AVMediaTypeVideo == packet.MediaType() {
+	} else if utils.AVMediaTypeVideo == packet.MediaType {
 		lastTimestamp = source.videoTimestamp
 		lastCreatedTime = source.videoPacketCreatedTime
 	}
@@ -193,38 +134,38 @@ func (source *BaseGBSource) correctTimestamp(packet utils.AVPacket, dts, pts int
 			duration = 0x1FFFFFFFF - lastTimestamp + pts
 			if duration < 90000 {
 				// 处理正常溢出
-				packet.SetDuration(duration)
+				packet.Duration = duration
 			} else {
 				// 时间戳不正确
-				log.Sugar.Errorf("推流时间戳不正确, 使用系统时钟. ssrc:%d", source.ssrc)
+				log.Sugar.Errorf("推流时间戳不正确, 使用系统时钟. ssrc: %x", source.ssrc)
 				source.isSystemClock = true
 			}
 		} else {
 			duration = pts - lastTimestamp
 		}
 
-		packet.SetDuration(duration)
-		duration = packet.Duration(90000)
+		packet.Duration = duration
+		duration = packet.GetDuration(90000)
 		if duration < 0 || duration < 750 {
-			log.Sugar.Errorf("推流时间戳不正确, 使用系统时钟. ts: %d duration: %d source: %s ssrc: %d", pts, duration, source.ID, source.ssrc)
+			log.Sugar.Errorf("推流时间戳不正确, 使用系统时钟. ts: %d duration: %d source: %s ssrc: %x", pts, duration, source.ID, source.ssrc)
 			source.isSystemClock = true
 		}
 	}
 
 	// 纠正时间戳
 	if source.isSystemClock && lastTimestamp != -1 {
-		duration = (packet.CreatedTime() - lastCreatedTime) * 90
-		packet.SetDts(lastTimestamp + duration)
-		packet.SetPts(lastTimestamp + duration)
-		packet.SetDuration(duration)
+		duration = (packet.CreatedTime - lastCreatedTime) * 90
+		packet.Dts = lastTimestamp + duration
+		packet.Pts = lastTimestamp + duration
+		packet.Duration = duration
 	}
 
-	if utils.AVMediaTypeAudio == packet.MediaType() {
-		source.audioTimestamp = packet.Pts()
-		source.audioPacketCreatedTime = packet.CreatedTime()
-	} else if utils.AVMediaTypeVideo == packet.MediaType() {
-		source.videoTimestamp = packet.Pts()
-		source.videoPacketCreatedTime = packet.CreatedTime()
+	if utils.AVMediaTypeAudio == packet.MediaType {
+		source.audioTimestamp = packet.Pts
+		source.audioPacketCreatedTime = packet.CreatedTime
+	} else if utils.AVMediaTypeVideo == packet.MediaType {
+		source.videoTimestamp = packet.Pts
+		source.videoPacketCreatedTime = packet.CreatedTime
 	}
 }
 
@@ -249,11 +190,6 @@ func (source *BaseGBSource) Close() {
 	}
 
 	source.PublishSource.Close()
-
-	if source.deMuxerCtx != nil {
-		source.deMuxerCtx.Close()
-		source.deMuxerCtx = nil
-	}
 }
 
 func (source *BaseGBSource) SetConn(conn net.Conn) {

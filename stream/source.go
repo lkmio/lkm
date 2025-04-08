@@ -2,16 +2,16 @@ package stream
 
 import (
 	"fmt"
-	"github.com/lkmio/avformat/collections"
-	"github.com/lkmio/avformat/transport"
+	"github.com/lkmio/avformat"
 	"github.com/lkmio/lkm/log"
+	"github.com/lkmio/transport"
 	"net"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/lkmio/avformat/stream"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/transcode"
 )
@@ -64,23 +64,8 @@ type Source interface {
 	// IsCompleted 所有推流track是否解析完毕
 	IsCompleted() bool
 
-	// FindOrCreatePacketBuffer 查找或者创建AVPacket的内存池
-	FindOrCreatePacketBuffer(index int, mediaType utils.AVMediaType) collections.MemoryPool
-
 	// OnDiscardPacket GOP缓存溢出回调, 释放AVPacket
-	OnDiscardPacket(pkt utils.AVPacket)
-
-	// OnDeMuxStream 解析出AVStream回调
-	OnDeMuxStream(stream utils.AVStream)
-
-	// OnDeMuxStreamDone 所有track解析完毕回调, 后续的OnDeMuxStream回调不再处理
-	OnDeMuxStreamDone()
-
-	// OnDeMuxPacket 解析出AvPacket回调
-	OnDeMuxPacket(packet utils.AVPacket)
-
-	// OnDeMuxDone 所有流解析完毕回调
-	OnDeMuxDone()
+	OnDiscardPacket(pkt *avformat.AVPacket)
 
 	Init(receiveQueueSize int)
 
@@ -135,16 +120,16 @@ type PublishSource struct {
 	state SessionState
 	Conn  net.Conn
 
-	TransDeMuxer     stream.DeMuxer            // 负责从推流协议中解析出AVStream和AVPacket
-	recordSink       Sink                      // 每个Source的录制流
-	recordFilePath   string                    // 录制流文件路径
-	hlsStream        TransStream               // HLS传输流, 如果开启, 在@see writeHeader 函数中直接创建, 如果等拉流时再创建, 会进一步加大HLS延迟.
-	audioTranscoders []transcode.Transcoder    // 音频解码器
-	videoTranscoders []transcode.Transcoder    // 视频解码器
-	originTracks     TrackManager              // 推流的音视频Streams
-	allStreamTracks  TrackManager              // 推流Streams+转码器获得的Stream
-	pktBuffers       [8]collections.MemoryPool // 推流每路的AVPacket缓存, AVPacket的data从该内存池中分配. 在GOP缓存溢出时,释放池中内存.
-	gopBuffer        GOPBuffer                 // GOP缓存, 音频和视频混合使用, 以视频关键帧为界, 缓存第二个视频关键帧时, 释放前一组gop. 如果不存在视频流, 不缓存音频
+	TransDemuxer     avformat.Demuxer       // 负责从推流协议中解析出AVStream和AVPacket
+	recordSink       Sink                   // 每个Source的录制流
+	recordFilePath   string                 // 录制流文件路径
+	hlsStream        TransStream            // HLS传输流, 如果开启, 在@see writeHeader 函数中直接创建, 如果等拉流时再创建, 会进一步加大HLS延迟.
+	audioTranscoders []transcode.Transcoder // 音频解码器
+	videoTranscoders []transcode.Transcoder // 视频解码器
+	originTracks     TrackManager           // 推流的音视频Streams
+	allStreamTracks  TrackManager           // 推流Streams+转码器获得的Stream
+	//pktBuffers       [8]collections.MemoryPool // 推流每路的AVPacket缓存, AVPacket的data从该内存池中分配. 在GOP缓存溢出时,释放池中内存.
+	gopBuffer GOPBuffer // GOP缓存, 音频和视频混合使用, 以视频关键帧为界, 缓存第二个视频关键帧时, 释放前一组gop. 如果不存在视频流, 不缓存音频
 
 	closed     atomic.Bool // source是否已经关闭
 	completed  bool        // 所有推流track是否解析完毕, @see writeHeader 函数中赋值为true
@@ -152,7 +137,7 @@ type PublishSource struct {
 
 	probeTimer *time.Timer // track解析超时计时器, 触发时执行@see writeHeader
 
-	TransStreams         map[TransStreamID]TransStream     // 所有的输出流, 持有Sink
+	TransStreams         map[TransStreamID]TransStream     // 所有输出流
 	sinks                map[SinkID]Sink                   // 保存所有Sink
 	slowSinks            map[SinkID]Sink                   // 因推流慢被挂起的sink队列
 	TransStreamSinks     map[TransStreamID]map[SinkID]Sink // 输出流对应的Sink
@@ -169,6 +154,7 @@ type PublishSource struct {
 	urlValues         url.Values         // 推流url携带的参数
 	createTime        time.Time          // source创建时间
 	statistics        *BitrateStatistics // 码流统计
+	streamLogger      avformat.OnUnpackStream2FileHandler
 }
 
 func (s *PublishSource) SetLastPacketTime(time2 time.Time) {
@@ -220,6 +206,17 @@ func (s *PublishSource) Init(receiveQueueSize int) {
 	s.slowSinks = make(map[SinkID]Sink, 12)
 	s.TransStreamSinks = make(map[TransStreamID]map[SinkID]Sink, len(transStreamFactories)+1)
 	s.statistics = NewBitrateStatistics()
+
+	// 此处设置的探测时长, 只是为了保证在probeTimeout触发前, 一直在探测
+	s.TransDemuxer.SetProbeDuration(60000)
+
+	// 启动探测超时计时器
+	s.probeTimer = time.AfterFunc(time.Duration(AppConfig.ProbeTimeout)*time.Millisecond, func() {
+		s.PostEvent(func() {
+			// s.writeHeader()
+			s.TransDemuxer.ProbeComplete()
+		})
+	})
 }
 
 func (s *PublishSource) CreateDefaultOutStreams() {
@@ -253,28 +250,6 @@ func (s *PublishSource) CreateDefaultOutStreams() {
 		s.hlsStream = hlsStream
 		s.TransStreams[id] = s.hlsStream
 	}
-}
-
-// FindOrCreatePacketBuffer 查找或者创建AVPacket的内存池
-func (s *PublishSource) FindOrCreatePacketBuffer(index int, mediaType utils.AVMediaType) collections.MemoryPool {
-	if index >= cap(s.pktBuffers) {
-		panic("流路数过多...")
-	}
-
-	if s.pktBuffers[index] == nil {
-		if utils.AVMediaTypeAudio == mediaType {
-			s.pktBuffers[index] = collections.NewRbMemoryPool(48000 * 12)
-		} else if AppConfig.GOPCache {
-			// 开启GOP缓存
-			s.pktBuffers[index] = collections.NewRbMemoryPool(AppConfig.GOPBufferSize)
-		} else {
-			// 未开启GOP缓存
-			// 1M缓存大小, 单帧绰绰有余
-			s.pktBuffers[index] = collections.NewRbMemoryPool(1024 * 1000)
-		}
-	}
-
-	return s.pktBuffers[index]
 }
 
 func (s *PublishSource) Input(data []byte) error {
@@ -328,20 +303,20 @@ func (s *PublishSource) CreateTransStream(id TransStreamID, protocol TransStream
 
 func (s *PublishSource) DispatchGOPBuffer(transStream TransStream) {
 	if s.gopBuffer != nil {
-		s.gopBuffer.PeekAll(func(packet utils.AVPacket) {
+		s.gopBuffer.PeekAll(func(packet *avformat.AVPacket) {
 			s.DispatchPacket(transStream, packet)
 		})
 	}
 }
 
 // DispatchPacket 分发AVPacket
-func (s *PublishSource) DispatchPacket(transStream TransStream, packet utils.AVPacket) {
+func (s *PublishSource) DispatchPacket(transStream TransStream, packet *avformat.AVPacket) {
 	data, timestamp, videoKey, err := transStream.Input(packet)
 	if err != nil || len(data) < 1 {
 		return
 	}
 
-	s.DispatchBuffer(transStream, packet.Index(), data, timestamp, videoKey)
+	s.DispatchBuffer(transStream, packet.Index, data, timestamp, videoKey)
 }
 
 // DispatchBuffer 分发传输流
@@ -427,26 +402,26 @@ func (s *PublishSource) doAddSink(sink Sink) bool {
 	}
 
 	if !disableAudio && utils.AVCodecIdNONE == audioCodecId {
-		audioCodecId = audioTrack.Stream.CodecId()
+		audioCodecId = audioTrack.Stream.CodecID
 	}
 	if !disableVideo && utils.AVCodecIdNONE == videoCodecId {
-		videoCodecId = videoTrack.Stream.CodecId()
+		videoCodecId = videoTrack.Stream.CodecID
 	}
 
 	// 创建音频转码器
-	if !disableAudio && audioCodecId != audioTrack.Stream.CodecId() {
+	if !disableAudio && audioCodecId != audioTrack.Stream.CodecID {
 		utils.Assert(false)
 	}
 
 	// 创建视频转码器
-	if !disableVideo && videoCodecId != videoTrack.Stream.CodecId() {
+	if !disableVideo && videoCodecId != videoTrack.Stream.CodecID {
 		utils.Assert(false)
 	}
 
 	// 查找传输流需要的所有track
 	var tracks []*Track
 	for _, track := range s.originTracks.All() {
-		if disableVideo && track.Stream.Type() == utils.AVMediaTypeVideo {
+		if disableVideo && track.Stream.MediaType == utils.AVMediaTypeVideo {
 			continue
 		}
 
@@ -504,7 +479,6 @@ func (s *PublishSource) doAddSink(sink Sink) bool {
 	_, ok := sink.GetConn().(*transport.Conn)
 	if ok && sink.IsTCPStreaming() && transStream.OutStreamBufferCapacity() > 2 {
 		length := transStream.OutStreamBufferCapacity() - 2
-		fmt.Printf("发送缓冲区容量: %d\r\n", length)
 		sink.EnableAsyncWriteMode(length)
 	}
 
@@ -617,17 +591,17 @@ func (s *PublishSource) DoClose() {
 
 	s.closed.Store(true)
 
-	if s.TransDeMuxer != nil {
-		s.TransDeMuxer.Close()
-		s.TransDeMuxer = nil
+	if s.TransDemuxer != nil {
+		s.TransDemuxer.Close()
+		s.TransDemuxer = nil
 	}
 
 	// 清空未写完的buffer
-	for _, buffer := range s.pktBuffers {
-		if buffer != nil {
-			buffer.Reset()
-		}
-	}
+	//for _, buffer := range s.pktBuffers {
+	//	if buffer != nil {
+	//		buffer.Reset()
+	//	}
+	//}
 
 	// 释放GOP缓存
 	if s.gopBuffer != nil {
@@ -735,40 +709,9 @@ func (s *PublishSource) Close() {
 }
 
 // OnDiscardPacket GOP缓存溢出丢弃回调
-func (s *PublishSource) OnDiscardPacket(packet utils.AVPacket) {
-	s.FindOrCreatePacketBuffer(packet.Index(), packet.MediaType()).FreeHead()
-}
-
-func (s *PublishSource) OnDeMuxStream(stream utils.AVStream) {
-	if s.completed {
-		log.Sugar.Warnf("添加%s track失败,已经WriteHeader. source: %s", stream.Type().ToString(), s.ID)
-		return
-	} else if !s.NotTrackAdded(stream.Index()) {
-		log.Sugar.Warnf("添加%s track失败,已经添加索引为%d的track. source: %s", stream.Type().ToString(), stream.Index(), s.ID)
-		return
-	}
-
-	s.originTracks.Add(NewTrack(stream, 0, 0))
-	s.allStreamTracks.Add(NewTrack(stream, 0, 0))
-
-	// 启动track解析超时计时器
-	if len(s.originTracks.All()) == 1 {
-		s.probeTimer = time.AfterFunc(time.Duration(AppConfig.ProbeTimeout)*time.Millisecond, func() {
-			s.PostEvent(func() {
-				s.writeHeader()
-			})
-		})
-	}
-
-	if utils.AVMediaTypeVideo == stream.Type() {
-		s.existVideo = true
-	}
-
-	// 创建GOPBuffer
-	if AppConfig.GOPCache && s.existVideo && s.gopBuffer == nil {
-		s.gopBuffer = NewStreamBuffer()
-		// 设置GOP缓存溢出回调
-		s.gopBuffer.SetDiscardHandler(s.OnDiscardPacket)
+func (s *PublishSource) OnDiscardPacket(packet *avformat.AVPacket) {
+	if s.TransDemuxer != nil {
+		s.TransDemuxer.DiscardHeadPacket(packet.BufferIndex)
 	}
 }
 
@@ -797,7 +740,7 @@ func (s *PublishSource) writeHeader() {
 		// 恢复每路track的时间戳
 		tracks := s.originTracks.All()
 		for _, track := range tracks {
-			timestamps := streamInfo.Timestamps[track.Stream.CodecId()]
+			timestamps := streamInfo.Timestamps[track.Stream.CodecID]
 			track.Dts = timestamps[0]
 			track.Pts = timestamps[1]
 		}
@@ -805,7 +748,7 @@ func (s *PublishSource) writeHeader() {
 
 	// 纠正GOP中的时间戳
 	if s.gopBuffer != nil && s.gopBuffer.Size() != 0 {
-		s.gopBuffer.PeekAll(func(packet utils.AVPacket) {
+		s.gopBuffer.PeekAll(func(packet *avformat.AVPacket) {
 			s.CorrectTimestamp(packet)
 		})
 	}
@@ -833,7 +776,7 @@ func (s *PublishSource) IsCompleted() bool {
 // NotTrackAdded 返回该index对应的track是否没有添加
 func (s *PublishSource) NotTrackAdded(index int) bool {
 	for _, track := range s.originTracks.All() {
-		if track.Stream.Index() == index {
+		if track.Stream.Index == index {
 			return false
 		}
 	}
@@ -841,39 +784,84 @@ func (s *PublishSource) NotTrackAdded(index int) bool {
 	return true
 }
 
-func (s *PublishSource) OnDeMuxStreamDone() {
-	s.writeHeader()
-}
-
-func (s *PublishSource) CorrectTimestamp(packet utils.AVPacket) {
+func (s *PublishSource) CorrectTimestamp(packet *avformat.AVPacket) {
 	// 对比第一包的时间戳和上次推流的最后时间戳。如果小于上次的推流时间戳，则在原来的基础上累加。
 	if s.streamEndInfo != nil && !s.timestampModeDecided {
 		s.timestampModeDecided = true
 
-		timestamps := s.streamEndInfo.Timestamps[packet.CodecId()]
+		timestamps := s.streamEndInfo.Timestamps[packet.CodecID]
 		s.accumulateTimestamps = true
 		log.Sugar.Infof("累加时间戳 上次推流dts: %d, pts: %d", timestamps[0], timestamps[1])
 	}
 
-	track := s.originTracks.Find(packet.CodecId())
-	duration := packet.Duration(packet.Timebase())
+	track := s.originTracks.Find(packet.CodecID)
+	duration := packet.GetDuration(packet.Timebase)
 
 	// 根据duration来累加时间戳
 	if s.accumulateTimestamps {
-		offset := packet.Pts() - packet.Dts()
-		packet.SetDts(track.Dts + duration)
-		packet.SetPts(packet.Dts() + offset)
+		offset := packet.Pts - packet.Dts
+		packet.Dts = track.Dts + duration
+		packet.Pts = packet.Dts + offset
 	}
 
-	track.Dts = packet.Dts()
-	track.Pts = packet.Pts()
+	track.Dts = packet.Dts
+	track.Pts = packet.Pts
 	track.FrameDuration = int(duration)
 }
 
-func (s *PublishSource) OnDeMuxPacket(packet utils.AVPacket) {
+func (s *PublishSource) OnNewTrack(track avformat.Track) {
+	if AppConfig.Debug {
+		s.streamLogger.Path = "dump/" + strings.ReplaceAll(s.ID, "/", "_")
+		s.streamLogger.OnNewTrack(track)
+	}
+
+	stream := track.GetStream()
+
+	if s.completed {
+		log.Sugar.Warnf("添加%s track失败,已经WriteHeader. source: %s", stream.MediaType, s.ID)
+		return
+	} else if !s.NotTrackAdded(stream.Index) {
+		log.Sugar.Warnf("添加%s track失败,已经添加索引为%d的track. source: %s", stream.MediaType, stream.Index, s.ID)
+		return
+	}
+
+	s.originTracks.Add(NewTrack(stream, 0, 0))
+	s.allStreamTracks.Add(NewTrack(stream, 0, 0))
+
+	if utils.AVMediaTypeVideo == stream.MediaType {
+		s.existVideo = true
+	}
+
+	// 创建GOPBuffer
+	if AppConfig.GOPCache && s.existVideo && s.gopBuffer == nil {
+		s.gopBuffer = NewStreamBuffer()
+		// 设置GOP缓存溢出回调
+		s.gopBuffer.SetDiscardHandler(s.OnDiscardPacket)
+	}
+}
+
+func (s *PublishSource) OnTrackComplete() {
+	if AppConfig.Debug {
+		s.streamLogger.OnTrackComplete()
+	}
+
+	s.writeHeader()
+}
+
+func (s *PublishSource) OnTrackNotFind() {
+	if AppConfig.Debug {
+		s.streamLogger.OnTrackNotFind()
+	}
+}
+
+func (s *PublishSource) OnPacket(packet *avformat.AVPacket) {
+	if AppConfig.Debug {
+		s.streamLogger.OnPacket(packet)
+	}
+
 	// track超时，忽略推流数据
-	if s.NotTrackAdded(packet.Index()) {
-		s.FindOrCreatePacketBuffer(packet.Index(), packet.MediaType()).FreeTail()
+	if s.NotTrackAdded(packet.Index) {
+		s.TransDemuxer.DiscardBackPacket(packet.BufferIndex)
 		return
 	}
 
@@ -883,7 +871,7 @@ func (s *PublishSource) OnDeMuxPacket(packet utils.AVPacket) {
 	}
 
 	// 遇到关键帧, 恢复推流
-	if utils.AVMediaTypeVideo == packet.MediaType() && packet.KeyFrame() && len(s.slowSinks) > 0 {
+	if utils.AVMediaTypeVideo == packet.MediaType && packet.Key && len(s.slowSinks) > 0 {
 		s.ResumeStreaming()
 	}
 
@@ -899,12 +887,8 @@ func (s *PublishSource) OnDeMuxPacket(packet utils.AVPacket) {
 
 	// 未开启GOP缓存或只存在音频流, 释放掉内存
 	if !AppConfig.GOPCache || !s.existVideo {
-		s.FindOrCreatePacketBuffer(packet.Index(), packet.MediaType()).FreeTail()
+		s.TransDemuxer.DiscardBackPacket(packet.BufferIndex)
 	}
-}
-
-func (s *PublishSource) OnDeMuxDone() {
-
 }
 
 func (s *PublishSource) GetType() SourceType {

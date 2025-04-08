@@ -6,8 +6,8 @@ import (
 	"net"
 	"runtime"
 
-	"github.com/lkmio/avformat/transport"
 	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/transport"
 )
 
 type Server interface {

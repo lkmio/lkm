@@ -2,16 +2,18 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/lkmio/avformat/transport"
 	"github.com/lkmio/lkm/flv"
-	"github.com/lkmio/lkm/gb28181"
 	"github.com/lkmio/lkm/hls"
 	"github.com/lkmio/lkm/jt1078"
-	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/record"
+	"github.com/lkmio/lkm/rtsp"
+	"github.com/lkmio/transport"
+	"os"
+
+	"github.com/lkmio/lkm/gb28181"
+	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/rtc"
 	"github.com/lkmio/lkm/rtmp"
-	"github.com/lkmio/lkm/rtsp"
 	"github.com/lkmio/lkm/stream"
 	"go.uber.org/zap/zapcore"
 	"net"
@@ -67,11 +69,18 @@ func init() {
 	log.InitLogger(config.Log.FileLogging, zapcore.Level(stream.AppConfig.Log.Level), stream.AppConfig.Log.Name, stream.AppConfig.Log.MaxSize, stream.AppConfig.Log.MaxBackup, stream.AppConfig.Log.MaxAge, stream.AppConfig.Log.Compress)
 
 	if stream.AppConfig.GB28181.Enable && stream.AppConfig.GB28181.IsMultiPort() {
-		gb28181.TransportManger = transport.NewTransportManager(uint16(stream.AppConfig.GB28181.Port[0]), uint16(stream.AppConfig.GB28181.Port[1]))
+		gb28181.TransportManger = transport.NewTransportManager(config.ListenIP, uint16(stream.AppConfig.GB28181.Port[0]), uint16(stream.AppConfig.GB28181.Port[1]))
 	}
 
 	if stream.AppConfig.Rtsp.Enable && stream.AppConfig.Rtsp.IsMultiPort() {
-		rtsp.TransportManger = transport.NewTransportManager(uint16(stream.AppConfig.Rtsp.Port[1]), uint16(stream.AppConfig.Rtsp.Port[2]))
+		rtsp.TransportManger = transport.NewTransportManager(config.ListenIP, uint16(stream.AppConfig.Rtsp.Port[1]), uint16(stream.AppConfig.Rtsp.Port[2]))
+	}
+
+	// 创建dump目录
+	if stream.AppConfig.Debug {
+		if err := os.MkdirAll("dump", 0666); err != nil {
+			panic(err)
+		}
 	}
 
 	// 打印配置信息

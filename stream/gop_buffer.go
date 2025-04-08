@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"github.com/lkmio/avformat"
 	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/avformat/utils"
 )
@@ -9,14 +10,14 @@ import (
 type GOPBuffer interface {
 
 	// AddPacket Return bool 缓存帧是否成功, 如果首帧非关键帧, 缓存失败
-	AddPacket(packet utils.AVPacket) bool
+	AddPacket(packet *avformat.AVPacket) bool
 
 	// SetDiscardHandler 设置丢弃帧时的回调
-	SetDiscardHandler(handler func(packet utils.AVPacket))
+	SetDiscardHandler(handler func(packet *avformat.AVPacket))
 
-	PeekAll(handler func(packet utils.AVPacket))
+	PeekAll(handler func(packet *avformat.AVPacket))
 
-	Peek(index int) utils.AVPacket
+	Peek(index int) *avformat.AVPacket
 
 	Size() int
 
@@ -26,24 +27,24 @@ type GOPBuffer interface {
 }
 
 type streamBuffer struct {
-	buffer             collections.RingBuffer
+	buffer             collections.RingBuffer[*avformat.AVPacket]
 	existVideoKeyFrame bool
-	discardHandler     func(packet utils.AVPacket)
+	discardHandler     func(packet *avformat.AVPacket)
 }
 
-func (s *streamBuffer) AddPacket(packet utils.AVPacket) bool {
+func (s *streamBuffer) AddPacket(packet *avformat.AVPacket) bool {
 	// 缓存满,清空
 	if s.Size()+1 == s.buffer.Capacity() {
 		s.Clear()
 	}
 
 	// 丢弃首帧视频非关键帧
-	if utils.AVMediaTypeVideo == packet.MediaType() && !s.existVideoKeyFrame && !packet.KeyFrame() {
+	if utils.AVMediaTypeVideo == packet.MediaType && !s.existVideoKeyFrame && !packet.Key {
 		return false
 	}
 
 	// 丢弃前一组GOP
-	videoKeyFrame := utils.AVMediaTypeVideo == packet.MediaType() && packet.KeyFrame()
+	videoKeyFrame := utils.AVMediaTypeVideo == packet.MediaType && packet.Key
 	if videoKeyFrame {
 		if s.existVideoKeyFrame {
 			s.discard()
@@ -56,7 +57,7 @@ func (s *streamBuffer) AddPacket(packet utils.AVPacket) bool {
 	return true
 }
 
-func (s *streamBuffer) SetDiscardHandler(handler func(packet utils.AVPacket)) {
+func (s *streamBuffer) SetDiscardHandler(handler func(packet *avformat.AVPacket)) {
 	s.discardHandler = handler
 }
 
@@ -65,36 +66,36 @@ func (s *streamBuffer) discard() {
 		pkt := s.buffer.Pop()
 
 		if s.discardHandler != nil {
-			s.discardHandler(pkt.(utils.AVPacket))
+			s.discardHandler(pkt)
 		}
 	}
 
 	s.existVideoKeyFrame = false
 }
 
-func (s *streamBuffer) Peek(index int) utils.AVPacket {
+func (s *streamBuffer) Peek(index int) *avformat.AVPacket {
 	utils.Assert(index < s.buffer.Size())
 	head, tail := s.buffer.Data()
 
 	if index < len(head) {
-		return head[index].(utils.AVPacket)
+		return head[index]
 	} else {
-		return tail[index-len(head)].(utils.AVPacket)
+		return tail[index-len(head)]
 	}
 }
 
-func (s *streamBuffer) PeekAll(handler func(packet utils.AVPacket)) {
+func (s *streamBuffer) PeekAll(handler func(packet *avformat.AVPacket)) {
 	head, tail := s.buffer.Data()
 
 	if head != nil {
 		for _, value := range head {
-			handler(value.(utils.AVPacket))
+			handler(value)
 		}
 	}
 
 	if tail != nil {
 		for _, value := range tail {
-			handler(value.(utils.AVPacket))
+			handler(value)
 		}
 	}
 }
@@ -112,5 +113,5 @@ func (s *streamBuffer) Close() {
 }
 
 func NewStreamBuffer() GOPBuffer {
-	return &streamBuffer{buffer: collections.NewRingBuffer(1000), existVideoKeyFrame: false}
+	return &streamBuffer{buffer: collections.NewRingBuffer[*avformat.AVPacket](1000), existVideoKeyFrame: false}
 }

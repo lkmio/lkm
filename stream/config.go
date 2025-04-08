@@ -232,11 +232,6 @@ func GetStreamPlayUrls(source string) []string {
 
 // DumpStream2File 保存推流到文件, 用4字节帧长分割
 func DumpStream2File(sourceType SourceType, conn net.Conn, data []byte) {
-	if err := os.MkdirAll("dump", 0666); err != nil {
-		log.Sugar.Errorf("创建dump文件夹失败 err:%s", err.Error())
-		return
-	}
-
 	path := fmt.Sprintf("dump/%s-%s", sourceType.String(), conn.RemoteAddr().String())
 	path = strings.ReplaceAll(path, ":", ".")
 

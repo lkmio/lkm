@@ -3,11 +3,12 @@ package rtsp
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/lkmio/avformat/libavc"
-	"github.com/lkmio/avformat/librtp"
-	"github.com/lkmio/avformat/librtsp/sdp"
+	"github.com/lkmio/avformat"
+	"github.com/lkmio/avformat/avc"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/stream"
+	"github.com/lkmio/rtp"
+	"github.com/pion/sdp/v3"
 	"net"
 	"strconv"
 )
@@ -38,21 +39,22 @@ func (t *TransStream) OverTCP(data []byte, channel int) {
 	binary.BigEndian.PutUint16(data[2:], uint16(len(data)-4))
 }
 
-func (t *TransStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, error) {
+func (t *TransStream) Input(packet *avformat.AVPacket) ([][]byte, int64, bool, error) {
 	t.ClearOutStreamBuffer()
 
 	var ts uint32
-	track := t.RtspTracks[packet.Index()]
-	if utils.AVMediaTypeAudio == packet.MediaType() {
+	track := t.RtspTracks[packet.Index]
+	if utils.AVMediaTypeAudio == packet.MediaType {
 		ts = uint32(packet.ConvertPts(track.Rate))
-		t.PackRtpPayload(track, packet.Index(), packet.Data(), ts)
-	} else if utils.AVMediaTypeVideo == packet.MediaType() {
+		t.PackRtpPayload(track, packet.Index, packet.Data, ts)
+	} else if utils.AVMediaTypeVideo == packet.MediaType {
 		ts = uint32(packet.ConvertPts(track.Rate))
-		data := libavc.RemoveStartCode(packet.AnnexBPacketData(t.BaseTransStream.Tracks[packet.Index()].Stream))
-		t.PackRtpPayload(track, packet.Index(), data, ts)
+		annexBData := avformat.AVCCPacket2AnnexB(t.BaseTransStream.Tracks[packet.Index].Stream, packet)
+		data := avc.RemoveStartCode(annexBData)
+		t.PackRtpPayload(track, packet.Index, data, ts)
 	}
 
-	return t.OutBuffer[:t.OutBufferSize], int64(ts), utils.AVMediaTypeVideo == packet.MediaType() && packet.KeyFrame(), nil
+	return t.OutBuffer[:t.OutBufferSize], int64(ts), utils.AVMediaTypeVideo == packet.MediaType && packet.Key, nil
 }
 
 func (t *TransStream) ReadExtraData(ts int64) ([][]byte, int64, error) {
@@ -65,7 +67,7 @@ func (t *TransStream) ReadExtraData(ts int64) ([][]byte, int64, error) {
 		// 回滚序号和时间戳
 		index := int(track.StartSeq) - len(track.ExtraDataBuffer)
 		for i, bytes := range track.ExtraDataBuffer {
-			librtp.RollbackSeq(bytes[OverTcpHeaderSize:], index+i+1)
+			rtp.RollbackSeq(bytes[OverTcpHeaderSize:], index+i+1)
 			binary.BigEndian.PutUint32(bytes[OverTcpHeaderSize+4:], uint32(ts))
 		}
 
@@ -98,9 +100,9 @@ func (t *TransStream) AddTrack(track *stream.Track) error {
 		return err
 	}
 
-	payloadType, ok := librtp.CodecIdPayloads[track.Stream.CodecId()]
+	payloadType, ok := rtp.CodecIdPayloads[track.Stream.CodecID]
 	if !ok {
-		return fmt.Errorf("no payload type was found for codecid: %d", track.Stream.CodecId())
+		return fmt.Errorf("no payload type was found for codecid: %d", track.Stream.CodecID)
 	}
 
 	// 恢复上次拉流的序号
@@ -111,35 +113,34 @@ func (t *TransStream) AddTrack(track *stream.Track) error {
 	}
 
 	// 创建RTP封装器
-	var muxer librtp.Muxer
-	if utils.AVCodecIdH264 == track.Stream.CodecId() {
-		muxer = librtp.NewH264Muxer(payloadType.Pt, int(startSeq), 0xFFFFFFFF)
-	} else if utils.AVCodecIdH265 == track.Stream.CodecId() {
-		muxer = librtp.NewH265Muxer(payloadType.Pt, int(startSeq), 0xFFFFFFFF)
-	} else if utils.AVCodecIdAAC == track.Stream.CodecId() {
-		muxer = librtp.NewAACMuxer(payloadType.Pt, int(startSeq), 0xFFFFFFFF)
-	} else if utils.AVCodecIdPCMALAW == track.Stream.CodecId() || utils.AVCodecIdPCMMULAW == track.Stream.CodecId() {
-		muxer = librtp.NewMuxer(payloadType.Pt, int(startSeq), 0xFFFFFFFF)
+	var muxer rtp.Muxer
+	if utils.AVCodecIdH264 == track.Stream.CodecID {
+		muxer = rtp.NewH264Muxer(payloadType.Pt, int(startSeq), 0xFFFFFFFF)
+	} else if utils.AVCodecIdH265 == track.Stream.CodecID {
+		muxer = rtp.NewH265Muxer(payloadType.Pt, int(startSeq), 0xFFFFFFFF)
+	} else if utils.AVCodecIdAAC == track.Stream.CodecID {
+		muxer = rtp.NewAACMuxer(payloadType.Pt, int(startSeq), 0xFFFFFFFF)
+	} else if utils.AVCodecIdPCMALAW == track.Stream.CodecID || utils.AVCodecIdPCMMULAW == track.Stream.CodecID {
+		muxer = rtp.NewMuxer(payloadType.Pt, int(startSeq), 0xFFFFFFFF)
 	}
 
-	rtspTrack := NewRTSPTrack(muxer, byte(payloadType.Pt), payloadType.ClockRate, track.Stream.Type())
+	rtspTrack := NewRTSPTrack(muxer, byte(payloadType.Pt), payloadType.ClockRate, track.Stream.MediaType)
 	t.RtspTracks = append(t.RtspTracks, rtspTrack)
 	index := len(t.RtspTracks) - 1
 
 	// 将sps和pps按照单一模式打包
 	bufferIndex := t.buffer.Index()
-	if utils.AVMediaTypeVideo == track.Stream.Type() {
-		parameters := track.Stream.CodecParameters()
-
-		if utils.AVCodecIdH265 == track.Stream.CodecId() {
-			bytes := parameters.(*utils.HEVCCodecData).VPS()
-			t.PackRtpPayload(rtspTrack, index, libavc.RemoveStartCode(bytes[0]), 0)
+	if utils.AVMediaTypeVideo == track.Stream.MediaType {
+		parameters := track.Stream.CodecParameters
+		if utils.AVCodecIdH265 == track.Stream.CodecID {
+			bytes := parameters.(*avformat.HEVCCodecData).VPS()
+			t.PackRtpPayload(rtspTrack, index, avc.RemoveStartCode(bytes[0]), 0)
 		}
 
 		spsBytes := parameters.SPS()
 		ppsBytes := parameters.PPS()
-		t.PackRtpPayload(rtspTrack, index, libavc.RemoveStartCode(spsBytes[0]), 0)
-		t.PackRtpPayload(rtspTrack, index, libavc.RemoveStartCode(ppsBytes[0]), 0)
+		t.PackRtpPayload(rtspTrack, index, avc.RemoveStartCode(spsBytes[0]), 0)
+		t.PackRtpPayload(rtspTrack, index, avc.RemoveStartCode(ppsBytes[0]), 0)
 
 		// 拷贝扩展数据的rtp包
 		size := t.buffer.Index() - bufferIndex
@@ -191,7 +192,7 @@ func (t *TransStream) WriteHeader() error {
 	}
 
 	for i, track := range t.Tracks {
-		payloadType, _ := librtp.CodecIdPayloads[track.Stream.CodecId()]
+		payloadType, _ := rtp.CodecIdPayloads[track.Stream.CodecID]
 		mediaDescription := sdp.MediaDescription{
 			ConnectionInformation: &sdp.ConnectionInformation{
 				NetworkType: "IN",
@@ -209,10 +210,10 @@ func (t *TransStream) WriteHeader() error {
 		mediaDescription.MediaName.Protos = []string{"RTP", "AVP"}
 		mediaDescription.MediaName.Formats = []string{strconv.Itoa(payloadType.Pt)}
 
-		if utils.AVMediaTypeAudio == track.Stream.Type() {
+		if utils.AVMediaTypeAudio == track.Stream.MediaType {
 			mediaDescription.MediaName.Media = "audio"
 
-			if utils.AVCodecIdAAC == track.Stream.CodecId() {
+			if utils.AVCodecIdAAC == track.Stream.CodecID {
 				//[14496-3], [RFC6416] profile-level-id:
 				//1 : Main Audio Profile Level 1
 				//9 : Speech Audio Profile Level 1

@@ -1,11 +1,11 @@
 package gb28181
 
 import (
-	"github.com/lkmio/avformat/librtp"
-	"github.com/lkmio/avformat/transport"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
+	"github.com/lkmio/rtp"
+	"github.com/lkmio/transport"
 	"net"
 )
 
@@ -17,7 +17,7 @@ const (
 type ForwardSink struct {
 	stream.BaseSink
 	setup  SetupType
-	socket transport.ITransport
+	socket transport.Transport
 	ssrc   uint32
 }
 
@@ -50,7 +50,7 @@ func (f *ForwardSink) Write(index int, data [][]byte, ts int64) error {
 	}
 
 	// 修改为与上级协商的SSRC
-	librtp.ModifySSRC(data[0], f.ssrc)
+	rtp.ModifySSRC(data[0], f.ssrc)
 
 	if SetupUDP == f.setup {
 		f.socket.(*transport.UDPClient).Write(data[0][2:])
@@ -83,14 +83,14 @@ func NewForwardSink(ssrc uint32, serverAddr string, setup SetupType, sinkId stre
 			return nil, 0, err
 		}
 
-		client, err := TransportManger.NewUDPClient(stream.AppConfig.ListenIP, remoteAddr)
+		client, err := TransportManger.NewUDPClient(remoteAddr)
 		if err != nil {
 			return nil, 0, err
 		}
 
 		sink.socket = client
 	} else if SetupActive == setup {
-		server, err := TransportManger.NewTCPServer(stream.AppConfig.ListenIP)
+		server, err := TransportManger.NewTCPServer()
 		if err != nil {
 			return nil, 0, err
 		}

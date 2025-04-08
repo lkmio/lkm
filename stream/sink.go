@@ -3,9 +3,9 @@ package stream
 import (
 	"context"
 	"fmt"
-	"github.com/lkmio/avformat/transport"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/log"
+	"github.com/lkmio/transport"
 	"net"
 	"net/url"
 	"sync"

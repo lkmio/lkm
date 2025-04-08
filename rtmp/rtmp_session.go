@@ -1,20 +1,20 @@
 package rtmp
 
 import (
-	"github.com/lkmio/avformat/librtmp"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
+	"github.com/lkmio/rtmp"
 	"net"
 )
 
 // Session RTMP会话, 解析处理Message
 type Session struct {
-	stack       *librtmp.Stack // rtmp协议栈, 解析message
-	handle      interface{}    // 持有具体会话句柄(推流端/拉流端)， 在@see OnPublish @see OnPlay回调中赋值
-	isPublisher bool           // 是否时推流会话
+	conn        net.Conn
+	stack       *rtmp.ServerStack // rtmp协议栈, 解析message
+	handle      interface{}       // 持有具体会话句柄(推流端/拉流端)， 在@see OnPublish @see OnPlay回调中赋值
+	isPublisher bool              // 是否是推流会话
 
-	conn          net.Conn
 	receiveBuffer *stream.ReceiveBuffer // 推流源收流队列
 }
 
@@ -29,14 +29,12 @@ func (s *Session) generateSourceID(app, stream string) string {
 }
 
 func (s *Session) OnPublish(app, stream_ string) utils.HookState {
-	log.Sugar.Infof("rtmp onpublish app:%s stream:%s conn:%s", app, stream_, s.conn.RemoteAddr().String())
+	log.Sugar.Infof("rtmp onpublish app: %s stream: %s conn: %s", app, stream_, s.conn.RemoteAddr().String())
 
 	streamName, values := stream.ParseUrl(stream_)
 
 	sourceId := s.generateSourceID(app, streamName)
 	source := NewPublisher(sourceId, s.stack, s.conn)
-	// 设置推流的音视频回调
-	s.stack.SetOnPublishHandler(source)
 
 	// 初始化放在add source前面, 以防add后再init, 空窗期拉流队列空指针.
 	source.Init(stream.ReceiveBufferTCPBlockCount)
@@ -45,7 +43,7 @@ func (s *Session) OnPublish(app, stream_ string) utils.HookState {
 	// 统一处理source推流事件, source是否已经存在, hook回调....
 	_, state := stream.PreparePublishSource(source, true)
 	if utils.HookStateOK != state {
-		log.Sugar.Errorf("rtmp推流失败 source:%s", sourceId)
+		log.Sugar.Errorf("rtmp推流失败 source: %s", sourceId)
 	} else {
 		s.handle = source
 		s.isPublisher = true
@@ -81,12 +79,12 @@ func (s *Session) Input(data []byte) error {
 	if s.isPublisher {
 		return s.handle.(*Publisher).PublishSource.Input(data)
 	} else {
-		return s.stack.Input(data)
+		return s.stack.Input(s.conn, data)
 	}
 }
 
 func (s *Session) Close() {
-	// session/conn/stack相互引用, go释放不了...手动赋值为nil
+	// session/conn/stack相互引用, gc回收不了...手动赋值为nil
 	s.conn = nil
 
 	defer func() {
@@ -120,8 +118,9 @@ func (s *Session) Close() {
 func NewSession(conn net.Conn) *Session {
 	session := &Session{}
 
-	stack := librtmp.NewStack(conn, session)
-	session.stack = stack
+	stackServer := rtmp.NewStackServer(false)
+	stackServer.SetOnStreamHandler(session)
+	session.stack = stackServer
 	session.conn = conn
 	return session
 }

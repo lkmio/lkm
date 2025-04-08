@@ -10,8 +10,8 @@ type TrackManager struct {
 
 func (s *TrackManager) Add(track *Track) {
 	for _, t := range s.tracks {
-		utils.Assert(t.Stream.Type() != track.Stream.Type())
-		utils.Assert(t.Stream.CodecId() != track.Stream.CodecId())
+		utils.Assert(t.Stream.MediaType != track.Stream.MediaType)
+		utils.Assert(t.Stream.CodecID != track.Stream.CodecID)
 	}
 
 	s.tracks = append(s.tracks, track)
@@ -19,7 +19,7 @@ func (s *TrackManager) Add(track *Track) {
 
 func (s *TrackManager) Find(id utils.AVCodecID) *Track {
 	for _, track := range s.tracks {
-		if track.Stream.CodecId() == id {
+		if track.Stream.CodecID == id {
 			return track
 		}
 	}
@@ -29,7 +29,7 @@ func (s *TrackManager) Find(id utils.AVCodecID) *Track {
 
 func (s *TrackManager) FindWithType(mediaType utils.AVMediaType) *Track {
 	for _, track := range s.tracks {
-		if track.Stream.Type() == mediaType {
+		if track.Stream.MediaType == mediaType {
 			return track
 		}
 	}
@@ -40,7 +40,7 @@ func (s *TrackManager) FindWithType(mediaType utils.AVMediaType) *Track {
 func (s *TrackManager) FindTracks(id utils.AVCodecID) []*Track {
 	var tracks []*Track
 	for _, track := range s.tracks {
-		if track.Stream.CodecId() == id {
+		if track.Stream.CodecID == id {
 			tracks = append(tracks, track)
 		}
 	}
@@ -51,7 +51,7 @@ func (s *TrackManager) FindTracks(id utils.AVCodecID) []*Track {
 func (s *TrackManager) FindTracksWithType(mediaType utils.AVMediaType) []*Track {
 	var tracks []*Track
 	for _, track := range s.tracks {
-		if track.Stream.Type() == mediaType {
+		if track.Stream.MediaType == mediaType {
 			tracks = append(tracks, track)
 		}
 	}

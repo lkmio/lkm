@@ -1,11 +1,11 @@
 package rtsp
 
 import (
-	"github.com/lkmio/avformat/librtp"
-	"github.com/lkmio/avformat/transport"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
+	"github.com/lkmio/rtp"
+	"github.com/lkmio/transport"
 	"github.com/pion/rtcp"
 	"net"
 	"time"
@@ -21,8 +21,8 @@ var (
 type Sink struct {
 	stream.BaseSink
 
-	senders []*librtp.RtpSender // 一个rtsp源, 可能存在多个流, 每个流都需要拉取
-	cb      func(sdp string)    // sdp回调, 响应describe
+	senders []*rtp.RtpSender // 一个rtsp源, 可能存在多个流, 每个流都需要拉取
+	cb      func(sdp string) // sdp回调, 响应describe
 }
 
 func (s *Sink) StartStreaming(transStream stream.TransStream) error {
@@ -31,7 +31,7 @@ func (s *Sink) StartStreaming(transStream stream.TransStream) error {
 		return nil
 	}
 
-	s.senders = make([]*librtp.RtpSender, transStream.TrackSize())
+	s.senders = make([]*rtp.RtpSender, transStream.TrackSize())
 	// sdp回调给sink, sink应答给describe请求
 	if s.cb != nil {
 		s.cb(transStream.(*TransStream).sdp)
@@ -47,19 +47,19 @@ func (s *Sink) AddSender(index int, tcp bool, ssrc uint32) (uint16, uint16, erro
 	var rtpPort uint16
 	var rtcpPort uint16
 
-	sender := librtp.RtpSender{
+	sender := rtp.RtpSender{
 		SSRC: ssrc,
 	}
 
 	if tcp {
 		s.TCPStreaming = true
 	} else {
-		sender.Rtp, err = TransportManger.NewUDPServer("0.0.0.0")
+		sender.Rtp, err = TransportManger.NewUDPServer()
 		if err != nil {
 			return 0, 0, err
 		}
 
-		sender.Rtcp, err = TransportManger.NewUDPServer("0.0.0.0")
+		sender.Rtcp, err = TransportManger.NewUDPServer()
 		if err != nil {
 			sender.Rtp.Close()
 			sender.Rtp = nil

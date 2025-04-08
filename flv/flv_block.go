@@ -7,9 +7,8 @@ import (
 
 const (
 	// HttpFlvBlockHeaderSize 在每块http-flv流的头部，预留指定大小的数据, 用于描述flv数据块的长度信息
-	// http-flv是以文件流的形式传输http流, 格式如下: length\r\n|flv data\r\n
+	// http-flv是以文件流形式传输的http流, 格式如下: length\r\n|flv data\r\n
 	// 我们对http-flv-block的封装: |block size[4]|skip count[2]|length\r\n|flv data\r\n
-	// skip count是因为length长度不固定, 需要一个字段说明, 跳过多少字节才是http-flv数据
 	HttpFlvBlockHeaderSize = 20
 )
 

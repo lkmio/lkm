@@ -1,8 +1,9 @@
 package rtsp
 
+
 import (
-	"github.com/lkmio/avformat/librtp"
 	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/rtp"
 )
 
 // Track RtspTrack 对rtsp每路输出流的封装
@@ -13,14 +14,14 @@ type Track struct {
 	StartSeq  uint16
 	EndSeq    uint16
 
-	Muxer           librtp.Muxer
+	Muxer           rtp.Muxer
 	ExtraDataBuffer [][]byte // 缓存带有编码信息的rtp包, 对所有sink通用
 }
 
 func (r *Track) Close() {
 }
 
-func NewRTSPTrack(muxer librtp.Muxer, pt byte, rate int, mediaType utils.AVMediaType) *Track {
+func NewRTSPTrack(muxer rtp.Muxer, pt byte, rate int, mediaType utils.AVMediaType) *Track {
 	stream := &Track{
 		PT:        pt,
 		Rate:      rate,

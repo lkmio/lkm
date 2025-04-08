@@ -5,49 +5,19 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"github.com/lkmio/avformat/transport"
+	"github.com/lkmio/avformat"
+	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/mpeg"
+	"github.com/lkmio/transport"
+	"github.com/pion/rtp"
 	"io"
 	"net"
 	"net/http"
 	"os"
+	"sort"
 	"testing"
 	"time"
 )
-
-// 输入rtp负载的ps流文件路径, 根据ssrc解析, rtp头不要带扩展
-func readRtpRaw(path string, ssrc uint32, tcp bool, cb func([]byte)) {
-	file, err := os.ReadFile(path)
-	if err != nil {
-		panic(err)
-	}
-
-	var offset int
-	tcpRtp := make([]byte, 1500)
-
-	for i := 0; i < len(file)-4; i++ {
-		if ssrc != binary.BigEndian.Uint32(file[i:]) {
-			continue
-		}
-
-		if i-8 != 0 {
-			var err error
-			rtp := file[offset : i-8]
-
-			if tcp {
-				binary.BigEndian.PutUint16(tcpRtp, uint16(len(rtp)))
-				copy(tcpRtp[2:], rtp)
-				cb(tcpRtp[:2+len(rtp)])
-			} else {
-				cb(rtp)
-			}
-
-			if err != nil {
-				panic(err.Error())
-			}
-		}
-		offset = i - 8
-	}
-}
 
 func connectSource(source string, addr string) {
 	v := &struct {
@@ -131,32 +101,137 @@ func createSource(source, setup string, ssrc uint32) (string, uint16) {
 	return connectInfo.Data.IP, connectInfo.Data.Port
 }
 
-func rtp2overTcp(path string, ssrc uint32) {
-	file, err := os.OpenFile("./rtp.raw", os.O_CREATE|os.O_RDWR, 0666)
+// 分割rtp包, 返回rtp over tcp包
+func splitPackets(data []byte, ssrc uint32) ([][]byte, uint32) {
+	tcp := binary.BigEndian.Uint16(data) <= 1500
+	length := len(data)
+	var packets [][]byte
+	if tcp {
+		var offset int
+		for i := 0; i < length; i += 2 {
+			if i > 0 {
+				packets = append(packets, data[offset:i])
+			}
+
+			offset = i
+			i += int(binary.BigEndian.Uint16(data[i:]))
+		}
+
+		if len(packets) > 0 {
+			packet := rtp.Packet{}
+			err := packet.Unmarshal(packets[0][2:])
+			if err != nil {
+				panic(err)
+			}
+
+			return packets, packet.SSRC
+		}
+	} else {
+		// udp包根据ssrc查找
+		var offset int
+		for i := 0; i < length-4; i++ {
+			if ssrc != binary.BigEndian.Uint32(data[i:]) {
+				continue
+			}
+
+			if i-8 != 0 {
+				packet := data[offset : i-8]
+				bytes := make([]byte, 2+len(packet))
+				binary.BigEndian.PutUint16(bytes, uint16(len(packet)))
+				copy(bytes[2:], packet)
+				packets = append(packets, bytes)
+			}
+
+			offset = i - 8
+		}
+
+		return packets, ssrc
+	}
+
+	return nil, ssrc
+}
+
+var ts int64 = -1
+
+func ctrDelay(data []byte) {
+	packet := rtp.Packet{}
+	err := packet.Unmarshal(data)
 	if err != nil {
 		panic(err)
 	}
 
-	readRtpRaw(path, ssrc, true, func(data []byte) {
-		file.Write(data)
-	})
+	if ts == -1 {
+		ts = int64(packet.Timestamp)
+	}
 
-	file.Close()
+	if dis := (int64(packet.Timestamp) - ts) / 90; dis > 0 {
+		time.Sleep(time.Duration(dis) * time.Millisecond)
+	}
+
+	ts = int64(packet.Timestamp)
 }
 
-// 使用wireshark直接导出udp流
+// 使用wireshark直接导出的rtp流
 // 根据ssrc来查找每个rtp包, rtp不要带扩展字段
-func TestUDPRecv(t *testing.T) {
-	path := "D:\\GOProjects\\avformat\\gb28181_h264.rtp"
-	ssrc := 0xBEBC201
+func TestPublish(t *testing.T) {
+	path := "../../source_files/gb28181_h264.rtp"
+	var ssrc uint32 = 0xBEBC201
 	localAddr := "0.0.0.0:20001"
-	setup := "udp" //udp/passive/active
 	id := "hls_mystream"
 
-	rtp2overTcp(path, uint32(ssrc))
-	ip, port := createSource(id, setup, uint32(ssrc))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		panic(err)
+	}
 
-	if setup == "udp" {
+	var packets [][]byte
+	packets, ssrc = splitPackets(data, ssrc)
+	utils.Assert(len(packets) > 0)
+
+	sort.Slice(packets, func(i, j int) bool {
+		packet := rtp.Packet{}
+		if err := packet.Unmarshal(packets[i][2:]); err != nil {
+			panic(err)
+		}
+		packet2 := rtp.Packet{}
+		if err := packet2.Unmarshal(packets[j][2:]); err != nil {
+			panic(err)
+		}
+
+		return packet.SequenceNumber < packet2.SequenceNumber
+	})
+
+	t.Run("demux", func(t *testing.T) {
+		buffer := mpeg.NewProbeBuffer(1024 * 1024 * 2)
+		demuxer := mpeg.NewPSDemuxer(true)
+		demuxer.SetHandler(&avformat.OnUnpackStream2FileHandler{
+			Path: "./ps_demux",
+		})
+
+		file, err := os.OpenFile("./ps_demux.ps", os.O_WRONLY|os.O_CREATE, 132)
+		if err != nil {
+			panic(err)
+		}
+
+		for _, packet := range packets {
+			file.Write(packet[14:])
+			bytes, err := buffer.Input(packet[14:])
+			if err != nil {
+				panic(err)
+			}
+
+			n, err := demuxer.Input(bytes)
+			if err != nil {
+				panic(err)
+			}
+
+			buffer.Reset(n)
+		}
+	})
+
+	t.Run("udp", func(t *testing.T) {
+		ip, port := createSource(id, "udp", ssrc)
+
 		addr, _ := net.ResolveUDPAddr("udp", localAddr)
 		remoteAddr, _ := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", ip, port))
 
@@ -166,11 +241,15 @@ func TestUDPRecv(t *testing.T) {
 			panic(err)
 		}
 
-		readRtpRaw(path, uint32(ssrc), false, func(data []byte) {
-			client.Write(data)
-			time.Sleep(1 * time.Millisecond)
-		})
-	} else if !(setup == "active") {
+		for _, packet := range packets {
+			client.Write(packet[2:])
+			ctrDelay(packet[2:])
+		}
+	})
+
+	t.Run("passive", func(t *testing.T) {
+		ip, port := createSource(id, "passive", ssrc)
+
 		addr, _ := net.ResolveTCPAddr("tcp", localAddr)
 		remoteAddr, _ := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", ip, port))
 
@@ -181,19 +260,23 @@ func TestUDPRecv(t *testing.T) {
 			panic(err)
 		}
 
-		readRtpRaw(path, uint32(ssrc), true, func(data []byte) {
-			client.Write(data)
-			time.Sleep(1 * time.Millisecond)
-		})
-	} else {
+		for _, packet := range packets {
+			client.Write(packet)
+			ctrDelay(packet[2:])
+		}
+	})
+
+	t.Run("active", func(t *testing.T) {
+		ip, port := createSource(id, "active", ssrc)
+
 		addr, _ := net.ResolveTCPAddr("tcp", localAddr)
 		server := transport.TCPServer{}
 
 		server.SetHandler2(func(conn net.Conn) []byte {
-			readRtpRaw(path, uint32(ssrc), true, func(data []byte) {
-				conn.Write(data)
-				time.Sleep(1 * time.Millisecond)
-			})
+			for _, packet := range packets {
+				conn.Write(packet)
+				ctrDelay(packet[2:])
+			}
 
 			return nil
 		}, nil, nil)
@@ -204,7 +287,5 @@ func TestUDPRecv(t *testing.T) {
 		}
 
 		connectSource(id, fmt.Sprintf("%s:%d", ip, port))
-	}
-
-	select {}
+	})
 }

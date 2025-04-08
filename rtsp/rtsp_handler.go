@@ -1,5 +1,6 @@
 package rtsp
 
+
 import (
 	"fmt"
 	"github.com/lkmio/avformat/utils"
@@ -70,7 +71,7 @@ func (h handler) Process(session *session, method string, url_ *url.URL, headers
 		return fmt.Errorf("please establish a session first")
 	}
 
-	source, _ := stream.Path2SourceId(url_.Path, "")
+	source, _ := stream.Path2SourceID(url_.Path, "")
 
 	//反射调用各个处理函数
 	results := m.Call([]reflect.Value{

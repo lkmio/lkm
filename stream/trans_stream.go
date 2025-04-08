@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"github.com/lkmio/avformat"
 	"github.com/lkmio/avformat/utils"
 )
 
@@ -11,7 +12,7 @@ type TransStream interface {
 	SetID(id TransStreamID)
 
 	// Input 封装传输流, 返回合并写块、时间戳、合并写块是否包含视频关键帧
-	Input(packet utils.AVPacket) ([][]byte, int64, bool, error)
+	Input(packet *avformat.AVPacket) ([][]byte, int64, bool, error)
 
 	AddTrack(track *Track) error
 
@@ -67,13 +68,13 @@ func (t *BaseTransStream) SetID(id TransStreamID) {
 	t.ID = id
 }
 
-func (t *BaseTransStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, error) {
+func (t *BaseTransStream) Input(packet *avformat.AVPacket) ([][]byte, int64, bool, error) {
 	return nil, -1, false, nil
 }
 
 func (t *BaseTransStream) AddTrack(track *Track) error {
 	t.Tracks = append(t.Tracks, track)
-	if utils.AVMediaTypeVideo == track.Stream.Type() {
+	if utils.AVMediaTypeVideo == track.Stream.MediaType {
 		t.ExistVideo = true
 	}
 	return nil

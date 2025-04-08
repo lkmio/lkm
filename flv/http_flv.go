@@ -2,8 +2,10 @@ package flv
 
 import (
 	"encoding/binary"
-	"github.com/lkmio/avformat/libflv"
+	"github.com/lkmio/avformat"
 	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/flv"
+	"github.com/lkmio/flv/amf0"
 	"github.com/lkmio/lkm/rtmp"
 	"github.com/lkmio/lkm/stream"
 )
@@ -11,13 +13,13 @@ import (
 type TransStream struct {
 	stream.TCPTransStream
 
-	Muxer               libflv.Muxer
-	flvHeaderBlock      []byte // 单独保存9个字节长的flv头, 只发一次, 后续恢复推流不再发送
-	flvExtraDataBlock   []byte // metadata和sequence header
-	flvExtraDataTagSize int    // 整个flv tag大小
+	Muxer                  *flv.Muxer
+	flvHeaderBlock         []byte // 单独保存9个字节长的flv头, 只发一次, 后续恢复推流不再发送
+	flvExtraDataBlock      []byte // metadata和sequence header
+	flvExtraDataPreTagSize uint32
 }
 
-func (t *TransStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, error) {
+func (t *TransStream) Input(packet *avformat.AVPacket) ([][]byte, int64, bool, error) {
 	t.ClearOutStreamBuffer()
 
 	var flvTagSize int
@@ -26,17 +28,19 @@ func (t *TransStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, error
 	var dts int64
 	var pts int64
 	var keyBuffer bool
+	var frameType int
 
 	dts = packet.ConvertDts(1000)
 	pts = packet.ConvertPts(1000)
-	if utils.AVMediaTypeAudio == packet.MediaType() {
-		flvTagSize = 17 + len(packet.Data())
-		data = packet.Data()
-	} else if utils.AVMediaTypeVideo == packet.MediaType() {
-		flvTagSize = t.Muxer.ComputeVideoDataSize(uint32(pts-dts)) + libflv.TagHeaderSize + len(packet.AVCCPacketData())
-
-		data = packet.AVCCPacketData()
-		videoKey = packet.KeyFrame()
+	if utils.AVMediaTypeAudio == packet.MediaType {
+		data = packet.Data
+		flvTagSize = flv.TagHeaderSize + t.Muxer.ComputeAudioDataHeaderSize() + len(packet.Data)
+	} else if utils.AVMediaTypeVideo == packet.MediaType {
+		data = avformat.AnnexBPacket2AVCC(packet)
+		flvTagSize = flv.TagHeaderSize + t.Muxer.ComputeVideoDataHeaderSize(uint32(pts-dts)) + len(data)
+		if videoKey = packet.Key; videoKey {
+			frameType = flv.FrameTypeKeyFrame
+		}
 	}
 
 	// 关键帧都放在切片头部，所以遇到关键帧创建新切片, 发送当前切片剩余流
@@ -64,7 +68,7 @@ func (t *TransStream) Input(packet utils.AVPacket) ([][]byte, int64, bool, error
 	// 分配block
 	bytes := t.MWBuffer.Allocate(separatorSize+flvTagSize, dts, videoKey)
 	// 写flv tag
-	n += t.Muxer.Input(bytes[n:], packet.MediaType(), len(data), dts, pts, packet.KeyFrame(), false)
+	n += t.Muxer.Input(bytes[n:], packet.MediaType, len(data), dts, pts, false, frameType)
 	copy(bytes[n:], data)
 
 	// 合并写满再发
@@ -82,43 +86,28 @@ func (t *TransStream) AddTrack(track *stream.Track) error {
 		return err
 	}
 
-	if utils.AVMediaTypeAudio == track.Stream.Type() {
-		t.Muxer.AddAudioTrack(track.Stream.CodecId(), 0, 0, 0)
-	} else if utils.AVMediaTypeVideo == track.Stream.Type() {
-		t.Muxer.AddVideoTrack(track.Stream.CodecId())
+	if utils.AVMediaTypeAudio == track.Stream.MediaType {
+		t.Muxer.AddAudioTrack(track.Stream)
+	} else if utils.AVMediaTypeVideo == track.Stream.MediaType {
+		t.Muxer.AddVideoTrack(track.Stream)
 
-		t.Muxer.MetaData().AddNumberProperty("width", float64(track.Stream.CodecParameters().Width()))
-		t.Muxer.MetaData().AddNumberProperty("height", float64(track.Stream.CodecParameters().Height()))
+		t.Muxer.MetaData().AddNumberProperty("width", float64(track.Stream.CodecParameters.Width()))
+		t.Muxer.MetaData().AddNumberProperty("height", float64(track.Stream.CodecParameters.Height()))
 	}
 	return nil
 }
 
 func (t *TransStream) WriteHeader() error {
 	var header [4096]byte
-	var extraDataSize int
 	size := t.Muxer.WriteHeader(header[:])
+	tags := header[9:size]
 	copy(t.flvHeaderBlock[HttpFlvBlockHeaderSize:], header[:9])
-	copy(t.flvExtraDataBlock[HttpFlvBlockHeaderSize:], header[9:size])
+	copy(t.flvExtraDataBlock[HttpFlvBlockHeaderSize:], tags)
 
-	extraDataSize = HttpFlvBlockHeaderSize + (size - 9)
-	for _, track := range t.BaseTransStream.Tracks {
-		var data []byte
-		if utils.AVMediaTypeAudio == track.Stream.Type() {
-			data = track.Stream.Extra()
-		} else if utils.AVMediaTypeVideo == track.Stream.Type() {
-			data = track.Stream.CodecParameters().MP4ExtraData()
-		}
+	t.flvExtraDataPreTagSize = t.Muxer.PrevTagSize()
 
-		n := t.Muxer.Input(t.flvExtraDataBlock[extraDataSize:], track.Stream.Type(), len(data), 0, 0, false, true)
-		extraDataSize += n
-		copy(t.flvExtraDataBlock[extraDataSize:], data)
-		extraDataSize += len(data)
-		t.flvExtraDataTagSize = n - 15 + len(data) + 11
-	}
-
-	// 加上末尾换行符
-	extraDataSize += 2
-	t.flvExtraDataBlock = t.flvExtraDataBlock[:extraDataSize]
+	// +2 加上末尾换行符
+	t.flvExtraDataBlock = t.flvExtraDataBlock[:HttpFlvBlockHeaderSize+size-9+2]
 	writeSeparator(t.flvHeaderBlock)
 	writeSeparator(t.flvExtraDataBlock)
 
@@ -135,9 +124,9 @@ func (t *TransStream) ReadKeyFrameBuffer() ([][]byte, int64, error) {
 
 	// 发送当前内存池已有的合并写切片
 	t.MWBuffer.ReadSegmentsFromKeyFrameIndex(func(bytes []byte) {
+		// 修改第一个flv tag的pre tag size为sequence header tag size
 		if t.OutBufferSize < 1 {
-			// 修改第一个flv tag的pre tag size为sequence header tag size
-			binary.BigEndian.PutUint32(bytes[HttpFlvBlockHeaderSize:], uint32(t.flvExtraDataTagSize))
+			binary.BigEndian.PutUint32(bytes[HttpFlvBlockHeaderSize:], t.flvExtraDataPreTagSize)
 		}
 
 		// 遍历发送合并写切片
@@ -173,9 +162,9 @@ func (t *TransStream) flushSegment() ([]byte, bool) {
 	return FormatSegment(segment), key
 }
 
-func NewHttpTransStream(metadata *libflv.AMF0Object, prevTagSize uint32) stream.TransStream {
+func NewHttpTransStream(metadata *amf0.Object, prevTagSize uint32) stream.TransStream {
 	return &TransStream{
-		Muxer:             libflv.NewMuxerWithPrevTagSize(metadata, prevTagSize),
+		Muxer:             flv.NewMuxerWithPrevTagSize(metadata, prevTagSize),
 		flvHeaderBlock:    make([]byte, 31),
 		flvExtraDataBlock: make([]byte, 4096),
 	}
@@ -183,7 +172,7 @@ func NewHttpTransStream(metadata *libflv.AMF0Object, prevTagSize uint32) stream.
 
 func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtocol, tracks []*stream.Track) (stream.TransStream, error) {
 	var prevTagSize uint32
-	var metaData *libflv.AMF0Object
+	var metaData *amf0.Object
 
 	endInfo := source.GetStreamEndInfo()
 	if endInfo != nil {
@@ -191,7 +180,7 @@ func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtoco
 	}
 
 	if stream.SourceTypeRtmp == source.GetType() {
-		metaData = source.(*rtmp.Publisher).Stack.MetaData()
+		metaData = source.(*rtmp.Publisher).Stack.Metadata()
 	}
 
 	return NewHttpTransStream(metaData, prevTagSize), nil

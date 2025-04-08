@@ -1,8 +1,8 @@
 package gb28181
 
 import (
-	"github.com/lkmio/avformat/transport"
 	"github.com/lkmio/lkm/stream"
+	"github.com/lkmio/transport"
 	"net"
 )
 

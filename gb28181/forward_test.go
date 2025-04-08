@@ -3,8 +3,8 @@ package gb28181
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/lkmio/avformat/transport"
 	"github.com/lkmio/lkm/stream"
+	"github.com/lkmio/transport"
 	"net"
 	"net/http"
 	"os"
@@ -82,8 +82,8 @@ func closeForwardSink(source, sink string) {
 	}
 }
 
-func createTransport(setup string) (transport.ITransport, *os.File) {
-	var socket transport.ITransport
+func createTransport(setup string) (transport.Transport, *os.File) {
+	var socket transport.Transport
 	name := fmt.Sprintf("./gb_forward_ps_%s_%d.raw", setup, time.Now().UnixMilli())
 	file, err := os.OpenFile(name, os.O_CREATE|os.O_RDWR, 0666)
 	if err != nil {
@@ -135,7 +135,7 @@ func TestForwardSink(t *testing.T) {
 
 	for {
 		var ids []string
-		var transports []transport.ITransport
+		var transports []transport.Transport
 		var files []*os.File
 
 		// 三种推流方式都测试

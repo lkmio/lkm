@@ -2,7 +2,7 @@ package rtmp
 
 import (
 	"encoding/binary"
-	"github.com/lkmio/avformat/transport"
+	"github.com/lkmio/transport"
 	"net"
 	"os"
 	"testing"
@@ -19,7 +19,7 @@ func TestName(t *testing.T) {
 	}
 
 	client := transport.TCPClient{}
-	if err := client.Connect(nil, addr); err != nil {
+	if _, err := client.Connect(nil, addr); err != nil {
 		panic(err)
 	}
 
