@@ -72,7 +72,7 @@ func (t *transStream) Input(packet *avformat.AVPacket) ([][]byte, int64, bool, e
 	// 整个chunk大小
 	totalSize := chunkHeaderSize + payloadSize + numChunks
 	// 如果时间戳超过3字节, 每个chunk都需要多4字节的扩展时间戳
-	if dts >= 0xFFFFFF && dts >= 0xFFFFFFFF {
+	if dts >= 0xFFFFFF {
 		totalSize += (1 + numChunks) * 4
 	}
 
@@ -89,7 +89,7 @@ func (t *transStream) Input(packet *avformat.AVPacket) ([][]byte, int64, bool, e
 		utils.Assert(ok)
 	}
 
-	// 写第一个type为0的chunk sequenceHeader
+	// 写第一个type为0的chunk
 	chunk.Length = payloadSize
 	chunk.Timestamp = uint32(dts)
 	n := chunk.MarshalHeader(bytes)
