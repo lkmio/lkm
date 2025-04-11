@@ -22,7 +22,7 @@ func (f *ForwardStream) WrapData(data []byte) []byte {
 	return block
 }
 
-func (f *ForwardStream) OutStreamBufferCapacity() int {
+func (f *ForwardStream) Capacity() int {
 	return f.buffer.BlockCount()
 }
 

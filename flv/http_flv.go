@@ -43,8 +43,8 @@ func (t *TransStream) Input(packet *avformat.AVPacket) ([][]byte, int64, bool, e
 		}
 	}
 
-	// 关键帧都放在切片头部，所以遇到关键帧创建新切片, 发送当前切片剩余流
-	if videoKey && !t.MWBuffer.IsNewSegment() {
+	// 关键帧都放在切片头部，所以遇到关键帧创建新切片
+	if videoKey && !t.MWBuffer.IsNewSegment() && t.MWBuffer.HasVideoDataInCurrentSegment() {
 		segment, key := t.flushSegment()
 		t.AppendOutStreamBuffer(segment)
 		keyBuffer = key
@@ -58,22 +58,35 @@ func (t *TransStream) Input(packet *avformat.AVPacket) ([][]byte, int64, bool, e
 		separatorSize = HttpFlvBlockHeaderSize
 		// 10字节描述flv包长, 前2个字节描述无效字节长度
 		n = HttpFlvBlockHeaderSize
-	}
-
-	// 切片末尾, 预留换行符
-	if t.MWBuffer.IsFull(dts) {
+	} else if t.MWBuffer.ShouldFlush(dts) {
+		// 切片末尾, 预留换行符
 		separatorSize += 2
 	}
 
-	// 分配block
-	bytes := t.MWBuffer.Allocate(separatorSize+flvTagSize, dts, videoKey)
+	// 分配指定大小的内存
+	bytes, ok := t.MWBuffer.TryAlloc(separatorSize+flvTagSize, dts, utils.AVMediaTypeVideo == packet.MediaType, videoKey)
+	if !ok {
+		segment, key := t.flushSegment()
+		t.AppendOutStreamBuffer(segment)
+
+		if !keyBuffer {
+			keyBuffer = key
+		}
+		bytes, ok = t.MWBuffer.TryAlloc(HttpFlvBlockHeaderSize+flvTagSize, dts, utils.AVMediaTypeVideo == packet.MediaType, videoKey)
+		n = HttpFlvBlockHeaderSize
+		utils.Assert(ok)
+	}
+
 	// 写flv tag
 	n += t.Muxer.Input(bytes[n:], packet.MediaType, len(data), dts, pts, false, frameType)
 	copy(bytes[n:], data)
 
 	// 合并写满再发
-	if segment, key := t.MWBuffer.PeekCompletedSegment(); len(segment) > 0 {
-		keyBuffer = key
+	if segment, key := t.MWBuffer.TryFlushSegment(); len(segment) > 0 {
+		if !keyBuffer {
+			keyBuffer = key
+		}
+
 		// 已经分配末尾换行符内存, 直接添加
 		t.AppendOutStreamBuffer(FormatSegment(segment))
 	}

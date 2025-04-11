@@ -1,27 +1,30 @@
 package stream
 
 import (
+	"github.com/lkmio/avformat/bufio"
 	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/avformat/utils"
 )
 
 const (
-	DefaultMBBufferSize = 20
+	BlockBufferSize  = 1024 * 1024 * 2
+	BlockBufferCount = 4
 )
 
 // MergeWritingBuffer 实现针对RTMP/FLV/HLS等基于TCP传输流的合并写缓存
-// 包含多个合并写块, 循环使用, 至少需要等到第二个I帧才开始循环. webrtcI帧间隔可能会高达几十秒,
 type MergeWritingBuffer interface {
-	Allocate(size int, ts int64, videoKey bool) []byte
+	TryGrow() bool
 
-	// PeekCompletedSegment 返回当前完整切片, 以及是否是关键帧切片, 非完整切片返回nil.
-	PeekCompletedSegment() ([]byte, bool)
+	TryAlloc(size int, ts int64, videoPkt, videoKey bool) ([]byte, bool)
+
+	// TryFlushSegment 尝试生成切片, 如果时长不足, 返回nil
+	TryFlushSegment() ([]byte, bool)
 
 	// FlushSegment 生成并返回当前切片, 以及是否是关键帧切片.
 	FlushSegment() ([]byte, bool)
 
-	// IsFull 当前切片已满
-	IsFull(ts int64) bool
+	// ShouldFlush 当前切片是否已达到生成条件
+	ShouldFlush(ts int64) bool
 
 	// IsNewSegment 当前切片是否还未写数据
 	IsNewSegment() bool
@@ -33,83 +36,180 @@ type MergeWritingBuffer interface {
 	ReadSegmentsFromKeyFrameIndex(cb func([]byte))
 
 	Capacity() int
-}
 
-type mwBlock struct {
-	free      bool
-	keyVideo  bool
-	buffer    collections.MemoryPool
-	completed bool
-	Time      int64
+	HasVideoDataInCurrentSegment() bool
 }
 
 type mergeWritingBuffer struct {
-	mwBlocks []mwBlock
-	index    int   // 当前切片位于mwBlocks的索引
+	buffers []struct {
+		buffer              collections.BlockBuffer
+		nextSegmentDataSize int
+		preSegmentsDataSize int
+		preSegmentCount     int
+
+		prevSegments *collections.Queue[struct {
+			data []byte
+			key  bool
+		}]
+		segments *collections.Queue[struct {
+			data []byte
+			key  bool
+		}]
+	}
+
+	index    int   // 当前使用内存池的索引
 	startTS  int64 // 当前切片的开始时间
 	duration int   // 当前切片时长
 
-	lastKeyFrameIndex int  // 最近的关键帧所在切片的索引
-	keyFrameCount     int  // 关键帧计数
-	existVideo        bool // 是否存在视频
-
-	keyFrameBufferMaxLength    int
-	nonKeyFrameBufferMaxLength int
+	hasKeyVideoDataInCurrentSegment   bool    // 当前切片是否存在关键视频帧
+	hasVideoDataInCurrentSegment      bool    // 当前切片是否存在视频帧
+	completedKeyVideoSegmentPositions []int64 // 完整视频关键帧切片的数量
+	existVideo                        bool    // 是否存在视频
+	segmentCount                      int     // 切片数量
 }
 
-func (m *mergeWritingBuffer) createMWBlock(videoKey bool) mwBlock {
-	if videoKey {
-		return mwBlock{true, videoKey, collections.NewDirectMemoryPool(m.keyFrameBufferMaxLength), false, 0}
+func (m *mergeWritingBuffer) createBuffer(minSize int) collections.BlockBuffer {
+	var size int
+	if !m.existVideo {
+		size = 1024 * 500
 	} else {
-		return mwBlock{true, false, collections.NewDirectMemoryPool(m.nonKeyFrameBufferMaxLength), false, 0}
+		size = BlockBufferSize
+	}
+
+	return collections.NewDirectBlockBuffer(bufio.MaxInt(size, minSize))
+}
+
+func (m *mergeWritingBuffer) grow(minSize int) {
+	m.buffers = append(m.buffers, struct {
+		buffer              collections.BlockBuffer
+		nextSegmentDataSize int
+		preSegmentsDataSize int
+		preSegmentCount     int
+		prevSegments        *collections.Queue[struct {
+			data []byte
+			key  bool
+		}]
+		segments *collections.Queue[struct {
+			data []byte
+			key  bool
+		}]
+	}{buffer: m.createBuffer(minSize), prevSegments: collections.NewQueue[struct {
+		data []byte
+		key  bool
+	}](64), segments: collections.NewQueue[struct {
+		data []byte
+		key  bool
+	}](64)})
+}
+
+func (m *mergeWritingBuffer) TryGrow() bool {
+	var ok bool
+	if !m.existVideo {
+		ok = len(m.buffers) < 1
+	} else {
+		ok = len(m.buffers) < BlockBufferCount
+	}
+
+	if ok {
+		m.grow(0)
+	}
+
+	return ok
+}
+
+func (m *mergeWritingBuffer) RemoveSegment() {
+	segment := m.buffers[m.index].prevSegments.Pop()
+	m.buffers[m.index].nextSegmentDataSize += len(segment.data)
+	m.segmentCount--
+
+	if segment.key {
+		m.completedKeyVideoSegmentPositions = m.completedKeyVideoSegmentPositions[1:]
 	}
 }
 
-func (m *mergeWritingBuffer) grow() {
-	pools := make([]mwBlock, cap(m.mwBlocks)*3/2)
-	for i := 0; i < cap(m.mwBlocks); i++ {
-		pools[i] = m.mwBlocks[i]
+func (m *mergeWritingBuffer) TryAlloc(size int, ts int64, videoPkt, videoKey bool) ([]byte, bool) {
+	length := len(m.buffers)
+	if length < 1 {
+		m.grow(size)
 	}
 
-	m.mwBlocks = pools
+	bytes := m.buffers[m.index].buffer.AvailableBytes()
+	if bytes < size {
+		// 非完整切片，先保存切片再分配新的内存
+		if m.buffers[m.index].buffer.PendingBlockSize() > 0 {
+			return nil, false
+		}
+
+		// 还未遇到2组GOP, 不能释放旧的内存池, 创建新的内存池
+		// 其他情况, 调用tryAlloc, 手动申请内存
+		if m.existVideo && AppConfig.GOPCache && len(m.completedKeyVideoSegmentPositions) < 2 {
+			m.grow(size)
+		}
+
+		// 即将使用下一个内存池, 清空上次创建的切片
+		for m.buffers[m.index].prevSegments.Size() > 0 {
+			m.RemoveSegment()
+		}
+
+		// 使用下一块内存, 或者从头覆盖
+		if m.index+1 < len(m.buffers) {
+			m.index++
+		} else {
+			m.index = 0
+		}
+
+		// 复用内存池, 将未清空完的上上次创建的切片放在尾部
+		//for m.buffers[m.index].prevSegments.Size() > 0 {
+		//	m.buffers[m.index].segments.Push(m.buffers[m.index].prevSegments.Pop())
+		//}
+
+		// 复用内存池, 清空上上次创建的切片
+		//for m.buffers[m.index].prevSegments.Size() > 0 {
+		//	m.RemoveSegment()
+		//}
+
+		// 复用内存池, 保留上次内存池创建的切片
+		m.buffers[m.index].nextSegmentDataSize = 0
+		m.buffers[m.index].preSegmentsDataSize = 0
+		m.buffers[m.index].preSegmentCount = m.buffers[m.index].segments.Size()
+		m.buffers[m.index].buffer.Clear()
+		if m.buffers[m.index].preSegmentCount > 0 {
+			m.buffers[m.index].prevSegments.Clear()
+			tmp := m.buffers[m.index].prevSegments
+			m.buffers[m.index].prevSegments = m.buffers[m.index].segments
+			m.buffers[m.index].segments = tmp
+			m.RemoveSegment()
+		}
+	}
+
+	// 复用旧的内存池, 减少计数
+	if !m.buffers[m.index].prevSegments.IsEmpty() {
+		totalSize := len(m.buffers[m.index].buffer.(*collections.DirectBlockBuffer).Data()) + size
+		for !m.buffers[m.index].prevSegments.IsEmpty() && totalSize > m.buffers[m.index].nextSegmentDataSize {
+			m.RemoveSegment()
+		}
+	}
+
+	return m.alloc(size, ts, videoPkt, videoKey), true
 }
 
-func (m *mergeWritingBuffer) Allocate(size int, ts int64, videoKey bool) []byte {
-	if !AppConfig.GOPCache || !m.existVideo {
-		return m.mwBlocks[0].buffer.Allocate(size)
-	}
-
+func (m *mergeWritingBuffer) alloc(size int, ts int64, videoPkt, videoKey bool) []byte {
 	utils.Assert(ts != -1)
+	bytes := m.buffers[m.index].buffer.AvailableBytes()
+	// 当前切片必须有足够空间, 否则先调用TryAlloc
+	utils.Assert(bytes >= size)
 
 	// 新的切片
 	if m.startTS == -1 {
 		m.startTS = ts
+	}
 
-		if m.mwBlocks[m.index].buffer == nil {
-			// 创建内存块
-			m.mwBlocks[m.index] = m.createMWBlock(videoKey)
-		} else {
-			// 循环使用
-			m.mwBlocks[m.index].buffer.Clear()
-
-			// 关键帧被覆盖, 减少计数
-			if m.mwBlocks[m.index].keyVideo {
-				m.keyFrameCount--
-			}
-		}
-
-		m.mwBlocks[m.index].free = false
-		m.mwBlocks[m.index].completed = false
-		m.mwBlocks[m.index].keyVideo = videoKey
-		m.mwBlocks[m.index].Time = ts
+	if !m.hasVideoDataInCurrentSegment && videoPkt {
+		m.hasVideoDataInCurrentSegment = true
 	}
 
 	if videoKey {
-		// 请务必确保关键帧帧从新的切片开始
-		// 外部遇到关键帧请先调用FlushSegment
-		utils.Assert(m.mwBlocks[m.index].buffer.IsEmpty())
-		//m.lastKeyFrameIndex = m.index
-		//m.keyFrameCount++
+		m.hasKeyVideoDataInCurrentSegment = true
 	}
 
 	if ts < m.startTS {
@@ -117,70 +217,43 @@ func (m *mergeWritingBuffer) Allocate(size int, ts int64, videoKey bool) []byte 
 	}
 
 	m.duration = int(ts - m.startTS)
-	return m.mwBlocks[m.index].buffer.Allocate(size)
+	return m.buffers[m.index].buffer.Alloc(size)
 }
 
 func (m *mergeWritingBuffer) FlushSegment() ([]byte, bool) {
-	if !AppConfig.GOPCache || !m.existVideo {
-		return nil, false
-	} else if m.mwBlocks[m.index].buffer == nil || m.mwBlocks[m.index].free {
-		return nil, false
-	}
-
-	data, _ := m.mwBlocks[m.index].buffer.Data()
+	data := m.buffers[m.index].buffer.Feat()
 	if len(data) == 0 {
 		return nil, false
 	}
 
-	key := m.mwBlocks[m.index].keyVideo
+	m.segmentCount++
+	key := m.hasKeyVideoDataInCurrentSegment
+	m.hasKeyVideoDataInCurrentSegment = false
 	if key {
-		m.lastKeyFrameIndex = m.index
-		m.keyFrameCount++
+		m.completedKeyVideoSegmentPositions = append(m.completedKeyVideoSegmentPositions, int64(m.index<<32|m.buffers[m.index].segments.Size()))
 	}
 
-	// 计算最大切片数据长度，后续创建新切片按照最大长度分配内存空间
-	if m.lastKeyFrameIndex == m.index && m.keyFrameBufferMaxLength < len(data) {
-		m.keyFrameBufferMaxLength = len(data) * 3 / 2
-	} else if m.lastKeyFrameIndex != m.index && m.nonKeyFrameBufferMaxLength < len(data) {
-		m.nonKeyFrameBufferMaxLength = len(data) * 3 / 2
-	}
-
-	// 设置当前切片的完整性
-	m.mwBlocks[m.index].completed = true
-
-	// 分配下一个切片
-	capacity := cap(m.mwBlocks)
-	if m.index+1 == capacity && m.keyFrameCount == 1 {
-		m.grow()
-		capacity = cap(m.mwBlocks)
-	}
-
-	// 计算下一个切片索引
-	m.index = (m.index + 1) % capacity
+	m.buffers[m.index].segments.Push(struct {
+		data []byte
+		key  bool
+	}{data: data, key: key})
 
 	// 清空下一个切片的标记
 	m.startTS = -1
 	m.duration = 0
-	m.mwBlocks[m.index].free = true
-	m.mwBlocks[m.index].completed = false
+	m.hasVideoDataInCurrentSegment = false
 	return data, key
 }
 
-func (m *mergeWritingBuffer) PeekCompletedSegment() ([]byte, bool) {
-	if !AppConfig.GOPCache || !m.existVideo {
-		data, _ := m.mwBlocks[0].buffer.Data()
-		m.mwBlocks[0].buffer.Clear()
-		return data, false
+func (m *mergeWritingBuffer) TryFlushSegment() ([]byte, bool) {
+	if (!AppConfig.GOPCache || !m.existVideo) || m.duration >= AppConfig.MergeWriteLatency {
+		return m.FlushSegment()
 	}
 
-	if m.duration < AppConfig.MergeWriteLatency {
-		return nil, false
-	}
-
-	return m.FlushSegment()
+	return nil, false
 }
 
-func (m *mergeWritingBuffer) IsFull(ts int64) bool {
+func (m *mergeWritingBuffer) ShouldFlush(ts int64) bool {
 	if m.startTS == -1 {
 		return false
 	}
@@ -189,67 +262,55 @@ func (m *mergeWritingBuffer) IsFull(ts int64) bool {
 }
 
 func (m *mergeWritingBuffer) IsNewSegment() bool {
-	return m.mwBlocks[m.index].buffer == nil || m.mwBlocks[m.index].free
+	return m.buffers == nil || m.buffers[m.index].buffer.PendingBlockSize() == 0
 }
 
-func (m *mergeWritingBuffer) Reserve(length int) {
-	utils.Assert(m.mwBlocks[m.index].buffer != nil)
-
-	_ = m.mwBlocks[m.index].buffer.Allocate(length)
+func (m *mergeWritingBuffer) Reserve(size int) {
+	_ = m.buffers[m.index].buffer.Alloc(size)
 }
 
 func (m *mergeWritingBuffer) ReadSegmentsFromKeyFrameIndex(cb func([]byte)) {
-	if m.keyFrameCount == 0 {
+	if !AppConfig.GOPCache || !m.existVideo || len(m.completedKeyVideoSegmentPositions) < 1 {
 		return
 	}
 
-	ranges := [2][2]int{{-1, -1}, {-1, -1}}
-	if m.lastKeyFrameIndex <= m.index {
-		ranges[0][0] = m.lastKeyFrameIndex
-		ranges[0][1] = m.index + 1
-	} else {
-		// 回环, 先遍历后面和前面的数据
-		ranges[0][0] = m.lastKeyFrameIndex
-		ranges[0][1] = cap(m.mwBlocks)
+	marker := m.completedKeyVideoSegmentPositions[len(m.completedKeyVideoSegmentPositions)-1]
+	bufferIndex := int(marker >> 32 & 0xFFFFFFFF)
+	position := int(marker & 0xFFFFFFFF)
 
-		ranges[1][0] = 0
-		ranges[1][1] = m.index + 1
+	var ranges [][2]int
+	// 回环
+	if m.index < bufferIndex {
+		ranges = append(ranges, [2]int{bufferIndex, len(m.buffers) - 1})
+		ranges = append(ranges, [2]int{0, m.index})
+	} else {
+		ranges = append(ranges, [2]int{bufferIndex, m.index})
 	}
 
-	for _, index := range ranges {
-		for i := index[0]; i > -1 && i < index[1]; i++ {
-			if m.mwBlocks[i].buffer == nil || !m.mwBlocks[i].completed {
-				break
+	for _, ints := range ranges {
+		for i := ints[0]; i <= ints[1]; i++ {
+
+			for j := position; j < m.buffers[i].segments.Size(); j++ {
+				cb(m.buffers[i].segments.Peek(j).data)
 			}
 
-			data, _ := m.mwBlocks[i].buffer.Data()
-			cb(data)
+			// 后续的切片, 从0开始
+			position = 0
 		}
 	}
 }
 
 func (m *mergeWritingBuffer) Capacity() int {
-	return cap(m.mwBlocks)
+	return m.segmentCount
+}
+
+func (m *mergeWritingBuffer) HasVideoDataInCurrentSegment() bool {
+	return m.hasVideoDataInCurrentSegment
 }
 
 func NewMergeWritingBuffer(existVideo bool) MergeWritingBuffer {
-	var blocks []mwBlock
-	if existVideo {
-		blocks = make([]mwBlock, DefaultMBBufferSize)
-	} else {
-		blocks = make([]mwBlock, 1)
-	}
-
-	if !existVideo || !AppConfig.GOPCache {
-		blocks[0] = mwBlock{true, false, collections.NewDirectMemoryPool(1024 * 100), false, 0}
-	}
-
 	return &mergeWritingBuffer{
-		keyFrameBufferMaxLength:    AppConfig.MergeWriteLatency * 1024 * 2,
-		nonKeyFrameBufferMaxLength: AppConfig.MergeWriteLatency * 1024 / 2,
-		mwBlocks:                   blocks,
-		startTS:                    -1,
-		lastKeyFrameIndex:          -1,
-		existVideo:                 existVideo,
+		startTS:    -1,
+		existVideo: existVideo,
 	}
 }

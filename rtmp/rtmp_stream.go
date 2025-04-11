@@ -59,11 +59,10 @@ func (t *transStream) Input(packet *avformat.AVPacket) ([][]byte, int64, bool, e
 	payloadSize += dataHeaderSize + len(data)
 
 	// 遇到视频关键帧, 发送剩余的流, 创建新切片
-	if videoKey {
-		if segment, key := t.MWBuffer.FlushSegment(); len(segment) > 0 {
-			keyBuffer = key
-			t.AppendOutStreamBuffer(segment)
-		}
+	if videoKey && !t.MWBuffer.IsNewSegment() && t.MWBuffer.HasVideoDataInCurrentSegment() {
+		segment, key := t.MWBuffer.FlushSegment()
+		t.AppendOutStreamBuffer(segment)
+		keyBuffer = key
 	}
 
 	// type为0的header大小
@@ -78,7 +77,17 @@ func (t *transStream) Input(packet *avformat.AVPacket) ([][]byte, int64, bool, e
 	}
 
 	// 分配指定大小的内存
-	bytes := t.MWBuffer.Allocate(totalSize, dts, videoKey)
+	bytes, ok := t.MWBuffer.TryAlloc(totalSize, dts, videoPkt, videoKey)
+	if !ok {
+		segment, key := t.MWBuffer.FlushSegment()
+		if !keyBuffer {
+			keyBuffer = key
+		}
+
+		t.AppendOutStreamBuffer(segment)
+		bytes, ok = t.MWBuffer.TryAlloc(totalSize, dts, videoPkt, videoKey)
+		utils.Assert(ok)
+	}
 
 	// 写第一个type为0的chunk sequenceHeader
 	chunk.Length = payloadSize
@@ -97,7 +106,7 @@ func (t *transStream) Input(packet *avformat.AVPacket) ([][]byte, int64, bool, e
 	utils.Assert(len(bytes) == n)
 
 	// 合并写满了再发
-	if segment, key := t.MWBuffer.PeekCompletedSegment(); len(segment) > 0 {
+	if segment, key := t.MWBuffer.TryFlushSegment(); len(segment) > 0 {
 		keyBuffer = key
 		t.AppendOutStreamBuffer(segment)
 	}

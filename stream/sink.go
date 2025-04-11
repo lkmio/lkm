@@ -96,6 +96,8 @@ type Sink interface {
 
 	// IsExited 异步发送协程是否退出, 如果还没有退出(write阻塞)不恢复推流
 	IsExited() bool
+
+	PendingSendQueueSize() int
 }
 
 type BaseSink struct {
@@ -187,6 +189,10 @@ func (s *BaseSink) Write(index int, data [][]byte, ts int64) error {
 	}
 
 	return nil
+}
+
+func (s *BaseSink) PendingSendQueueSize() int {
+	return len(s.pendingSendQueue)
 }
 
 func (s *BaseSink) GetSourceID() string {

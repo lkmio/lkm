@@ -43,10 +43,14 @@ type TransStream interface {
 	// AppendOutStreamBuffer 添加合并写块到队列
 	AppendOutStreamBuffer(buffer []byte)
 
-	// OutStreamBufferCapacity 返回合并写块队列容量大小, 作为sink异步推流的队列大小;
-	OutStreamBufferCapacity() int
+	// Capacity 返回合并写块队列容量大小, 作为sink异步推流的队列大小;
+	Capacity() int
 
 	IsExistVideo() bool
+
+	GrowMWBuffer() bool
+
+	IsTCPStreaming() bool
 }
 
 type BaseTransStream struct {
@@ -112,7 +116,7 @@ func (t *BaseTransStream) AppendOutStreamBuffer(buffer []byte) {
 	t.OutBufferSize++
 }
 
-func (t *BaseTransStream) OutStreamBufferCapacity() int {
+func (t *BaseTransStream) Capacity() int {
 	return 0
 }
 
@@ -136,6 +140,14 @@ func (t *BaseTransStream) ReadKeyFrameBuffer() ([][]byte, int64, error) {
 	return nil, 0, nil
 }
 
+func (t *BaseTransStream) GrowMWBuffer() bool {
+	return false
+}
+
+func (t *BaseTransStream) IsTCPStreaming() bool {
+	return false
+}
+
 type TCPTransStream struct {
 	BaseTransStream
 
@@ -145,7 +157,16 @@ type TCPTransStream struct {
 	MWBuffer MergeWritingBuffer //合并写缓冲区, 同时作为用户态的发送缓冲区
 }
 
-func (t *TCPTransStream) OutStreamBufferCapacity() int {
+func (t *TCPTransStream) Capacity() int {
 	utils.Assert(t.MWBuffer != nil)
 	return t.MWBuffer.Capacity()
+}
+
+func (t *TCPTransStream) GrowMWBuffer() bool {
+	utils.Assert(t.MWBuffer != nil)
+	return t.MWBuffer.TryGrow()
+}
+
+func (t *TCPTransStream) IsTCPStreaming() bool {
+	return true
 }

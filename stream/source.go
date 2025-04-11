@@ -321,6 +321,7 @@ func (s *PublishSource) DispatchPacket(transStream TransStream, packet *avformat
 func (s *PublishSource) DispatchBuffer(transStream TransStream, index int, data [][]byte, timestamp int64, videoKey bool) {
 	sinks := s.TransStreamSinks[transStream.GetID()]
 	exist := transStream.IsExistVideo()
+
 	for _, sink := range sinks {
 
 		// 如果存在视频, 确保向sink发送的第一帧是关键帧
@@ -330,35 +331,53 @@ func (s *PublishSource) DispatchBuffer(transStream TransStream, index int, data 
 			}
 
 			if extraData, _, _ := transStream.ReadExtraData(timestamp); len(extraData) > 0 {
-				s.write(sink, index, extraData, timestamp)
+				s.write(transStream, sink, index, extraData, timestamp)
 			}
 		}
 
-		s.write(sink, index, data, timestamp)
+		s.write(transStream, sink, index, data, timestamp)
+	}
+}
+
+func (s *PublishSource) pendingSink(sink Sink) {
+	if s.existVideo {
+		log.Sugar.Errorf("向sink推流超时,挂起%s-sink: %s source: %s", sink.GetProtocol().String(), sink.GetID(), s.ID)
+		// 等待下个关键帧恢复推流
+		s.PauseStreaming(sink)
+	} else {
+		log.Sugar.Errorf("向sink推流超时,关闭连接. %s-sink: %s source: %s", sink.GetProtocol().String(), sink.GetID(), s.ID)
+		go sink.Close()
 	}
 }
 
 // 向sink推流
-func (s *PublishSource) write(sink Sink, index int, data [][]byte, timestamp int64) {
+func (s *PublishSource) write(transStream TransStream, sink Sink, index int, data [][]byte, timestamp int64) {
 	err := sink.Write(index, data, timestamp)
-	if err == nil {
-		sink.IncreaseSentPacketCount()
+	ok := err == nil
+
+	defer func() {
+		if ok {
+			sink.IncreaseSentPacketCount()
+		}
+	}()
+
+	// 跳过非TCP流和待发送包数量小于合并写缓冲区大小的sink
+	if !transStream.IsTCPStreaming() || sink.PendingSendQueueSize() <= transStream.Capacity() {
 		return
+	}
+
+	// 尝试扩容合并写缓冲区, 不能扩容, 则挂起Sink
+	if !transStream.GrowMWBuffer() {
+		ok = false
+		s.pendingSink(sink)
 	}
 
 	// 推流超时, 可能是服务器或拉流端带宽不够、拉流端不读取数据等情况造成内核发送缓冲区满, 进而阻塞.
 	// 直接关闭连接. 当然也可以将sink先挂起, 后续再继续推流.
-	_, ok := err.(*transport.ZeroWindowSizeError)
-	if ok {
-		if s.existVideo {
-			log.Sugar.Errorf("向sink推流超时,挂起%s-sink: %s source: %s", sink.GetProtocol().String(), sink.GetID(), s.ID)
-			// 等待下个关键帧恢复推流
-			s.PauseStreaming(sink)
-		} else {
-			log.Sugar.Errorf("向sink推流超时,关闭连接. %s-sink: %s source: %s", sink.GetProtocol().String(), sink.GetID(), s.ID)
-			go sink.Close()
-		}
-	}
+	//_, ok := err.(*transport.ZeroWindowSizeError)
+	//if ok {
+	//	s.pendingSink(sink)
+	//}
 }
 
 func (s *PublishSource) PauseStreaming(sink Sink) {
@@ -475,9 +494,8 @@ func (s *PublishSource) doAddSink(sink Sink) bool {
 
 	// TCP拉流开启异步发包, 一旦出现网络不好的链路, 其余正常链路不受影响.
 	_, ok := sink.GetConn().(*transport.Conn)
-	if ok && sink.IsTCPStreaming() && transStream.OutStreamBufferCapacity() > 2 {
-		length := transStream.OutStreamBufferCapacity() - 2
-		sink.EnableAsyncWriteMode(length)
+	if ok && sink.IsTCPStreaming() {
+		sink.EnableAsyncWriteMode(64)
 	}
 
 	// 发送已有的缓存数据
@@ -485,10 +503,10 @@ func (s *PublishSource) doAddSink(sink Sink) bool {
 	data, timestamp, _ := transStream.ReadKeyFrameBuffer()
 	if len(data) > 0 {
 		if extraData, _, _ := transStream.ReadExtraData(timestamp); len(extraData) > 0 {
-			s.write(sink, 0, extraData, timestamp)
+			s.write(transStream, sink, 0, extraData, timestamp)
 		}
 
-		s.write(sink, 0, data, timestamp)
+		s.write(transStream, sink, 0, data, timestamp)
 	}
 
 	// 新建传输流，发送已经缓存的音视频帧

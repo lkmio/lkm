@@ -264,9 +264,8 @@ func init() {
 
 // AppConfig_ GOP缓存和合并写开关必须保持一致，同时开启或关闭. 关闭GOP缓存，是为了降低延迟，很难理解又另外开启合并写.
 type AppConfig_ struct {
-	GOPCache       bool   `json:"gop_cache"`       // 是否开启GOP缓存，只缓存一组音视频
-	GOPBufferSize  int    `json:"gop_buffer_size"` // 预估GOPBuffer大小, AVPacket缓存池和合并写缓存池都会参考此大小
-	ProbeTimeout   int    `json:"probe_timeout"`   // 收流解析AVStream的超时时间
+	GOPCache       bool   `json:"gop_cache"`     // 是否开启GOP缓存，只缓存一组音视频
+	ProbeTimeout   int    `json:"probe_timeout"` // 收流解析AVStream的超时时间
 	PublicIP       string `json:"public_ip"`
 	ListenIP       string `json:"listen_ip"`
 	IdleTimeout    int64  `json:"idle_timeout"`    // 多长时间(单位秒)没有拉流. 如果开启hook通知, 根据hook响应, 决定是否关闭Source(200-不关闭/非200关闭). 否则会直接关闭Source.
@@ -306,14 +305,12 @@ func LoadConfigFile(path string) (*AppConfig_, error) {
 func SetDefaultConfig(config *AppConfig_) {
 	if !config.GOPCache {
 		config.GOPCache = true
-		config.GOPBufferSize = 8196 * 1024
 		config.MergeWriteLatency = 350
 		log.Sugar.Warnf("强制开启GOP缓存")
 	}
 
-	config.GOPBufferSize = limitInt(4096*1024/8, 2048*1024*10, config.GOPBufferSize) // 最低4M码率 最高160M码率
-	config.MergeWriteLatency = limitInt(350, 2000, config.MergeWriteLatency)         // 最低缓存350毫秒数据才发送 最高缓存2秒数据才发送
-	config.ProbeTimeout = limitInt(2000, 5000, config.MergeWriteLatency)             // 2-5秒内必须解析完AVStream
+	config.MergeWriteLatency = limitInt(350, 2000, config.MergeWriteLatency) // 最低缓存350毫秒数据才发送 最高缓存2秒数据才发送
+	config.ProbeTimeout = limitInt(2000, 5000, config.MergeWriteLatency)     // 2-5秒内必须解析完AVStream
 
 	config.Log.Level = limitInt(int(zapcore.DebugLevel), int(zapcore.FatalLevel), config.Log.Level)
 	config.Log.MaxSize = limitMin(1, config.Log.MaxSize)
