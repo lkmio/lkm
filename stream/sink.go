@@ -136,6 +136,8 @@ func (s *BaseSink) SetID(id SinkID) {
 }
 
 func (s *BaseSink) doAsyncWrite() {
+	defer s.existed.Store(true)
+
 	for {
 		select {
 		case <-s.cancelCtx.Done():
@@ -145,8 +147,6 @@ func (s *BaseSink) doAsyncWrite() {
 			break
 		}
 	}
-
-	s.existed.Store(true)
 }
 
 func (s *BaseSink) EnableAsyncWriteMode(queueSize int) {
@@ -262,6 +262,10 @@ func (s *BaseSink) Close() {
 		if s.Conn != nil {
 			s.Conn.Close()
 			s.Conn = nil
+		}
+
+		if s.cancelCtx != nil {
+			s.cancelFunc()
 		}
 	}()
 
