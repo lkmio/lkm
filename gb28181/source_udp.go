@@ -9,7 +9,7 @@ import (
 type UDPSource struct {
 	BaseGBSource
 
-	jitterBuffer  *stream.JitterBuffer
+	jitterBuffer  *stream.JitterBuffer[*rtp.Packet]
 	receiveBuffer *stream.ReceiveBuffer
 }
 
@@ -18,9 +18,9 @@ func (u *UDPSource) SetupType() SetupType {
 }
 
 // OnOrderedRtp 有序RTP包回调
-func (u *UDPSource) OnOrderedRtp(packet interface{}) {
+func (u *UDPSource) OnOrderedRtp(packet *rtp.Packet) {
 	// 此时还在网络收流携程, 交给Source的主协程处理
-	u.PublishSource.Input(packet.(*rtp.Packet).Raw)
+	u.PublishSource.Input(packet.Raw)
 }
 
 // InputRtpPacket 将RTP包排序后，交给Source的主协程处理
@@ -30,23 +30,24 @@ func (u *UDPSource) InputRtpPacket(pkt *rtp.Packet) error {
 
 	pkt.Raw = block[:len(pkt.Raw)]
 	u.jitterBuffer.Push(pkt.SequenceNumber, pkt)
+	for pop := u.jitterBuffer.Pop(true); pop != nil; pop = u.jitterBuffer.Pop(true) {
+		u.OnOrderedRtp(pop)
+	}
 	return nil
 }
 
 func (u *UDPSource) Close() {
-	// 清空剩余在缓冲区的包
-	u.jitterBuffer.Flush()
-	u.jitterBuffer.SetHandler(nil)
+	// 清空剩余的包
+	for pop := u.jitterBuffer.Pop(false); pop != nil; pop = u.jitterBuffer.Pop(false) {
+		u.OnOrderedRtp(pop)
+	}
 
 	u.BaseGBSource.Close()
 }
 
 func NewUDPSource() *UDPSource {
-	u := &UDPSource{
+	return &UDPSource{
 		receiveBuffer: stream.NewReceiveBuffer(1500, stream.ReceiveBufferUdpBlockCount+50),
+		jitterBuffer:  stream.NewJitterBuffer[*rtp.Packet](),
 	}
-
-	u.jitterBuffer = stream.NewJitterBuffer()
-	u.jitterBuffer.SetHandler(u.OnOrderedRtp)
-	return u
 }
