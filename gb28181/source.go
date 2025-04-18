@@ -3,6 +3,7 @@ package gb28181
 import (
 	"fmt"
 	"github.com/lkmio/avformat"
+	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
@@ -82,7 +83,8 @@ func (source *BaseGBSource) Input(data []byte) error {
 		}
 
 		bytes := transStream.(*ForwardStream).WrapData(data)
-		rtpPacket := [1][]byte{bytes}
+		rtpPacket := [1]*collections.ReferenceCounter[[]byte]{collections.NewReferenceCounter(bytes)}
+
 		source.DispatchBuffer(transStream, -1, rtpPacket[:], -1, true)
 	}
 

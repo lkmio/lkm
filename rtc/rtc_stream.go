@@ -2,6 +2,7 @@ package rtc
 
 import (
 	"github.com/lkmio/avformat"
+	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/stream"
 	"github.com/pion/interceptor"
@@ -17,20 +18,20 @@ type transStream struct {
 	stream.BaseTransStream
 }
 
-func (t *transStream) Input(packet *avformat.AVPacket) ([][]byte, int64, bool, error) {
+func (t *transStream) Input(packet *avformat.AVPacket) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
 	t.ClearOutStreamBuffer()
 
 	if utils.AVMediaTypeAudio == packet.MediaType {
-		t.AppendOutStreamBuffer(packet.Data)
+		t.AppendOutStreamBuffer(collections.NewReferenceCounter(packet.Data))
 	} else if utils.AVMediaTypeVideo == packet.MediaType {
 		avStream := t.BaseTransStream.Tracks[packet.Index].Stream
 		if packet.Key {
 			extra := avStream.CodecParameters.AnnexBExtraData()
-			t.AppendOutStreamBuffer(extra)
+			t.AppendOutStreamBuffer(collections.NewReferenceCounter(extra))
 		}
 
 		data := avformat.AVCCPacket2AnnexB(avStream, packet)
-		t.AppendOutStreamBuffer(data)
+		t.AppendOutStreamBuffer(collections.NewReferenceCounter(data))
 	}
 
 	return t.OutBuffer[:t.OutBufferSize], int64(uint32(packet.GetDuration(1000))), utils.AVMediaTypeVideo == packet.MediaType && packet.Key, nil

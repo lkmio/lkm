@@ -3,6 +3,7 @@ package flv
 import (
 	"encoding/binary"
 	"github.com/lkmio/avformat"
+	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/flv"
 	"github.com/lkmio/flv/amf0"
@@ -19,7 +20,7 @@ type TransStream struct {
 	flvExtraDataPreTagSize uint32
 }
 
-func (t *TransStream) Input(packet *avformat.AVPacket) ([][]byte, int64, bool, error) {
+func (t *TransStream) Input(packet *avformat.AVPacket) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
 	t.ClearOutStreamBuffer()
 
 	var flvTagSize int
@@ -82,13 +83,14 @@ func (t *TransStream) Input(packet *avformat.AVPacket) ([][]byte, int64, bool, e
 	copy(bytes[n:], data)
 
 	// 合并写满再发
-	if segment, key := t.MWBuffer.TryFlushSegment(); len(segment) > 0 {
+	if segment, key := t.MWBuffer.TryFlushSegment(); segment != nil {
 		if !keyBuffer {
 			keyBuffer = key
 		}
 
 		// 已经分配末尾换行符内存, 直接添加
-		t.AppendOutStreamBuffer(FormatSegment(segment))
+		segment.ResetData(FormatSegment(segment.Get()))
+		t.AppendOutStreamBuffer(segment)
 	}
 
 	return t.OutBuffer[:t.OutBufferSize], 0, keyBuffer, nil
@@ -128,38 +130,33 @@ func (t *TransStream) WriteHeader() error {
 	return nil
 }
 
-func (t *TransStream) ReadExtraData(_ int64) ([][]byte, int64, error) {
-	return [][]byte{GetHttpFLVBlock(t.flvHeaderBlock), GetHttpFLVBlock(t.flvExtraDataBlock)}, 0, nil
+func (t *TransStream) ReadExtraData(_ int64) ([]*collections.ReferenceCounter[[]byte], int64, error) {
+	return []*collections.ReferenceCounter[[]byte]{collections.NewReferenceCounter(GetHttpFLVBlock(t.flvHeaderBlock)), collections.NewReferenceCounter(GetHttpFLVBlock(t.flvExtraDataBlock))}, 0, nil
 }
 
-func (t *TransStream) ReadKeyFrameBuffer() ([][]byte, int64, error) {
+func (t *TransStream) ReadKeyFrameBuffer() ([]*collections.ReferenceCounter[[]byte], int64, error) {
 	t.ClearOutStreamBuffer()
 
 	// 发送当前内存池已有的合并写切片
-	t.MWBuffer.ReadSegmentsFromKeyFrameIndex(func(bytes []byte) {
+	t.MWBuffer.ReadSegmentsFromKeyFrameIndex(func(segment *collections.ReferenceCounter[[]byte]) {
 		// 修改第一个flv tag的pre tag size为sequence header tag size
+		bytes := segment.Get()
 		if t.OutBufferSize < 1 {
-			binary.BigEndian.PutUint32(bytes[HttpFlvBlockHeaderSize:], t.flvExtraDataPreTagSize)
+			binary.BigEndian.PutUint32(GetFLVTag(bytes), t.flvExtraDataPreTagSize)
 		}
 
-		// 遍历发送合并写切片
-		var index int
-		for ; index < len(bytes); index += 4 {
-			size := binary.BigEndian.Uint32(bytes[index:])
-			t.AppendOutStreamBuffer(GetHttpFLVBlock(bytes[index : index+4+int(size)]))
-			index += int(size)
-		}
+		t.AppendOutStreamBuffer(segment)
 	})
 
 	return t.OutBuffer[:t.OutBufferSize], 0, nil
 }
 
-func (t *TransStream) Close() ([][]byte, int64, error) {
+func (t *TransStream) Close() ([]*collections.ReferenceCounter[[]byte], int64, error) {
 	t.ClearOutStreamBuffer()
 
 	// 发送剩余的流
 	if !t.MWBuffer.IsNewSegment() {
-		if segment, _ := t.flushSegment(); len(segment) > 0 {
+		if segment, _ := t.flushSegment(); segment != nil {
 			t.AppendOutStreamBuffer(segment)
 		}
 	}
@@ -168,11 +165,12 @@ func (t *TransStream) Close() ([][]byte, int64, error) {
 }
 
 // 保存为完整的http-flv切片
-func (t *TransStream) flushSegment() ([]byte, bool) {
+func (t *TransStream) flushSegment() (*collections.ReferenceCounter[[]byte], bool) {
 	// 预览末尾换行符
 	t.MWBuffer.Reserve(2)
 	segment, key := t.MWBuffer.FlushSegment()
-	return FormatSegment(segment), key
+	segment.ResetData(FormatSegment(segment.Get()))
+	return segment, key
 }
 
 func NewHttpTransStream(metadata *amf0.Object, prevTagSize uint32) stream.TransStream {

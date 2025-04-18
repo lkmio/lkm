@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/lkmio/avformat"
 	"github.com/lkmio/avformat/avc"
+	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/stream"
 	"github.com/lkmio/rtp"
@@ -39,7 +40,7 @@ func (t *TransStream) OverTCP(data []byte, channel int) {
 	binary.BigEndian.PutUint16(data[2:], uint16(len(data)-4))
 }
 
-func (t *TransStream) Input(packet *avformat.AVPacket) ([][]byte, int64, bool, error) {
+func (t *TransStream) Input(packet *avformat.AVPacket) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
 	t.ClearOutStreamBuffer()
 
 	var ts uint32
@@ -57,7 +58,9 @@ func (t *TransStream) Input(packet *avformat.AVPacket) ([][]byte, int64, bool, e
 	return t.OutBuffer[:t.OutBufferSize], int64(ts), utils.AVMediaTypeVideo == packet.MediaType && packet.Key, nil
 }
 
-func (t *TransStream) ReadExtraData(ts int64) ([][]byte, int64, error) {
+func (t *TransStream) ReadExtraData(ts int64) ([]*collections.ReferenceCounter[[]byte], int64, error) {
+	t.ClearOutStreamBuffer()
+
 	// 返回视频编码数据的rtp包
 	for _, track := range t.RtspTracks {
 		if utils.AVMediaTypeVideo != track.MediaType {
@@ -71,7 +74,11 @@ func (t *TransStream) ReadExtraData(ts int64) ([][]byte, int64, error) {
 			binary.BigEndian.PutUint32(bytes[OverTcpHeaderSize+4:], uint32(ts))
 		}
 
-		return track.ExtraDataBuffer, ts, nil
+		for _, data := range track.ExtraDataBuffer {
+			t.AppendOutStreamBuffer(collections.NewReferenceCounter(data))
+		}
+
+		return t.OutBuffer[:t.OutBufferSize], ts, nil
 	}
 
 	return nil, ts, nil
@@ -91,7 +98,7 @@ func (t *TransStream) PackRtpPayload(track *Track, channel int, data []byte, tim
 
 		packet := t.buffer.Get(index)[:OverTcpHeaderSize+len(bytes)]
 		t.OverTCP(packet, channel)
-		t.AppendOutStreamBuffer(packet)
+		t.AppendOutStreamBuffer(collections.NewReferenceCounter(packet))
 	})
 }
 
@@ -158,7 +165,7 @@ func (t *TransStream) AddTrack(track *stream.Track) error {
 	return nil
 }
 
-func (t *TransStream) Close() ([][]byte, int64, error) {
+func (t *TransStream) Close() ([]*collections.ReferenceCounter[[]byte], int64, error) {
 	for _, track := range t.RtspTracks {
 		if track != nil {
 			track.Close()

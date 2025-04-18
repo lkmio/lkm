@@ -2,6 +2,7 @@ package rtmp
 
 import (
 	"github.com/lkmio/avformat"
+	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/flv"
 	"github.com/lkmio/flv/amf0"
@@ -20,7 +21,7 @@ type transStream struct {
 	metaData   *amf0.Object // 推流方携带的元数据
 }
 
-func (t *transStream) Input(packet *avformat.AVPacket) ([][]byte, int64, bool, error) {
+func (t *transStream) Input(packet *avformat.AVPacket) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
 	t.ClearOutStreamBuffer()
 
 	var data []byte
@@ -106,7 +107,7 @@ func (t *transStream) Input(packet *avformat.AVPacket) ([][]byte, int64, bool, e
 	utils.Assert(len(bytes) == n)
 
 	// 合并写满了再发
-	if segment, key := t.MWBuffer.TryFlushSegment(); len(segment) > 0 {
+	if segment, key := t.MWBuffer.TryFlushSegment(); segment != nil {
 		keyBuffer = key
 		t.AppendOutStreamBuffer(segment)
 	}
@@ -114,18 +115,18 @@ func (t *transStream) Input(packet *avformat.AVPacket) ([][]byte, int64, bool, e
 	return t.OutBuffer[:t.OutBufferSize], 0, keyBuffer, nil
 }
 
-func (t *transStream) ReadExtraData(_ int64) ([][]byte, int64, error) {
+func (t *transStream) ReadExtraData(_ int64) ([]*collections.ReferenceCounter[[]byte], int64, error) {
 	utils.Assert(len(t.sequenceHeader) > 0)
 
 	// 发送sequence sequenceHeader
-	return [][]byte{t.sequenceHeader}, 0, nil
+	return []*collections.ReferenceCounter[[]byte]{collections.NewReferenceCounter(t.sequenceHeader)}, 0, nil
 }
 
-func (t *transStream) ReadKeyFrameBuffer() ([][]byte, int64, error) {
+func (t *transStream) ReadKeyFrameBuffer() ([]*collections.ReferenceCounter[[]byte], int64, error) {
 	t.ClearOutStreamBuffer()
 
 	// 发送当前内存池已有的合并写切片
-	t.MWBuffer.ReadSegmentsFromKeyFrameIndex(func(bytes []byte) {
+	t.MWBuffer.ReadSegmentsFromKeyFrameIndex(func(bytes *collections.ReferenceCounter[[]byte]) {
 		t.AppendOutStreamBuffer(bytes)
 	})
 
@@ -222,11 +223,11 @@ func (t *transStream) WriteHeader() error {
 	return nil
 }
 
-func (t *transStream) Close() ([][]byte, int64, error) {
+func (t *transStream) Close() ([]*collections.ReferenceCounter[[]byte], int64, error) {
 	t.ClearOutStreamBuffer()
 
 	// 发送剩余的流
-	if segment, _ := t.MWBuffer.FlushSegment(); len(segment) > 0 {
+	if segment, _ := t.MWBuffer.FlushSegment(); segment != nil {
 		t.AppendOutStreamBuffer(segment)
 	}
 

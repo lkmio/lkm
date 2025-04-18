@@ -3,6 +3,7 @@ package hls
 import (
 	"fmt"
 	"github.com/lkmio/avformat"
+	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
@@ -37,7 +38,7 @@ type TransStream struct {
 	PlaylistFormat *string                     // 位于内存中的播放列表，每个sink都引用指针地址.
 }
 
-func (t *TransStream) Input(packet *avformat.AVPacket) ([][]byte, int64, bool, error) {
+func (t *TransStream) Input(packet *avformat.AVPacket) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
 	// 创建一下个切片
 	// 已缓存时长>=指定时长, 如果存在视频, 还需要等遇到关键帧才切片
 	if (!t.ExistVideo || utils.AVMediaTypeVideo == packet.MediaType && packet.Key) && float32(t.muxer.Duration())/90000 >= float32(t.duration) {
@@ -190,7 +191,7 @@ func (t *TransStream) createSegment() error {
 	return nil
 }
 
-func (t *TransStream) Close() ([][]byte, int64, error) {
+func (t *TransStream) Close() ([]*collections.ReferenceCounter[[]byte], int64, error) {
 	var err error
 
 	if t.ctx.file != nil {

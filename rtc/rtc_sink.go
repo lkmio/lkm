@@ -2,6 +2,7 @@ package rtc
 
 import (
 	"fmt"
+	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
@@ -140,14 +141,14 @@ func (s *Sink) Close() {
 	}
 }
 
-func (s *Sink) Write(index int, data [][]byte, ts int64) error {
+func (s *Sink) Write(index int, data []*collections.ReferenceCounter[[]byte], ts int64) error {
 	if s.tracks[index] == nil {
 		return nil
 	}
 
 	for _, bytes := range data {
 		err := s.tracks[index].WriteSample(media.Sample{
-			Data:     bytes,
+			Data:     bytes.Get(),
 			Duration: time.Duration(ts) * time.Millisecond,
 		})
 

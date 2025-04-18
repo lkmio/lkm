@@ -2,6 +2,7 @@ package stream
 
 import (
 	"github.com/lkmio/avformat"
+	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/avformat/utils"
 )
 
@@ -12,7 +13,7 @@ type TransStream interface {
 	SetID(id TransStreamID)
 
 	// Input 封装传输流, 返回合并写块、时间戳、合并写块是否包含视频关键帧
-	Input(packet *avformat.AVPacket) ([][]byte, int64, bool, error)
+	Input(packet *avformat.AVPacket) ([]*collections.ReferenceCounter[[]byte], int64, bool, error)
 
 	AddTrack(track *Track) error
 
@@ -29,28 +30,19 @@ type TransStream interface {
 	SetProtocol(protocol TransStreamProtocol)
 
 	// ReadExtraData 读取传输流的编码器扩展数据
-	ReadExtraData(timestamp int64) ([][]byte, int64, error)
+	ReadExtraData(timestamp int64) ([]*collections.ReferenceCounter[[]byte], int64, error)
 
 	// ReadKeyFrameBuffer 读取最近的包含视频关键帧的合并写队列
-	ReadKeyFrameBuffer() ([][]byte, int64, error)
+	ReadKeyFrameBuffer() ([]*collections.ReferenceCounter[[]byte], int64, error)
 
 	// Close 关闭传输流, 返回还未flush的合并写块
-	Close() ([][]byte, int64, error)
-
-	// ClearOutStreamBuffer 清空传输流的合并写块队列
-	ClearOutStreamBuffer()
-
-	// AppendOutStreamBuffer 添加合并写块到队列
-	AppendOutStreamBuffer(buffer []byte)
-
-	// Capacity 返回合并写块队列容量大小, 作为sink异步推流的队列大小;
-	Capacity() int
+	Close() ([]*collections.ReferenceCounter[[]byte], int64, error)
 
 	IsExistVideo() bool
 
-	GrowMWBuffer() bool
-
 	IsTCPStreaming() bool
+
+	GetMWBuffer() MergeWritingBuffer
 }
 
 type BaseTransStream struct {
@@ -60,8 +52,8 @@ type BaseTransStream struct {
 	ExistVideo bool
 	Protocol   TransStreamProtocol
 
-	OutBuffer     [][]byte // 传输流的合并写块队列
-	OutBufferSize int      // 传输流返合并写块队列大小
+	OutBuffer     []*collections.ReferenceCounter[[]byte] // 传输流的合并写块队列
+	OutBufferSize int                                     // 传输流返合并写块队列大小
 }
 
 func (t *BaseTransStream) GetID() TransStreamID {
@@ -72,7 +64,7 @@ func (t *BaseTransStream) SetID(id TransStreamID) {
 	t.ID = id
 }
 
-func (t *BaseTransStream) Input(packet *avformat.AVPacket) ([][]byte, int64, bool, error) {
+func (t *BaseTransStream) Input(packet *avformat.AVPacket) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
 	return nil, -1, false, nil
 }
 
@@ -84,7 +76,7 @@ func (t *BaseTransStream) AddTrack(track *Track) error {
 	return nil
 }
 
-func (t *BaseTransStream) Close() ([][]byte, int64, error) {
+func (t *BaseTransStream) Close() ([]*collections.ReferenceCounter[[]byte], int64, error) {
 	return nil, 0, nil
 }
 
@@ -100,11 +92,11 @@ func (t *BaseTransStream) ClearOutStreamBuffer() {
 	t.OutBufferSize = 0
 }
 
-func (t *BaseTransStream) AppendOutStreamBuffer(buffer []byte) {
+func (t *BaseTransStream) AppendOutStreamBuffer(buffer *collections.ReferenceCounter[[]byte]) {
 	if t.OutBufferSize+1 > len(t.OutBuffer) {
 		// 扩容
 		size := (t.OutBufferSize + 1) * 2
-		newBuffer := make([][]byte, size)
+		newBuffer := make([]*collections.ReferenceCounter[[]byte], size)
 		for i := 0; i < t.OutBufferSize; i++ {
 			newBuffer[i] = t.OutBuffer[i]
 		}
@@ -114,10 +106,6 @@ func (t *BaseTransStream) AppendOutStreamBuffer(buffer []byte) {
 
 	t.OutBuffer[t.OutBufferSize] = buffer
 	t.OutBufferSize++
-}
-
-func (t *BaseTransStream) Capacity() int {
-	return 0
 }
 
 func (t *BaseTransStream) TrackSize() int {
@@ -132,20 +120,20 @@ func (t *BaseTransStream) IsExistVideo() bool {
 	return t.ExistVideo
 }
 
-func (t *BaseTransStream) ReadExtraData(timestamp int64) ([][]byte, int64, error) {
+func (t *BaseTransStream) ReadExtraData(timestamp int64) ([]*collections.ReferenceCounter[[]byte], int64, error) {
 	return nil, 0, nil
 }
 
-func (t *BaseTransStream) ReadKeyFrameBuffer() ([][]byte, int64, error) {
+func (t *BaseTransStream) ReadKeyFrameBuffer() ([]*collections.ReferenceCounter[[]byte], int64, error) {
 	return nil, 0, nil
-}
-
-func (t *BaseTransStream) GrowMWBuffer() bool {
-	return false
 }
 
 func (t *BaseTransStream) IsTCPStreaming() bool {
 	return false
+}
+
+func (t *BaseTransStream) GetMWBuffer() MergeWritingBuffer {
+	return nil
 }
 
 type TCPTransStream struct {
@@ -157,16 +145,10 @@ type TCPTransStream struct {
 	MWBuffer MergeWritingBuffer //合并写缓冲区, 同时作为用户态的发送缓冲区
 }
 
-func (t *TCPTransStream) Capacity() int {
-	utils.Assert(t.MWBuffer != nil)
-	return t.MWBuffer.Capacity()
-}
-
-func (t *TCPTransStream) GrowMWBuffer() bool {
-	utils.Assert(t.MWBuffer != nil)
-	return t.MWBuffer.TryGrow()
-}
-
 func (t *TCPTransStream) IsTCPStreaming() bool {
 	return true
+}
+
+func (t *TCPTransStream) GetMWBuffer() MergeWritingBuffer {
+	return t.MWBuffer
 }

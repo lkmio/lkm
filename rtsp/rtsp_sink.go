@@ -1,6 +1,7 @@
 package rtsp
 
 import (
+	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
@@ -79,7 +80,7 @@ func (s *Sink) AddSender(index int, tcp bool, ssrc uint32) (uint16, uint16, erro
 	return rtpPort, rtcpPort, err
 }
 
-func (s *Sink) Write(index int, data [][]byte, rtpTime int64) error {
+func (s *Sink) Write(index int, data []*collections.ReferenceCounter[[]byte], rtpTime int64) error {
 	// 拉流方还没有连接上来
 	if index >= cap(s.senders) || s.senders[index] == nil {
 		return nil
@@ -88,12 +89,12 @@ func (s *Sink) Write(index int, data [][]byte, rtpTime int64) error {
 	for _, bytes := range data {
 		sender := s.senders[index]
 		sender.PktCount++
-		sender.OctetCount += len(bytes)
+		sender.OctetCount += len(bytes.Get())
 		if s.TCPStreaming {
-			s.Conn.Write(bytes)
+			s.Conn.Write(bytes.Get())
 		} else {
 			//发送rtcp sr包
-			sender.RtpConn.Write(bytes[OverTcpHeaderSize:])
+			sender.RtpConn.Write(bytes.Get()[OverTcpHeaderSize:])
 
 			if sender.RtcpConn == nil || sender.PktCount%100 != 0 {
 				continue

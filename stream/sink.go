@@ -3,13 +3,12 @@ package stream
 import (
 	"context"
 	"fmt"
+	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/log"
-	"github.com/lkmio/transport"
 	"net"
 	"net/url"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -21,7 +20,7 @@ type Sink interface {
 
 	GetSourceID() string
 
-	Write(index int, data [][]byte, ts int64) error
+	Write(index int, data []*collections.ReferenceCounter[[]byte], ts int64) error
 
 	GetTransStreamID() TransStreamID
 
@@ -91,12 +90,6 @@ type Sink interface {
 	// EnableAsyncWriteMode 开启异步发送
 	EnableAsyncWriteMode(queueSize int)
 
-	// Pause 暂停推流
-	Pause()
-
-	// IsExited 异步发送协程是否退出, 如果还没有退出(write阻塞)不恢复推流
-	IsExited() bool
-
 	PendingSendQueueSize() int
 }
 
@@ -121,10 +114,11 @@ type BaseSink struct {
 	Ready           bool // 是否准备好推流. Sink可以通过控制该变量, 达到触发Source推流, 但不立即拉流的目的. 比如rtsp拉流端在信令交互阶段,需要先获取媒体信息,再拉流.
 	createTime      time.Time
 
-	existed          atomic.Bool
-	pendingSendQueue chan []byte // 等待发送的数据队列
-	cancelFunc       func()
-	cancelCtx        context.Context
+	pendingSendQueue  chan *collections.ReferenceCounter[[]byte]                     // 等待发送的数据队列
+	blockedBufferList *collections.LinkedList[*collections.ReferenceCounter[[]byte]] // 异步队列阻塞后的切片数据
+
+	cancelFunc func()
+	cancelCtx  context.Context
 }
 
 func (s *BaseSink) GetID() SinkID {
@@ -136,14 +130,28 @@ func (s *BaseSink) SetID(id SinkID) {
 }
 
 func (s *BaseSink) doAsyncWrite() {
-	defer s.existed.Store(true)
+	defer func() {
+		// 释放未发送的数据
+		for len(s.pendingSendQueue) > 0 {
+			buffer := <-s.pendingSendQueue
+			buffer.Release()
+		}
+
+		for s.blockedBufferList.Size() > 0 {
+			buffer := s.blockedBufferList.Remove(0)
+			buffer.Release()
+		}
+
+		ReleasePendingBuffers(s.SourceID, s.TransStreamID)
+	}()
 
 	for {
 		select {
 		case <-s.cancelCtx.Done():
 			return
 		case data := <-s.pendingSendQueue:
-			s.Conn.Write(data)
+			s.Conn.Write(data.Get())
+			data.Release()
 			break
 		}
 	}
@@ -151,37 +159,48 @@ func (s *BaseSink) doAsyncWrite() {
 
 func (s *BaseSink) EnableAsyncWriteMode(queueSize int) {
 	utils.Assert(s.Conn != nil)
-	s.existed.Store(false)
-	s.pendingSendQueue = make(chan []byte, queueSize)
+	s.pendingSendQueue = make(chan *collections.ReferenceCounter[[]byte], queueSize)
+	s.blockedBufferList = &collections.LinkedList[*collections.ReferenceCounter[[]byte]]{}
 	s.cancelCtx, s.cancelFunc = context.WithCancel(context.Background())
 	go s.doAsyncWrite()
 }
 
-func (s *BaseSink) Pause() {
-	if s.cancelCtx != nil {
-		s.cancelFunc()
-	}
-}
-
-func (s *BaseSink) IsExited() bool {
-	return s.existed.Load()
-}
-
-func (s *BaseSink) Write(index int, data [][]byte, ts int64) error {
+func (s *BaseSink) Write(index int, data []*collections.ReferenceCounter[[]byte], ts int64) error {
 	if s.Conn == nil {
 		return nil
 	}
 
+	// 发送被阻塞的数据
+	for s.blockedBufferList.Size() > 0 {
+		bytes := s.blockedBufferList.Get(0)
+		select {
+		case s.pendingSendQueue <- bytes:
+			s.blockedBufferList.Remove(0)
+			break
+		default:
+			// 发送被阻塞的数据失败, 将本次发送的数据加入阻塞队列
+			for _, datum := range data {
+				s.blockedBufferList.Add(datum)
+				datum.Refer()
+			}
+			return nil
+		}
+	}
+
 	for _, bytes := range data {
 		if s.cancelCtx != nil {
+			bytes.Refer()
 			select {
 			case s.pendingSendQueue <- bytes:
 				break
 			default:
-				return transport.ZeroWindowSizeError{}
+				// 将本次发送的数据加入阻塞队列
+				s.blockedBufferList.Add(bytes)
+				//return transport.ZeroWindowSizeError{}
+				return nil
 			}
 		} else {
-			_, err := s.Conn.Write(bytes)
+			_, err := s.Conn.Write(bytes.Get())
 			if err != nil {
 				return err
 			}

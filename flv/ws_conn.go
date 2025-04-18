@@ -16,7 +16,7 @@ func (w WSConn) Read(b []byte) (n int, err error) {
 }
 
 func (w WSConn) Write(block []byte) (n int, err error) {
-	// ws-flv负载的时flv tag
+	// ws-flv负载的是flv tag
 	return 0, w.WriteMessage(websocket.BinaryMessage, GetFLVTag(block))
 }
 

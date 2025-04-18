@@ -1,6 +1,7 @@
 package gb28181
 
 import (
+	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
@@ -39,7 +40,7 @@ func (f *ForwardSink) OnDisConnected(conn net.Conn, err error) {
 	f.Close()
 }
 
-func (f *ForwardSink) Write(index int, data [][]byte, ts int64) error {
+func (f *ForwardSink) Write(index int, data []*collections.ReferenceCounter[[]byte], ts int64) error {
 	if SetupUDP != f.setup && f.Conn == nil {
 		return nil
 	}
@@ -50,12 +51,12 @@ func (f *ForwardSink) Write(index int, data [][]byte, ts int64) error {
 	}
 
 	// 修改为与上级协商的SSRC
-	rtp.ModifySSRC(data[0], f.ssrc)
+	rtp.ModifySSRC(data[0].Get(), f.ssrc)
 
 	if SetupUDP == f.setup {
-		f.socket.(*transport.UDPClient).Write(data[0][2:])
+		f.socket.(*transport.UDPClient).Write(data[0].Get()[2:])
 	} else {
-		if _, err := f.Conn.Write(data[0]); err != nil {
+		if _, err := f.Conn.Write(data[0].Get()); err != nil {
 			return err
 		}
 	}
