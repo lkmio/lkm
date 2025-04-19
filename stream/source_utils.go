@@ -328,7 +328,7 @@ func LoopEvent(source Source) {
 		}
 
 		var ok bool
-		source.PostEvent(func() {
+		source.ExecuteSyncEvent(func() {
 			source.ProbeTimeout()
 			ok = len(source.OriginTracks()) > 0
 		})
