@@ -9,8 +9,7 @@ import (
 type UDPSource struct {
 	BaseGBSource
 
-	jitterBuffer  *stream.JitterBuffer[*rtp.Packet]
-	receiveBuffer *stream.ReceiveBuffer
+	jitterBuffer *stream.JitterBuffer[*rtp.Packet]
 }
 
 func (u *UDPSource) SetupType() SetupType {
@@ -25,7 +24,7 @@ func (u *UDPSource) OnOrderedRtp(packet *rtp.Packet) {
 
 // InputRtpPacket 将RTP包排序后，交给Source的主协程处理
 func (u *UDPSource) InputRtpPacket(pkt *rtp.Packet) error {
-	block := u.receiveBuffer.GetBlock()
+	block := stream.UDPReceiveBufferPool.Get().([]byte)
 	copy(block, pkt.Raw)
 
 	pkt.Raw = block[:len(pkt.Raw)]
@@ -47,7 +46,6 @@ func (u *UDPSource) Close() {
 
 func NewUDPSource() *UDPSource {
 	return &UDPSource{
-		receiveBuffer: stream.NewReceiveBuffer(1500, stream.ReceiveBufferUdpBlockCount+50),
-		jitterBuffer:  stream.NewJitterBuffer[*rtp.Packet](),
+		jitterBuffer: stream.NewJitterBuffer[*rtp.Packet](),
 	}
 }

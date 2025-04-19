@@ -14,8 +14,6 @@ type Session struct {
 	stack       *rtmp.ServerStack // rtmp协议栈, 解析message
 	handle      interface{}       // 持有具体会话句柄(推流端/拉流端)， 在@see OnPublish @see OnPlay回调中赋值
 	isPublisher bool              // 是否是推流会话
-
-	receiveBuffer *stream.ReceiveBuffer // 推流源收流队列
 }
 
 func (s *Session) generateSourceID(app, stream string) string {
@@ -37,7 +35,7 @@ func (s *Session) OnPublish(app, stream_ string) utils.HookState {
 	source := NewPublisher(sourceId, s.stack, s.conn)
 
 	// 初始化放在add source前面, 以防add后再init, 空窗期拉流队列空指针.
-	source.Init(stream.ReceiveBufferTCPBlockCount)
+	source.Init(stream.TCPReceiveBufferQueueSize)
 	source.SetUrlValues(values)
 
 	// 统一处理source推流事件, source是否已经存在, hook回调....
@@ -47,7 +45,6 @@ func (s *Session) OnPublish(app, stream_ string) utils.HookState {
 	} else {
 		s.handle = source
 		s.isPublisher = true
-		s.receiveBuffer = stream.NewTCPReceiveBuffer()
 
 		go stream.LoopEvent(source)
 	}
@@ -105,7 +102,6 @@ func (s *Session) Close() {
 
 		if s.isPublisher {
 			publisher.Close()
-			s.receiveBuffer = nil
 		}
 	} else {
 		sink := s.handle.(*Sink)

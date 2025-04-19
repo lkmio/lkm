@@ -31,7 +31,7 @@ func (s *jtServer) OnPacket(conn net.Conn, data []byte) []byte {
 	s.StreamServer.OnPacket(conn, data)
 	session := conn.(*transport.Conn).Data.(*Session)
 	session.PublishSource.Input(data)
-	return session.receiveBuffer.GetBlock()
+	return stream.TCPReceiveBufferPool.Get().([]byte)
 }
 
 func (s *jtServer) Start(addr net.Addr) error {

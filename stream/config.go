@@ -310,7 +310,7 @@ func SetDefaultConfig(config *AppConfig_) {
 	}
 
 	config.MergeWriteLatency = limitInt(350, 2000, config.MergeWriteLatency) // 最低缓存350毫秒数据才发送 最高缓存2秒数据才发送
-	config.ProbeTimeout = limitInt(2000, 5000, config.MergeWriteLatency)     // 2-5秒内必须解析完AVStream
+	config.ProbeTimeout = limitInt(2000, 5000, config.ProbeTimeout)          // 2-5秒内必须解析完AVStream
 
 	config.Log.Level = limitInt(int(zapcore.DebugLevel), int(zapcore.FatalLevel), config.Log.Level)
 	config.Log.MaxSize = limitMin(1, config.Log.MaxSize)

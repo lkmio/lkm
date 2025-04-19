@@ -10,16 +10,13 @@ import (
 
 // TCPSession 国标TCP主被动推流Session, 统一处理TCP粘包.
 type TCPSession struct {
-	conn          net.Conn
-	source        GBSource
-	receiveBuffer *stream.ReceiveBuffer
-	decoder       *transport.LengthFieldFrameDecoder
+	conn    net.Conn
+	source  GBSource
+	decoder *transport.LengthFieldFrameDecoder
 }
 
 func (t *TCPSession) Init(source GBSource) {
 	t.source = source
-	// 创建收流缓冲区
-	t.receiveBuffer = stream.NewTCPReceiveBuffer()
 }
 
 func (t *TCPSession) Close() {

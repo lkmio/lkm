@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/log"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -218,6 +219,7 @@ func ParseUrl(name string) (string, url.Values) {
 //}
 
 // StartReceiveDataTimer 启动收流超时计时器
+// 收流超时, 客观上认为是流中断, 应该关闭Source. 如果开启了Hook, 并且Hook返回200应答, 则不关闭Source.
 func StartReceiveDataTimer(source Source) *time.Timer {
 	utils.Assert(AppConfig.ReceiveTimeout > 0)
 
@@ -225,14 +227,17 @@ func StartReceiveDataTimer(source Source) *time.Timer {
 	receiveDataTimer = time.AfterFunc(time.Duration(AppConfig.ReceiveTimeout), func() {
 		dis := time.Now().Sub(source.LastPacketTime())
 
-		// 如果开启Hook通知, 根据响应决定是否关闭Source
-		// 如果通知失败, 或者非200应答, 释放Source
-		// 如果没有开启Hook通知, 直接删除
 		if dis >= time.Duration(AppConfig.ReceiveTimeout) {
 			log.Sugar.Errorf("收流超时 source: %s", source.GetID())
 
-			response, state := HookReceiveTimeoutEvent(source)
-			if utils.HookStateOK != state || response == nil {
+			var shouldClose = true
+			if AppConfig.Hooks.IsEnableOnReceiveTimeout() {
+				// 此处参考返回值err, 客观希望关闭Source
+				response, err := HookReceiveTimeoutEvent(source)
+				shouldClose = !(err == nil && response != nil && http.StatusOK == response.StatusCode)
+			}
+
+			if shouldClose {
 				source.Close()
 				return
 			}
@@ -246,8 +251,10 @@ func StartReceiveDataTimer(source Source) *time.Timer {
 }
 
 // StartIdleTimer 启动拉流空闲计时器
+// 拉流空闲, 不应该关闭Source. 如果开启了Hook, 并且Hook返回非200应答, 则关闭Source.
 func StartIdleTimer(source Source) *time.Timer {
 	utils.Assert(AppConfig.IdleTimeout > 0)
+	utils.Assert(AppConfig.Hooks.IsEnableOnIdleTimeout())
 
 	var idleTimer *time.Timer
 	idleTimer = time.AfterFunc(time.Duration(AppConfig.IdleTimeout), func() {
@@ -256,8 +263,9 @@ func StartIdleTimer(source Source) *time.Timer {
 		if source.SinkCount() < 1 && dis >= time.Duration(AppConfig.IdleTimeout) {
 			log.Sugar.Errorf("拉流空闲超时 source: %s", source.GetID())
 
-			response, state := HookIdleTimeoutEvent(source)
-			if utils.HookStateOK != state || response == nil {
+			// 此处不参考返回值err, 客观希望不关闭Source
+			response, _ := HookIdleTimeoutEvent(source)
+			if response != nil && http.StatusOK != response.StatusCode {
 				source.Close()
 				return
 			}
@@ -274,6 +282,7 @@ func LoopEvent(source Source) {
 	// 将超时计时器放在此处开启, 方便在退出的时候关闭
 	var receiveTimer *time.Timer
 	var idleTimer *time.Timer
+	var probeTimer *time.Timer
 
 	defer func() {
 		log.Sugar.Debugf("主协程执行结束 source: %s", source.GetID())
@@ -282,13 +291,28 @@ func LoopEvent(source Source) {
 		if receiveTimer != nil {
 			receiveTimer.Stop()
 		}
+
 		if idleTimer != nil {
 			idleTimer.Stop()
+		}
+
+		if probeTimer != nil {
+			probeTimer.Stop()
+		}
+
+		// 未使用的数据, 放回池中
+		for len(source.StreamPipe()) > 0 {
+			data := <-source.StreamPipe()
+			if size := cap(data); size > UDPReceiveBufferSize {
+				TCPReceiveBufferPool.Put(data[:size])
+			} else {
+				UDPReceiveBufferPool.Put(data[:size])
+			}
 		}
 	}()
 
 	// 开启收流超时计时器
-	if AppConfig.Hooks.IsEnableOnReceiveTimeout() && AppConfig.ReceiveTimeout > 0 {
+	if AppConfig.ReceiveTimeout > 0 {
 		receiveTimer = StartReceiveDataTimer(source)
 	}
 
@@ -296,6 +320,24 @@ func LoopEvent(source Source) {
 	if AppConfig.Hooks.IsEnableOnIdleTimeout() && AppConfig.IdleTimeout > 0 {
 		idleTimer = StartIdleTimer(source)
 	}
+
+	// 开启探测超时计时器
+	probeTimer = time.AfterFunc(time.Duration(AppConfig.ProbeTimeout)*time.Millisecond, func() {
+		if source.IsCompleted() {
+			return
+		}
+
+		var ok bool
+		source.PostEvent(func() {
+			source.ProbeTimeout()
+			ok = len(source.OriginTracks()) > 0
+		})
+
+		if !ok {
+			source.Close()
+			return
+		}
+	})
 
 	for {
 		select {
@@ -307,10 +349,16 @@ func LoopEvent(source Source) {
 
 			if err := source.Input(data); err != nil {
 				log.Sugar.Errorf("解析推流数据发生err: %s 释放source: %s", err.Error(), source.GetID())
-				source.DoClose()
+				go source.Close()
 				return
 			}
 
+			// 使用后, 放回池中
+			if size := cap(data); size > UDPReceiveBufferSize {
+				TCPReceiveBufferPool.Put(data[:size])
+			} else {
+				UDPReceiveBufferPool.Put(data[:size])
+			}
 			break
 		// 切换到主协程,执行该函数. 目的是用于无锁化处理推拉流的连接与断开, 推流源断开, 查询推流源信息等事件. 不要做耗时操作, 否则会影响推拉流.
 		case event := <-source.MainContextEvents():

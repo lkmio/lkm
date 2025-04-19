@@ -35,13 +35,7 @@ func (T *TCPServer) OnCloseSession(session *TCPSession) {
 
 func (T *TCPServer) OnConnected(conn net.Conn) []byte {
 	T.StreamServer.OnConnected(conn)
-
-	//TCP单端口收流, Session已经绑定Source, 使用ReceiveBuffer读取网络包
-	if conn.(*transport.Conn).Data.(*TCPSession).source != nil {
-		return conn.(*transport.Conn).Data.(*TCPSession).receiveBuffer.GetBlock()
-	}
-
-	return nil
+	return stream.TCPReceiveBufferPool.Get().([]byte)
 }
 
 func (T *TCPServer) OnPacket(conn net.Conn, data []byte) []byte {
@@ -69,12 +63,7 @@ func (T *TCPServer) OnPacket(conn net.Conn, data []byte) []byte {
 		}
 	}
 
-	// 绑定Source后, 使用ReceiveBuffer读取网络包, 减少拷贝
-	if session.source != nil {
-		return session.receiveBuffer.GetBlock()
-	}
-
-	return nil
+	return stream.TCPReceiveBufferPool.Get().([]byte)
 }
 
 func NewTCPServer(filter Filter) (*TCPServer, error) {

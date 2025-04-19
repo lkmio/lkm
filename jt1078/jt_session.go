@@ -11,8 +11,7 @@ import (
 
 type Session struct {
 	stream.PublishSource
-	decoder       *transport.DelimiterFrameDecoder
-	receiveBuffer *stream.ReceiveBuffer
+	decoder *transport.DelimiterFrameDecoder
 }
 
 func (s *Session) Input(data []byte) error {
@@ -73,12 +72,11 @@ func NewSession(conn net.Conn) *Session {
 			TransDemuxer: NewDemuxer(),
 		},
 
-		decoder:       transport.NewDelimiterFrameDecoder(1024*1024*2, delimiter[:]),
-		receiveBuffer: stream.NewTCPReceiveBuffer(),
+		decoder: transport.NewDelimiterFrameDecoder(1024*1024*2, delimiter[:]),
 	}
 
 	session.TransDemuxer.SetHandler(&session)
-	session.Init(stream.ReceiveBufferTCPBlockCount)
+	session.Init(stream.TCPReceiveBufferQueueSize)
 	go stream.LoopEvent(&session)
 	return &session
 }

@@ -101,10 +101,11 @@ func (source *BaseGBSource) Input(data []byte) error {
 
 	// 非解析缓冲区满的错误, 继续解析
 	if err != nil {
-		log.Sugar.Errorf("解析ps流发生err: %s source: %s", err.Error(), source.GetID())
 		if strings.HasPrefix(err.Error(), "probe") {
 			return err
 		}
+
+		log.Sugar.Errorf("解析ps流发生err: %s source: %s", err.Error(), source.GetID())
 	}
 
 	source.probeBuffer.Reset(n)
@@ -139,7 +140,7 @@ func (source *BaseGBSource) correctTimestamp(packet *avformat.AVPacket, dts, pts
 				packet.Duration = duration
 			} else {
 				// 时间戳不正确
-				log.Sugar.Errorf("推流时间戳不正确, 使用系统时钟. ssrc: %x", source.ssrc)
+				log.Sugar.Errorf("推流时间戳不正确, 使用系统时钟. source: %s ssrc: %x duration: %d", source.ID, source.ssrc, duration)
 				source.isSystemClock = true
 			}
 		} else {
@@ -292,16 +293,16 @@ func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, int, 
 		}
 	}
 
-	var bufferBlockCount int
+	var queueSize int
 	if active || tcp {
-		bufferBlockCount = stream.ReceiveBufferTCPBlockCount
+		queueSize = stream.TCPReceiveBufferQueueSize
 	} else {
-		bufferBlockCount = stream.ReceiveBufferUdpBlockCount
+		queueSize = stream.UDPReceiveBufferQueueSize
 	}
 
 	source.SetID(id)
 	source.SetSSRC(ssrc)
-	source.Init(bufferBlockCount)
+	source.Init(queueSize)
 	if _, state := stream.PreparePublishSource(source, false); utils.HookStateOK != state {
 		return nil, 0, fmt.Errorf("error code %d", state)
 	}

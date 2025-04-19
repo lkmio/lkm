@@ -1,9 +1,28 @@
 package stream
 
-const (
-	ReceiveBufferUdpBlockCount = 300
+import "sync"
 
-	ReceiveBufferTCPBlockCount = 50
+const (
+	UDPReceiveBufferSize = 1500
+	TCPReceiveBufferSize = 4096 * 20
+
+	UDPReceiveBufferQueueSize = 1000
+	TCPReceiveBufferQueueSize = 50
+)
+
+// 后续考虑使用cas队列实现
+var (
+	UDPReceiveBufferPool = sync.Pool{
+		New: func() any {
+			return make([]byte, UDPReceiveBufferSize)
+		},
+	}
+
+	TCPReceiveBufferPool = sync.Pool{
+		New: func() any {
+			return make([]byte, TCPReceiveBufferSize)
+		},
+	}
 )
 
 // ReceiveBuffer 收流缓冲区. 网络收流->解析流->封装流->发送流是同步的,从解析到发送可能耗时,从而影响读取网络流. 使用收流缓冲区,可有效降低出现此问题的概率.
@@ -37,12 +56,4 @@ func (r *ReceiveBuffer) BlockCount() int {
 
 func NewReceiveBuffer(blockSize, blockCount int) *ReceiveBuffer {
 	return &ReceiveBuffer{blockCapacity: blockSize, blockCount: blockCount, data: make([]byte, blockSize*blockCount), index: 0}
-}
-
-func NewUDPReceiveBuffer() *ReceiveBuffer {
-	return NewReceiveBuffer(1500, ReceiveBufferUdpBlockCount)
-}
-
-func NewTCPReceiveBuffer() *ReceiveBuffer {
-	return NewReceiveBuffer(4096*20, ReceiveBufferTCPBlockCount)
 }

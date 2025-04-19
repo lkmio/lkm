@@ -55,34 +55,14 @@ func HookPublishDoneEvent(source Source) {
 	}
 }
 
-func HookReceiveTimeoutEvent(source Source) (*http.Response, utils.HookState) {
-	var response *http.Response
-
-	if AppConfig.Hooks.IsEnableOnReceiveTimeout() {
-		resp, err := Hook(HookEventReceiveTimeout, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
-		if err != nil {
-			return resp, utils.HookStateFailure
-		}
-
-		response = resp
-	}
-
-	return response, utils.HookStateOK
+func HookReceiveTimeoutEvent(source Source) (*http.Response, error) {
+	utils.Assert(AppConfig.Hooks.IsEnableOnReceiveTimeout())
+	return Hook(HookEventReceiveTimeout, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
 }
 
-func HookIdleTimeoutEvent(source Source) (*http.Response, utils.HookState) {
-	var response *http.Response
-
-	if AppConfig.Hooks.IsEnableOnIdleTimeout() {
-		resp, err := Hook(HookEventIdleTimeout, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
-		if err != nil {
-			return resp, utils.HookStateFailure
-		}
-
-		response = resp
-	}
-
-	return response, utils.HookStateOK
+func HookIdleTimeoutEvent(source Source) (*http.Response, error) {
+	utils.Assert(AppConfig.Hooks.IsEnableOnIdleTimeout())
+	return Hook(HookEventIdleTimeout, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
 }
 
 func HookRecordEvent(source Source, path string) {

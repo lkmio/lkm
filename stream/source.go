@@ -60,8 +60,6 @@ type Source interface {
 	// 将Sink添加到等待队列
 	Close()
 
-	DoClose()
-
 	// IsCompleted 所有推流track是否解析完毕
 	IsCompleted() bool
 
@@ -110,6 +108,8 @@ type Source interface {
 	GetTransStreams() map[TransStreamID]TransStream
 
 	GetStreamEndInfo() *StreamEndInfo
+
+	ProbeTimeout()
 }
 
 type PublishSource struct {
@@ -129,10 +129,8 @@ type PublishSource struct {
 	gopBuffer        GOPBuffer              // GOP缓存, 音频和视频混合使用, 以视频关键帧为界, 缓存第二个视频关键帧时, 释放前一组gop. 如果不存在视频流, 不缓存音频
 
 	closed     atomic.Bool // source是否已经关闭
-	completed  bool        // 所有推流track是否解析完毕, @see writeHeader 函数中赋值为true
+	completed  atomic.Bool // 所有推流track是否解析完毕, @see writeHeader 函数中赋值为true
 	existVideo bool        // 是否存在视频
-
-	probeTimer *time.Timer // track解析超时计时器, 触发时执行@see writeHeader
 
 	TransStreams         map[TransStreamID]TransStream     // 所有输出流
 	sinks                map[SinkID]Sink                   // 保存所有Sink
@@ -201,17 +199,8 @@ func (s *PublishSource) Init(receiveQueueSize int) {
 	s.sinks = make(map[SinkID]Sink, 128)
 	s.TransStreamSinks = make(map[TransStreamID]map[SinkID]Sink, len(transStreamFactories)+1)
 	s.statistics = NewBitrateStatistics()
-
-	// 此处设置的探测时长, 只是为了保证在probeTimeout触发前, 一直在探测
-	s.TransDemuxer.SetProbeDuration(60000)
-
-	// 启动探测超时计时器
-	s.probeTimer = time.AfterFunc(time.Duration(AppConfig.ProbeTimeout)*time.Millisecond, func() {
-		s.PostEvent(func() {
-			// s.writeHeader()
-			s.TransDemuxer.ProbeComplete()
-		})
-	})
+	// 设置探测时长
+	s.TransDemuxer.SetProbeDuration(AppConfig.ProbeTimeout)
 }
 
 func (s *PublishSource) CreateDefaultOutStreams() {
@@ -484,7 +473,7 @@ func (s *PublishSource) doAddSink(sink Sink, resume bool) bool {
 
 func (s *PublishSource) AddSink(sink Sink) {
 	s.PostEvent(func() {
-		if !s.completed {
+		if !s.completed.Load() {
 			AddSinkToWaitingQueue(sink.GetSourceID(), sink)
 		} else {
 			if !s.doAddSink(sink, false) {
@@ -584,11 +573,6 @@ func (s *PublishSource) DoClose() {
 	if s.TransDemuxer != nil {
 		s.TransDemuxer.Close()
 		s.TransDemuxer = nil
-	}
-
-	// 停止track探测计时器
-	if s.probeTimer != nil {
-		s.probeTimer.Stop()
 	}
 
 	// 关闭录制流
@@ -693,15 +677,12 @@ func (s *PublishSource) Close() {
 
 // 解析完所有track后, 创建各种输出流
 func (s *PublishSource) writeHeader() {
-	if s.completed {
+	if s.completed.Load() {
 		fmt.Printf("添加Stream失败 Source: %s已经WriteHeader", s.ID)
 		return
 	}
 
-	s.completed = true
-	if s.probeTimer != nil {
-		s.probeTimer.Stop()
-	}
+	s.completed.Store(true)
 
 	if len(s.originTracks.All()) == 0 {
 		log.Sugar.Errorf("没有一路track, 删除source: %s", s.ID)
@@ -746,7 +727,7 @@ func (s *PublishSource) writeHeader() {
 }
 
 func (s *PublishSource) IsCompleted() bool {
-	return s.completed
+	return s.completed.Load()
 }
 
 // NotTrackAdded 返回该index对应的track是否没有添加
@@ -793,7 +774,7 @@ func (s *PublishSource) OnNewTrack(track avformat.Track) {
 
 	stream := track.GetStream()
 
-	if s.completed {
+	if s.completed.Load() {
 		log.Sugar.Warnf("添加%s track失败,已经WriteHeader. source: %s", stream.MediaType, s.ID)
 		return
 	} else if !s.NotTrackAdded(stream.Index) {
@@ -826,6 +807,8 @@ func (s *PublishSource) OnTrackNotFind() {
 	if AppConfig.Debug {
 		s.streamLogger.OnTrackNotFind()
 	}
+
+	log.Sugar.Errorf("no tracks found. source id: %s", s.ID)
 }
 
 func (s *PublishSource) OnPacket(packet *avformat.AVPacket) {
@@ -852,7 +835,7 @@ func (s *PublishSource) OnPacket(packet *avformat.AVPacket) {
 	}
 
 	// track解析完毕后，才能生成传输流
-	if s.completed {
+	if s.completed.Load() {
 		s.CorrectTimestamp(packet)
 
 		// 分发给各个传输流
@@ -938,4 +921,8 @@ func (s *PublishSource) GetTransStreams() map[TransStreamID]TransStream {
 
 func (s *PublishSource) GetStreamEndInfo() *StreamEndInfo {
 	return s.streamEndInfo
+}
+
+func (s *PublishSource) ProbeTimeout() {
+	s.TransDemuxer.ProbeComplete()
 }
