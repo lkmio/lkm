@@ -135,6 +135,7 @@ type PublishSource struct {
 	existVideo bool        // 是否存在视频
 
 	TransStreams         map[TransStreamID]TransStream     // 所有输出流
+	ForwardTransStream   TransStream                       // 转发流
 	sinks                map[SinkID]Sink                   // 保存所有Sink
 	TransStreamSinks     map[TransStreamID]map[SinkID]Sink // 输出流对应的Sink
 	streamEndInfo        *StreamEndInfo                    // 之前推流源信息
@@ -286,6 +287,11 @@ func (s *PublishSource) CreateTransStream(id TransStreamID, protocol TransStream
 	s.TransStreamSinks[id] = make(map[SinkID]Sink, 128)
 	_ = transStream.WriteHeader()
 
+	// 设置转发流
+	if TransStreamGBStreamForward == transStream.GetProtocol() {
+		s.ForwardTransStream = transStream
+	}
+
 	return transStream, err
 }
 
@@ -428,6 +434,12 @@ func (s *PublishSource) doAddSink(sink Sink, resume bool) bool {
 		}
 	}
 
+	err := sink.StartStreaming(transStream)
+	if err != nil {
+		log.Sugar.Errorf("添加sink失败,开始推流发生err: %s sink: %s source: %s ", err.Error(), SinkId2String(sink.GetID()), s.ID)
+		return false
+	}
+	
 	// 还没做好准备(rtsp拉流还在协商sdp中), 暂不推流
 	if !sink.IsReady() {
 		return true
@@ -437,12 +449,6 @@ func (s *PublishSource) doAddSink(sink Sink, resume bool) bool {
 	if !resume && s.recordSink != sink {
 		s.sinkCount++
 		log.Sugar.Infof("sink count: %d source: %s", s.sinkCount, s.ID)
-	}
-
-	err := sink.StartStreaming(transStream)
-	if err != nil {
-		log.Sugar.Errorf("添加sink失败,开始推流发生err: %s sink: %s source: %s ", err.Error(), SinkId2String(sink.GetID()), s.ID)
-		return false
 	}
 
 	s.sinks[sink.GetID()] = sink

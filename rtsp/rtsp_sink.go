@@ -54,6 +54,7 @@ func (s *Sink) AddSender(index int, tcp bool, ssrc uint32) (uint16, uint16, erro
 
 	if tcp {
 		s.TCPStreaming = true
+		s.BaseSink.EnableAsyncWriteMode(512)
 	} else {
 		sender.Rtp, err = TransportManger.NewUDPServer()
 		if err != nil {
@@ -86,14 +87,17 @@ func (s *Sink) Write(index int, data []*collections.ReferenceCounter[[]byte], rt
 		return nil
 	}
 
-	for _, bytes := range data {
+	for i, bytes := range data {
 		sender := s.senders[index]
 		sender.PktCount++
 		sender.OctetCount += len(bytes.Get())
 		if s.TCPStreaming {
-			s.Conn.Write(bytes.Get())
+			// 一次发送会花屏?
+			// return s.BaseSink.Write(index, data, rtpTime)
+			s.BaseSink.Write(index, data[i:i+1], rtpTime)
+			//s.Conn.Write(bytes.Get())
 		} else {
-			//发送rtcp sr包
+			// 发送rtcp sr包
 			sender.RtpConn.Write(bytes.Get()[OverTcpHeaderSize:])
 
 			if sender.RtcpConn == nil || sender.PktCount%100 != 0 {

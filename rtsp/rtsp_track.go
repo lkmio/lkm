@@ -1,12 +1,12 @@
 package rtsp
 
-
 import (
+	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/rtp"
 )
 
-// Track RtspTrack 对rtsp每路输出流的封装
+// Track rtsp每路输出流的封装
 type Track struct {
 	PT        byte
 	Rate      int
@@ -15,7 +15,7 @@ type Track struct {
 	EndSeq    uint16
 
 	Muxer           rtp.Muxer
-	ExtraDataBuffer [][]byte // 缓存带有编码信息的rtp包, 对所有sink通用
+	ExtraDataBuffer []*collections.ReferenceCounter[[]byte] // 缓存带有编码信息的rtp包, 对所有sink通用
 }
 
 func (r *Track) Close() {

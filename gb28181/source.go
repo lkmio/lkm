@@ -3,7 +3,6 @@ package gb28181
 import (
 	"fmt"
 	"github.com/lkmio/avformat"
-	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
@@ -77,15 +76,9 @@ func (source *BaseGBSource) Init(receiveQueueSize int) {
 // Input 输入rtp包, 处理PS流, 负责解析->封装->推流
 func (source *BaseGBSource) Input(data []byte) error {
 	// 国标级联转发
-	for _, transStream := range source.TransStreams {
-		if transStream.GetProtocol() != stream.TransStreamGBStreamForward {
-			continue
-		}
-
-		bytes := transStream.(*ForwardStream).WrapData(data)
-		rtpPacket := [1]*collections.ReferenceCounter[[]byte]{collections.NewReferenceCounter(bytes)}
-
-		source.DispatchBuffer(transStream, -1, rtpPacket[:], -1, true)
+	if source.ForwardTransStream != nil {
+		packet := avformat.AVPacket{Data: data}
+		source.DispatchPacket(source.ForwardTransStream, &packet)
 	}
 
 	packet := rtp.Packet{}

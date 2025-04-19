@@ -10,11 +10,6 @@ import (
 	"net"
 )
 
-const (
-	TcpStreamForwardBufferBlockSize = 1024
-	RTPOverTCPPacketSize            = 1600
-)
-
 type ForwardSink struct {
 	stream.BaseSink
 	setup  SetupType
@@ -26,7 +21,7 @@ func (f *ForwardSink) OnConnected(conn net.Conn) []byte {
 	log.Sugar.Infof("级联连接 conn: %s", conn.RemoteAddr())
 
 	f.Conn = conn
-	f.Conn.(*transport.Conn).EnableAsyncWriteMode(TcpStreamForwardBufferBlockSize - 2)
+	f.Conn.(*transport.Conn).EnableAsyncWriteMode(512)
 	return nil
 }
 
@@ -41,12 +36,8 @@ func (f *ForwardSink) OnDisConnected(conn net.Conn, err error) {
 }
 
 func (f *ForwardSink) Write(index int, data []*collections.ReferenceCounter[[]byte], ts int64) error {
+	// TCP等待连接后再转发数据
 	if SetupUDP != f.setup && f.Conn == nil {
-		return nil
-	}
-
-	if len(data)+2 > RTPOverTCPPacketSize {
-		log.Sugar.Errorf("国标级联转发流失败 rtp包过长, 长度：%d, 最大允许：%d", len(data), RTPOverTCPPacketSize)
 		return nil
 	}
 
@@ -56,9 +47,7 @@ func (f *ForwardSink) Write(index int, data []*collections.ReferenceCounter[[]by
 	if SetupUDP == f.setup {
 		f.socket.(*transport.UDPClient).Write(data[0].Get()[2:])
 	} else {
-		if _, err := f.Conn.Write(data[0].Get()); err != nil {
-			return err
-		}
+		return f.BaseSink.Write(index, data, ts)
 	}
 
 	return nil

@@ -31,7 +31,8 @@ type TransStream struct {
 	//oldTracks  []*Track
 	oldTracks map[byte]uint16
 	sdp       string
-	buffer    *stream.ReceiveBuffer // 保存封装后的rtp包
+
+	rtpBuffers *collections.Queue[*collections.ReferenceCounter[[]byte]]
 }
 
 func (t *TransStream) OverTCP(data []byte, channel int) {
@@ -41,26 +42,37 @@ func (t *TransStream) OverTCP(data []byte, channel int) {
 }
 
 func (t *TransStream) Input(packet *avformat.AVPacket) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
-	t.ClearOutStreamBuffer()
+	// 释放rtp包
+	for t.rtpBuffers.Size() > 0 {
+		rtp := t.rtpBuffers.Peek(0)
+		if rtp.UseCount() > 1 {
+			break
+		}
+
+		t.rtpBuffers.Pop()
+
+		// 放回池中
+		data := rtp.Get()
+		stream.UDPReceiveBufferPool.Put(data[:cap(data)])
+	}
 
 	var ts uint32
+	var result []*collections.ReferenceCounter[[]byte]
 	track := t.RtspTracks[packet.Index]
 	if utils.AVMediaTypeAudio == packet.MediaType {
 		ts = uint32(packet.ConvertPts(track.Rate))
-		t.PackRtpPayload(track, packet.Index, packet.Data, ts)
+		result = t.PackRtpPayload(track, packet.Index, packet.Data, ts)
 	} else if utils.AVMediaTypeVideo == packet.MediaType {
 		ts = uint32(packet.ConvertPts(track.Rate))
 		annexBData := avformat.AVCCPacket2AnnexB(t.BaseTransStream.Tracks[packet.Index].Stream, packet)
 		data := avc.RemoveStartCode(annexBData)
-		t.PackRtpPayload(track, packet.Index, data, ts)
+		result = t.PackRtpPayload(track, packet.Index, data, ts)
 	}
 
-	return t.OutBuffer[:t.OutBufferSize], int64(ts), utils.AVMediaTypeVideo == packet.MediaType && packet.Key, nil
+	return result, int64(ts), utils.AVMediaTypeVideo == packet.MediaType && packet.Key, nil
 }
 
 func (t *TransStream) ReadExtraData(ts int64) ([]*collections.ReferenceCounter[[]byte], int64, error) {
-	t.ClearOutStreamBuffer()
-
 	// 返回视频编码数据的rtp包
 	for _, track := range t.RtspTracks {
 		if utils.AVMediaTypeVideo != track.MediaType {
@@ -69,37 +81,39 @@ func (t *TransStream) ReadExtraData(ts int64) ([]*collections.ReferenceCounter[[
 
 		// 回滚序号和时间戳
 		index := int(track.StartSeq) - len(track.ExtraDataBuffer)
-		for i, bytes := range track.ExtraDataBuffer {
-			rtp.RollbackSeq(bytes[OverTcpHeaderSize:], index+i+1)
-			binary.BigEndian.PutUint32(bytes[OverTcpHeaderSize+4:], uint32(ts))
+		for i, packet := range track.ExtraDataBuffer {
+			rtp.RollbackSeq(packet.Get()[OverTcpHeaderSize:], index+i+1)
+			binary.BigEndian.PutUint32(packet.Get()[OverTcpHeaderSize+4:], uint32(ts))
 		}
 
-		for _, data := range track.ExtraDataBuffer {
-			t.AppendOutStreamBuffer(collections.NewReferenceCounter(data))
-		}
-
-		return t.OutBuffer[:t.OutBufferSize], ts, nil
+		// 目前只有视频需要发送扩展数据的rtp包, 所以直接返回
+		return track.ExtraDataBuffer, ts, nil
 	}
 
 	return nil, ts, nil
 }
 
-func (t *TransStream) PackRtpPayload(track *Track, channel int, data []byte, timestamp uint32) {
-	var index int
+// PackRtpPayload 打包返回rtp over tcp的数据包
+func (t *TransStream) PackRtpPayload(track *Track, channel int, data []byte, timestamp uint32) []*collections.ReferenceCounter[[]byte] {
+	var result []*collections.ReferenceCounter[[]byte]
+	var packet []byte
 
 	// 保存开始序号
 	track.StartSeq = track.Muxer.GetHeader().Seq
 	track.Muxer.Input(data, timestamp, func() []byte {
-		index = t.buffer.Index()
-		block := t.buffer.GetBlock()
-		return block[OverTcpHeaderSize:]
+		packet = stream.UDPReceiveBufferPool.Get().([]byte)
+		return packet[OverTcpHeaderSize:]
 	}, func(bytes []byte) {
 		track.EndSeq = track.Muxer.GetHeader().Seq
+		overTCPPacket := packet[:OverTcpHeaderSize+len(bytes)]
+		t.OverTCP(overTCPPacket, channel)
 
-		packet := t.buffer.Get(index)[:OverTcpHeaderSize+len(bytes)]
-		t.OverTCP(packet, channel)
-		t.AppendOutStreamBuffer(collections.NewReferenceCounter(packet))
+		refPacket := collections.NewReferenceCounter(overTCPPacket)
+		result = append(result, refPacket)
+		t.rtpBuffers.Push(refPacket)
 	})
+
+	return result
 }
 
 func (t *TransStream) AddTrack(track *stream.Track) error {
@@ -133,33 +147,32 @@ func (t *TransStream) AddTrack(track *stream.Track) error {
 
 	rtspTrack := NewRTSPTrack(muxer, byte(payloadType.Pt), payloadType.ClockRate, track.Stream.MediaType)
 	t.RtspTracks = append(t.RtspTracks, rtspTrack)
-	index := len(t.RtspTracks) - 1
+	trackIndex := len(t.RtspTracks) - 1
 
 	// 将sps和pps按照单一模式打包
-	bufferIndex := t.buffer.Index()
+	var extraDataPackets []*collections.ReferenceCounter[[]byte]
+	packAndAdd := func(data []byte) {
+		packets := t.PackRtpPayload(rtspTrack, trackIndex, data, 0)
+		for _, packet := range packets {
+			extraDataPackets = append(extraDataPackets, packet)
+			// 出队列, 单独保存
+			t.rtpBuffers.Pop()
+		}
+	}
+
 	if utils.AVMediaTypeVideo == track.Stream.MediaType {
 		parameters := track.Stream.CodecParameters
 		if utils.AVCodecIdH265 == track.Stream.CodecID {
 			bytes := parameters.(*avformat.HEVCCodecData).VPS()
-			t.PackRtpPayload(rtspTrack, index, avc.RemoveStartCode(bytes[0]), 0)
+			packAndAdd(avc.RemoveStartCode(bytes[0]))
 		}
 
 		spsBytes := parameters.SPS()
 		ppsBytes := parameters.PPS()
-		t.PackRtpPayload(rtspTrack, index, avc.RemoveStartCode(spsBytes[0]), 0)
-		t.PackRtpPayload(rtspTrack, index, avc.RemoveStartCode(ppsBytes[0]), 0)
+		packAndAdd(avc.RemoveStartCode(spsBytes[0]))
+		packAndAdd(avc.RemoveStartCode(ppsBytes[0]))
 
-		// 拷贝扩展数据的rtp包
-		size := t.buffer.Index() - bufferIndex
-		extraRtpBuffer := make([][]byte, size)
-		for i := 0; i < size; i++ {
-			src := t.buffer.Get(bufferIndex + i)
-			dst := make([]byte, len(src))
-			copy(dst, src)
-			extraRtpBuffer[i] = dst[:OverTcpHeaderSize+binary.BigEndian.Uint16(dst[2:])]
-		}
-
-		t.RtspTracks[index].ExtraDataBuffer = extraRtpBuffer
+		t.RtspTracks[trackIndex].ExtraDataBuffer = extraDataPackets
 	}
 
 	return nil
@@ -261,11 +274,10 @@ func (t *TransStream) WriteHeader() error {
 
 func NewTransStream(addr net.IPAddr, urlFormat string, oldTracks map[byte]uint16) stream.TransStream {
 	t := &TransStream{
-		addr:      addr,
-		urlFormat: urlFormat,
-		// 在将AVPacket打包rtp时, 会使用多个buffer块, 回环覆盖多个rtp块, 如果是TCP拉流并且网络不好, 推流的数据会错乱.
-		buffer:    stream.NewReceiveBuffer(1500, 1024),
-		oldTracks: oldTracks,
+		addr:       addr,
+		urlFormat:  urlFormat,
+		oldTracks:  oldTracks,
+		rtpBuffers: collections.NewQueue[*collections.ReferenceCounter[[]byte]](512),
 	}
 
 	if addr.IP.To4() != nil {
