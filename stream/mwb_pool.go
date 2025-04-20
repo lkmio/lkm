@@ -69,32 +69,19 @@ func ReleasePendingBuffers(sourceId string, transStreamId TransStreamID) {
 }
 
 func release(buffers *collections.Queue[*mbBuffer], length int) bool {
-	var count int
 	for i := 0; i < length; i++ {
-		buffer := buffers.Peek(i)
+		buffer := buffers.Peek(0)
 		size := buffer.segments.Size()
 
-		var j int
-		for ; j < size; j++ {
-			segment := buffer.segments.Peek(0)
-			if segment.UseCount() > 1 {
-				break
-			}
-
-			buffer.segments.Pop()
-		}
-
-		// 所有切片都已经没有使用, 释放内存池
-		if j == size {
+		// 判断最后一个合并写切片是否已经释放, 最后一个都释放了，前面的肯定也已经释放了
+		if size == 0 || (size > 0 && buffer.segments.Peek(size-1).UseCount() < 2) {
+			buffers.Pop()
 			buffer.buffer.Clear()
+			buffer.segments.Clear()
 			MWBufferPool.Put(buffer)
-			count++
+		} else {
+			break
 		}
 	}
-
-	for ; count > 0; count-- {
-		buffers.Pop()
-	}
-
 	return buffers.Size() == 0
 }
