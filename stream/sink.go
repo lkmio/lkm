@@ -274,17 +274,19 @@ func (s *BaseSink) Close() {
 
 	s.Lock()
 	defer func() {
+		closed := s.State == SessionStateClosed
 		s.State = SessionStateClosed
 		s.UnLock()
 
-		// 最后断开网络连接, 确保从source删除sink之前, 推流是安全的.
-		if s.Conn != nil {
-			s.Conn.Close()
-			s.Conn = nil
-		}
+		if !closed {
+			if s.cancelCtx != nil {
+				s.cancelFunc()
+			}
 
-		if s.cancelCtx != nil {
-			s.cancelFunc()
+			// 最后断开网络连接, 确保从source删除sink之前, 推流是安全的.
+			if s.Conn != nil {
+				s.Conn.Close()
+			}
 		}
 	}()
 
