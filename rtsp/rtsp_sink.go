@@ -81,7 +81,7 @@ func (s *Sink) AddSender(index int, tcp bool, ssrc uint32) (uint16, uint16, erro
 	return rtpPort, rtcpPort, err
 }
 
-func (s *Sink) Write(index int, data []*collections.ReferenceCounter[[]byte], rtpTime int64) error {
+func (s *Sink) Write(index int, data []*collections.ReferenceCounter[[]byte], rtpTime int64, keyVideo bool) error {
 	// 拉流方还没有连接上来
 	if index >= cap(s.senders) || s.senders[index] == nil {
 		return nil
@@ -94,7 +94,7 @@ func (s *Sink) Write(index int, data []*collections.ReferenceCounter[[]byte], rt
 		if s.TCPStreaming {
 			// 一次发送会花屏?
 			// return s.BaseSink.Write(index, data, rtpTime)
-			s.BaseSink.Write(index, data[i:i+1], rtpTime)
+			s.BaseSink.Write(index, data[i:i+1], rtpTime, keyVideo)
 			//s.Conn.Write(bytes.Get())
 		} else {
 			// 发送rtcp sr包

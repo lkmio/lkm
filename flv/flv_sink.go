@@ -17,14 +17,14 @@ func (s *Sink) StopStreaming(stream stream.TransStream) {
 	s.prevTagSize = stream.(*TransStream).Muxer.PrevTagSize()
 }
 
-func (s *Sink) Write(index int, data []*collections.ReferenceCounter[[]byte], ts int64) error {
+func (s *Sink) Write(index int, data []*collections.ReferenceCounter[[]byte], ts int64, keyVideo bool) error {
 	// 恢复推流时, 不发送9个字节的flv header
 	if s.prevTagSize > 0 {
 		data = data[1:]
 		s.prevTagSize = 0
 	}
 
-	return s.BaseSink.Write(index, data, ts)
+	return s.BaseSink.Write(index, data, ts, keyVideo)
 }
 
 func NewFLVSink(id stream.SinkID, sourceId string, conn net.Conn) stream.Sink {

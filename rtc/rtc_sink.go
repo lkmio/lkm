@@ -141,7 +141,7 @@ func (s *Sink) Close() {
 	}
 }
 
-func (s *Sink) Write(index int, data []*collections.ReferenceCounter[[]byte], ts int64) error {
+func (s *Sink) Write(index int, data []*collections.ReferenceCounter[[]byte], ts int64, keyVideo bool) error {
 	if s.tracks[index] == nil {
 		return nil
 	}

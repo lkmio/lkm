@@ -35,7 +35,7 @@ func (f *ForwardSink) OnDisConnected(conn net.Conn, err error) {
 	f.Close()
 }
 
-func (f *ForwardSink) Write(index int, data []*collections.ReferenceCounter[[]byte], ts int64) error {
+func (f *ForwardSink) Write(index int, data []*collections.ReferenceCounter[[]byte], ts int64, keyVideo bool) error {
 	// TCP等待连接后再转发数据
 	if SetupUDP != f.setup && f.Conn == nil {
 		return nil
@@ -47,7 +47,7 @@ func (f *ForwardSink) Write(index int, data []*collections.ReferenceCounter[[]by
 	if SetupUDP == f.setup {
 		f.socket.(*transport.UDPClient).Write(data[0].Get()[2:])
 	} else {
-		return f.BaseSink.Write(index, data, ts)
+		return f.BaseSink.Write(index, data, ts, keyVideo)
 	}
 
 	return nil

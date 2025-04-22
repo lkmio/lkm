@@ -9,7 +9,15 @@ import (
 	"net"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
+)
+
+const (
+	EnableFastForward         = false           // 发送超时, 开始追帧
+	EnableCloseOnWriteTimeout = false           // 发送超时, 直接关闭Sink
+	WriteTimeout              = 2000            // 发送超时时间, 单位毫秒. 如果发送超时, 开始追帧/关闭Sink
+	MaxPendingDataSize        = 1024 * 1024 * 5 // 最大等待发送数据大小, 超过该大小, 开始追帧/关闭Sink
 )
 
 // Sink 对拉流端的封装
@@ -20,7 +28,7 @@ type Sink interface {
 
 	GetSourceID() string
 
-	Write(index int, data []*collections.ReferenceCounter[[]byte], ts int64) error
+	Write(index int, data []*collections.ReferenceCounter[[]byte], ts int64, keyVideo bool) error
 
 	GetTransStreamID() TransStreamID
 
@@ -110,9 +118,12 @@ type BaseSink struct {
 	TCPStreaming bool       // 是否是TCP流式拉流
 	urlValues    url.Values // 拉流时携带的Url参数
 
-	SentPacketCount int  // 发包计数
-	Ready           bool // 是否准备好推流. Sink可以通过控制该变量, 达到触发Source推流, 但不立即拉流的目的. 比如rtsp拉流端在信令交互阶段,需要先获取媒体信息,再拉流.
-	createTime      time.Time
+	SentPacketCount         int  // 发包计数
+	Ready                   bool // 是否准备好推流. Sink可以通过控制该变量, 达到触发Source推流, 但不立即拉流的目的. 比如rtsp拉流端在信令交互阶段,需要先获取媒体信息,再拉流.
+	createTime              time.Time
+	totalDataSize           atomic.Uint64
+	writtenDataSize         atomic.Uint64
+	lastKeyVideoDataSegment *collections.ReferenceCounter[[]byte]
 
 	pendingSendQueue  chan *collections.ReferenceCounter[[]byte]                     // 等待发送的数据队列
 	blockedBufferList *collections.LinkedList[*collections.ReferenceCounter[[]byte]] // 异步队列阻塞后的切片数据
@@ -127,6 +138,36 @@ func (s *BaseSink) GetID() SinkID {
 
 func (s *BaseSink) SetID(id SinkID) {
 	s.ID = id
+}
+
+func (s *BaseSink) fastForward(firstSegment *collections.ReferenceCounter[[]byte]) (*collections.ReferenceCounter[[]byte], bool) {
+	if s.lastKeyVideoDataSegment == firstSegment {
+		return firstSegment, true
+	}
+
+	firstSegment.Release()
+	s.writtenDataSize.Add(uint64(len(firstSegment.Get())))
+
+	for len(s.pendingSendQueue) > 0 {
+		buffer := <-s.pendingSendQueue
+		// 不存在视频, 清空队列
+		// 还没有追到最近的关键帧, 继续追帧
+		if s.lastKeyVideoDataSegment == nil || buffer != s.lastKeyVideoDataSegment {
+			buffer.Release()
+			s.writtenDataSize.Add(uint64(len(buffer.Get())))
+		} else {
+			// else if TransStreamFlv == s.Protocol {
+			// 	// 重置第一个flv tag的pre tag size
+			// 	if data == s.lastKeyVideoDataSegment {
+			// 		binary.BigEndian.PutUint32(GetFLVTag(data.Get()), s.flvExtraDataPreTagSize)
+			// 	}
+			// }
+			return buffer, true
+		}
+	}
+
+	// 不存在视频, 清空队列后, 等待下次继续推流
+	return nil, s.lastKeyVideoDataSegment == nil
 }
 
 func (s *BaseSink) doAsyncWrite() {
@@ -145,13 +186,56 @@ func (s *BaseSink) doAsyncWrite() {
 		ReleasePendingBuffers(s.SourceID, s.TransStreamID)
 	}()
 
+	var fastForward bool
 	for {
 		select {
 		case <-s.cancelCtx.Done():
 			return
 		case data := <-s.pendingSendQueue:
-			s.Conn.Write(data.Get())
+			// 追帧到最近的关键帧
+			if fastForward {
+				var ok bool
+				data, ok = s.fastForward(data)
+				if fastForward = !ok; !ok || data == nil {
+					break
+				}
+			}
+
+			l := time.Now().UnixMilli()
+			_, err := s.Conn.Write(data.Get())
+			duration := time.Now().UnixMilli() - l
+			if err != nil {
+				log.Sugar.Errorf(err.Error())
+			}
+
 			data.Release()
+			s.writtenDataSize.Add(uint64(len(data.Get())))
+
+			if (EnableFastForward || EnableCloseOnWriteTimeout) && duration > WriteTimeout {
+				// 等待发送的数据大小超过最大等待发送数据大小, 开始追帧
+				// 如果extra data没有发送完成, 拉流端会有问题. 给个最低128k限制, 当然也可以统计真实的extra data大小
+				// timeout := s.writtenDataSize.Load() > 128*1024 && s.totalDataSize.Load()-s.writtenDataSize.Load() > MaxPendingDataSize
+				timeout := s.totalDataSize.Load()-s.writtenDataSize.Load() > MaxPendingDataSize
+				if !timeout {
+					break
+				}
+
+				if EnableCloseOnWriteTimeout {
+					log.Sugar.Errorf("write timeout, closing sink. writtenDataSize: %d, totalDataSize: %d sink: %s, source: %s", s.writtenDataSize.Load(), s.totalDataSize.Load(), s.ID, s.SourceID)
+					s.Conn.Close()
+					// 不直接return, 从连接处最外层逐步关闭Sink
+					// 如果直接return,Sink未从Source中删除, 执行defer func函数操作blockedBufferList与write非线程安全, 可能会panic, 以及管道清理不干净, buffer不释放等问题
+					// return
+
+					<-s.cancelCtx.Done()
+					return
+				}
+
+				if EnableFastForward {
+					fastForward = true
+					log.Sugar.Errorf("write timeout, fast forward. writtenDataSize: %d, totalDataSize: %d sink: %s, source: %s", s.writtenDataSize.Load(), s.totalDataSize.Load(), s.ID, s.SourceID)
+				}
+			}
 			break
 		}
 	}
@@ -165,9 +249,18 @@ func (s *BaseSink) EnableAsyncWriteMode(queueSize int) {
 	go s.doAsyncWrite()
 }
 
-func (s *BaseSink) Write(index int, data []*collections.ReferenceCounter[[]byte], ts int64) error {
+func (s *BaseSink) Write(index int, data []*collections.ReferenceCounter[[]byte], ts int64, keyVideo bool) error {
 	if s.Conn == nil {
 		return nil
+	}
+
+	if keyVideo {
+		s.lastKeyVideoDataSegment = data[0]
+	}
+
+	// 统计发送的数据大小
+	for _, datum := range data {
+		s.totalDataSize.Add(uint64(len(datum.Get())))
 	}
 
 	// 发送被阻塞的数据
@@ -274,6 +367,7 @@ func (s *BaseSink) Close() {
 
 	s.Lock()
 	defer func() {
+		// 此时Sink已经从Source或等待队列中删除
 		closed := s.State == SessionStateClosed
 		s.State = SessionStateClosed
 		s.UnLock()

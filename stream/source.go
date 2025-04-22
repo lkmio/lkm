@@ -314,7 +314,7 @@ func (s *PublishSource) DispatchPacket(transStream TransStream, packet *avformat
 }
 
 // DispatchBuffer 分发传输流
-func (s *PublishSource) DispatchBuffer(transStream TransStream, index int, data []*collections.ReferenceCounter[[]byte], timestamp int64, videoKey bool) {
+func (s *PublishSource) DispatchBuffer(transStream TransStream, index int, data []*collections.ReferenceCounter[[]byte], timestamp int64, keyVideo bool) {
 	sinks := s.TransStreamSinks[transStream.GetID()]
 	exist := transStream.IsExistVideo()
 
@@ -322,18 +322,18 @@ func (s *PublishSource) DispatchBuffer(transStream TransStream, index int, data 
 
 		// 如果存在视频, 确保向sink发送的第一帧是关键帧
 		if exist && sink.GetSentPacketCount() < 1 {
-			if !videoKey {
+			if !keyVideo {
 				continue
 			}
 
 			if extraData, _, _ := transStream.ReadExtraData(timestamp); len(extraData) > 0 {
-				if ok := s.write(sink, index, extraData, timestamp); !ok {
+				if ok := s.write(sink, index, extraData, timestamp, false); !ok {
 					continue
 				}
 			}
 		}
 
-		if ok := s.write(sink, index, data, timestamp); !ok {
+		if ok := s.write(sink, index, data, timestamp, keyVideo); !ok {
 			continue
 		}
 	}
@@ -345,8 +345,8 @@ func (s *PublishSource) pendingSink(sink Sink) {
 }
 
 // 向sink推流
-func (s *PublishSource) write(sink Sink, index int, data []*collections.ReferenceCounter[[]byte], timestamp int64) bool {
-	err := sink.Write(index, data, timestamp)
+func (s *PublishSource) write(sink Sink, index int, data []*collections.ReferenceCounter[[]byte], timestamp int64, keyVideo bool) bool {
+	err := sink.Write(index, data, timestamp, keyVideo)
 	if err == nil {
 		sink.IncreaseSentPacketCount()
 		return true
@@ -439,7 +439,7 @@ func (s *PublishSource) doAddSink(sink Sink, resume bool) bool {
 		log.Sugar.Errorf("添加sink失败,开始推流发生err: %s sink: %s source: %s ", err.Error(), SinkId2String(sink.GetID()), s.ID)
 		return false
 	}
-	
+
 	// 还没做好准备(rtsp拉流还在协商sdp中), 暂不推流
 	if !sink.IsReady() {
 		return true
@@ -465,10 +465,10 @@ func (s *PublishSource) doAddSink(sink Sink, resume bool) bool {
 	data, timestamp, _ := transStream.ReadKeyFrameBuffer()
 	if len(data) > 0 {
 		if extraData, _, _ := transStream.ReadExtraData(timestamp); len(extraData) > 0 {
-			s.write(sink, 0, extraData, timestamp)
+			s.write(sink, 0, extraData, timestamp, false)
 		}
 
-		s.write(sink, 0, data, timestamp)
+		s.write(sink, 0, data, timestamp, true)
 	}
 
 	// 新建传输流，发送已经缓存的音视频帧

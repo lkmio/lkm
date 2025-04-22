@@ -15,7 +15,7 @@ type FLVFileSink struct {
 }
 
 // Input 输入http-flv数据
-func (f *FLVFileSink) Write(index int, blocks []*collections.ReferenceCounter[[]byte], ts int64) error {
+func (f *FLVFileSink) Write(index int, blocks []*collections.ReferenceCounter[[]byte], ts int64, keyVideo bool) error {
 	if f.fail {
 		return nil
 	}
