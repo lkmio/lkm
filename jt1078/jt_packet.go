@@ -61,7 +61,7 @@ func (p *Packet) Unmarshal(data []byte) error {
 
 	var simNumber string
 	for i := 4; i < 10; i++ {
-		simNumber += fmt.Sprintf("%02d", data[i])
+		simNumber += fmt.Sprintf("%02x", data[i])
 	}
 
 	// channel
