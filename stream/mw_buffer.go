@@ -107,7 +107,8 @@ func (m *mergeWritingBuffer) FlushSegment() (*collections.ReferenceCounter[[]byt
 
 	counter := collections.NewReferenceCounter(data)
 	// 遇到完整关键帧切片, 替代前一组
-	if m.hasKeyVideoDataInCurrentSegment {
+	// 或者只保留最近的音频切片
+	if m.hasKeyVideoDataInCurrentSegment || !m.existVideo {
 		for m.lastKeyVideoDataSegments.Size() > 0 {
 			segment := m.lastKeyVideoDataSegments.Pop()
 			segment.Release()
@@ -131,7 +132,7 @@ func (m *mergeWritingBuffer) FlushSegment() (*collections.ReferenceCounter[[]byt
 }
 
 func (m *mergeWritingBuffer) TryFlushSegment() (*collections.ReferenceCounter[[]byte], bool) {
-	if (!AppConfig.GOPCache || !m.existVideo) || m.duration >= AppConfig.MergeWriteLatency {
+	if !AppConfig.GOPCache || m.duration >= AppConfig.MergeWriteLatency {
 		return m.FlushSegment()
 	}
 
@@ -156,7 +157,7 @@ func (m *mergeWritingBuffer) Reserve(size int) {
 }
 
 func (m *mergeWritingBuffer) ReadSegmentsFromKeyFrameIndex(cb func(*collections.ReferenceCounter[[]byte])) {
-	if !AppConfig.GOPCache || !m.existVideo || m.lastKeyVideoDataSegments.Size() == 0 {
+	if !AppConfig.GOPCache || m.lastKeyVideoDataSegments.Size() == 0 {
 		return
 	}
 
@@ -189,7 +190,7 @@ func NewMergeWritingBuffer(existVideo bool) MergeWritingBuffer {
 		buffers:    collections.NewQueue[*mbBuffer](24),
 	}
 
-	if existVideo && AppConfig.GOPCache {
+	if AppConfig.GOPCache {
 		buffer.lastKeyVideoDataSegments = collections.NewQueue[*collections.ReferenceCounter[[]byte]](36)
 	}
 
