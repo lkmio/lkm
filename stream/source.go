@@ -320,9 +320,9 @@ func (s *PublishSource) DispatchBuffer(transStream TransStream, index int, data 
 
 	for _, sink := range sinks {
 
-		// 如果存在视频, 确保向sink发送的第一帧是关键帧
-		if exist && sink.GetSentPacketCount() < 1 {
-			if !keyVideo {
+		if sink.GetSentPacketCount() < 1 {
+			// 如果存在视频, 确保向sink发送的第一帧是关键帧
+			if exist && !keyVideo {
 				continue
 			}
 
@@ -806,7 +806,7 @@ func (s *PublishSource) OnPacket(packet *avformat.AVPacket) {
 
 	// track超时，忽略推流数据
 	if s.NotTrackAdded(packet.Index) {
-		s.TransDemuxer.DiscardBackPacket(packet.BufferIndex)
+		s.TransDemuxer.DiscardHeadPacket(packet.BufferIndex)
 		return
 	}
 
@@ -832,9 +832,9 @@ func (s *PublishSource) OnPacket(packet *avformat.AVPacket) {
 		}
 	}
 
-	// 未开启GOP缓存或只存在音频流, 释放掉内存
+	// 未开启GOP缓存或只存在音频流, 立即释放
 	if !AppConfig.GOPCache || !s.existVideo {
-		s.TransDemuxer.DiscardBackPacket(packet.BufferIndex)
+		s.TransDemuxer.DiscardHeadPacket(packet.BufferIndex)
 	}
 }
 
