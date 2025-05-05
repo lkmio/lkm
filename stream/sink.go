@@ -206,6 +206,8 @@ func (s *BaseSink) doAsyncWrite() {
 			duration := time.Now().UnixMilli() - l
 			if err != nil {
 				log.Sugar.Errorf(err.Error())
+				<-s.cancelCtx.Done()
+				return
 			}
 
 			data.Release()
