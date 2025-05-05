@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -50,7 +51,7 @@ func connectSource(source string, addr string) {
 	}
 }
 
-func createSource(source, setup string, ssrc uint32) (string, uint16) {
+func createSource(source, setup string, ssrc uint32) (string, uint16, uint32) {
 	v := struct {
 		Source string `json:"source"` //GetSourceID
 		Setup  string `json:"setup"`  //active/passive
@@ -90,6 +91,7 @@ func createSource(source, setup string, ssrc uint32) (string, uint16) {
 		Data struct {
 			IP   string `json:"ip"`
 			Port uint16 `json:"port,omitempty"`
+			SSRC string `json:"ssrc,omitempty"`
 		}
 	}{}
 
@@ -98,7 +100,12 @@ func createSource(source, setup string, ssrc uint32) (string, uint16) {
 		panic(err)
 	}
 
-	return connectInfo.Data.IP, connectInfo.Data.Port
+	atoi, err := strconv.Atoi(connectInfo.Data.SSRC)
+	if err != nil {
+		panic(err)
+	}
+
+	return connectInfo.Data.IP, connectInfo.Data.Port, uint32(atoi)
 }
 
 // 分割rtp包, 返回rtp over tcp包
@@ -171,11 +178,24 @@ func ctrDelay(data []byte) {
 	ts = int64(packet.Timestamp)
 }
 
+func modifySSRC(data []byte, ssrc uint32) {
+	packet := rtp.Packet{}
+	err := packet.Unmarshal(data)
+	if err != nil {
+		panic(err)
+	}
+
+	packet.SSRC = ssrc
+	bytes, err := packet.Marshal()
+	utils.Assert(len(bytes) == len(data))
+	copy(data, bytes)
+}
+
 // 使用wireshark直接导出的rtp流
 // 根据ssrc来查找每个rtp包, rtp不要带扩展字段
 func TestPublish(t *testing.T) {
 	path := "../../source_files/gb28181_h264.rtp"
-	var ssrc uint32 = 0xBEBC201
+	var rawSsrc uint32 = 0xBEBC201
 	localAddr := "0.0.0.0:20001"
 	id := "hls_mystream"
 
@@ -185,7 +205,7 @@ func TestPublish(t *testing.T) {
 	}
 
 	var packets [][]byte
-	packets, ssrc = splitPackets(data, ssrc)
+	packets, rawSsrc = splitPackets(data, rawSsrc)
 	utils.Assert(len(packets) > 0)
 
 	sort.Slice(packets, func(i, j int) bool {
@@ -230,7 +250,7 @@ func TestPublish(t *testing.T) {
 	})
 
 	t.Run("udp", func(t *testing.T) {
-		ip, port := createSource(id, "udp", ssrc)
+		ip, port, ssrc := createSource(id, "udp", rawSsrc)
 
 		addr, _ := net.ResolveUDPAddr("udp", localAddr)
 		remoteAddr, _ := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", ip, port))
@@ -242,13 +262,14 @@ func TestPublish(t *testing.T) {
 		}
 
 		for _, packet := range packets {
+			modifySSRC(packet[2:], ssrc)
 			client.Write(packet[2:])
 			ctrDelay(packet[2:])
 		}
 	})
 
 	t.Run("passive", func(t *testing.T) {
-		ip, port := createSource(id, "passive", ssrc)
+		ip, port, ssrc := createSource(id, "passive", rawSsrc)
 
 		addr, _ := net.ResolveTCPAddr("tcp", localAddr)
 		remoteAddr, _ := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", ip, port))
@@ -261,19 +282,21 @@ func TestPublish(t *testing.T) {
 		}
 
 		for _, packet := range packets {
+			modifySSRC(packet[2:], ssrc)
 			client.Write(packet)
 			ctrDelay(packet[2:])
 		}
 	})
 
 	t.Run("active", func(t *testing.T) {
-		ip, port := createSource(id, "active", ssrc)
+		ip, port, ssrc := createSource(id, "active", rawSsrc)
 
 		addr, _ := net.ResolveTCPAddr("tcp", localAddr)
 		server := transport.TCPServer{}
 
 		server.SetHandler2(func(conn net.Conn) []byte {
 			for _, packet := range packets {
+				modifySSRC(packet[2:], ssrc)
 				conn.Write(packet)
 				ctrDelay(packet[2:])
 			}

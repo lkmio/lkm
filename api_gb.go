@@ -8,24 +8,36 @@ import (
 	"github.com/lkmio/lkm/stream"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
+const (
+	InviteTypeLive = iota
+	InviteTypePlayback
+	InviteTypeDownload
+	InviteTypeBroadcast
+	InviteTypeTalk
+)
+
 type GBForwardParams struct {
-	Source string `json:"source"` //GetSourceID
-	Addr   string `json:"addr"`
-	SSRC   uint32 `json:"ssrc"`
-	Setup  string `json:"setup"`
+	Source     string `json:"source"` // GetSourceID
+	Addr       string `json:"addr"`
+	SSRC       uint32 `json:"ssrc"`
+	OfferSetup string `json:"offer_setup"`
+	Setup      string `json:"setup"`
+	Type       int    `json:"type"` // live/download/playback/talk/broadcast
 }
 
 type GBSourceParams struct {
-	Source string `json:"source"` //GetSourceID
-	Setup  string `json:"setup"`  //active/passive
+	Source string `json:"source"` // GetSourceID
+	Setup  string `json:"setup"`  // active/passive
 	SSRC   uint32 `json:"ssrc,omitempty"`
+	Type   int    `json:"type"` // live/download/playback/talk/broadcast
 }
 
 type GBConnect struct {
-	Source     string `json:"source"` //GetSourceID
+	Source     string `json:"source"` // GetSourceID
 	RemoteAddr string `json:"remote_addr"`
 }
 
@@ -37,6 +49,7 @@ func (api *ApiServer) OnGBSourceCreate(v *GBSourceParams, w http.ResponseWriter,
 		IP   string   `json:"ip"`
 		Port int      `json:"port,omitempty"`
 		Urls []string `json:"urls"`
+		SSRC string   `json:"ssrc,omitempty"`
 	}{}
 
 	var err error
@@ -78,7 +91,15 @@ func (api *ApiServer) OnGBSourceCreate(v *GBSourceParams, w http.ResponseWriter,
 		}
 	}
 
-	_, port, err := gb28181.NewGBSource(v.Source, v.SSRC, tcp, active)
+	var ssrc string
+	if v.Type == InviteTypeDownload || v.Type == InviteTypePlayback {
+		ssrc = gb28181.GetVodSSRC()
+	} else {
+		ssrc = gb28181.GetLiveSSRC()
+	}
+
+	ssrcValue, _ := strconv.Atoi(ssrc)
+	_, port, err := gb28181.NewGBSource(v.Source, uint32(ssrcValue), tcp, active)
 	if err != nil {
 		return
 	}
@@ -86,6 +107,7 @@ func (api *ApiServer) OnGBSourceCreate(v *GBSourceParams, w http.ResponseWriter,
 	response.IP = stream.AppConfig.PublicIP
 	response.Port = port
 	response.Urls = stream.GetStreamPlayUrls(v.Source)
+	response.SSRC = ssrc
 	httpResponseOK(w, response)
 }
 

@@ -126,23 +126,27 @@ func main() {
 	// 多端口模式下, 创建GBSource时才创建收流端口
 	if stream.AppConfig.GB28181.Enable && !stream.AppConfig.GB28181.IsMultiPort() {
 		if stream.AppConfig.GB28181.IsEnableUDP() {
-			server, err := gb28181.NewUDPServer(gb28181.NewSSRCFilter(128))
+			filter := gb28181.NewSSRCFilter(128)
+			server, err := gb28181.NewUDPServer(filter)
 			if err != nil {
 				panic(err)
 			}
 
 			gb28181.SharedUDPServer = server
 			log.Sugar.Info("启动GB28181 udp收流端口成功:" + stream.ListenAddr(stream.AppConfig.GB28181.Port[0]))
+			gb28181.SSRCFilters = append(gb28181.SSRCFilters, filter)
 		}
 
 		if stream.AppConfig.GB28181.IsEnableTCP() {
-			server, err := gb28181.NewTCPServer(gb28181.NewSSRCFilter(128))
+			filter := gb28181.NewSSRCFilter(128)
+			server, err := gb28181.NewTCPServer(filter)
 			if err != nil {
 				panic(err)
 			}
 
 			gb28181.SharedTCPServer = server
 			log.Sugar.Info("启动GB28181 tcp收流端口成功:" + stream.ListenAddr(stream.AppConfig.GB28181.Port[0]))
+			gb28181.SSRCFilters = append(gb28181.SSRCFilters, filter)
 		}
 	}
 
