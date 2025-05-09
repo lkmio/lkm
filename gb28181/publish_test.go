@@ -53,13 +53,15 @@ func connectSource(source string, addr string) {
 
 func createSource(source, setup string, ssrc uint32) (string, uint16, uint32) {
 	v := struct {
-		Source string `json:"source"` //GetSourceID
-		Setup  string `json:"setup"`  //active/passive
-		SSRC   uint32 `json:"ssrc,omitempty"`
+		Source      string `json:"source"` //GetSourceID
+		Setup       string `json:"setup"`  //active/passive
+		SSRC        string `json:"ssrc,omitempty"`
+		SessionName string `json:"session_name,omitempty"` // play/download/playback/talk/broadcast
 	}{
-		Source: source,
-		Setup:  setup,
-		SSRC:   ssrc,
+		Source:      source,
+		Setup:       setup,
+		SSRC:        strconv.Itoa(int(ssrc)),
+		SessionName: "play",
 	}
 
 	marshal, err := json.Marshal(v)
@@ -67,7 +69,8 @@ func createSource(source, setup string, ssrc uint32) (string, uint16, uint32) {
 		panic(err)
 	}
 
-	request, err := http.NewRequest("POST", "http://localhost:8080/api/v1/gb28181/source/create", bytes.NewBuffer(marshal))
+	//request, err := http.NewRequest("POST", "http://localhost:8080/api/v1/gb28181/source/create", bytes.NewBuffer(marshal))
+	request, err := http.NewRequest("POST", "http://localhost:8080/api/v1/gb28181/offer/create", bytes.NewBuffer(marshal))
 	if err != nil {
 		panic(err)
 	}
@@ -89,8 +92,7 @@ func createSource(source, setup string, ssrc uint32) (string, uint16, uint32) {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 		Data struct {
-			IP   string `json:"ip"`
-			Port uint16 `json:"port,omitempty"`
+			Addr string `json:"addr"`
 			SSRC string `json:"ssrc,omitempty"`
 		}
 	}{}
@@ -105,7 +107,9 @@ func createSource(source, setup string, ssrc uint32) (string, uint16, uint32) {
 		panic(err)
 	}
 
-	return connectInfo.Data.IP, connectInfo.Data.Port, uint32(atoi)
+	host, p, err := net.SplitHostPort(connectInfo.Data.Addr)
+	Port, err := strconv.Atoi(p)
+	return host, uint16(Port), uint32(atoi)
 }
 
 // 分割rtp包, 返回rtp over tcp包

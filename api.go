@@ -104,19 +104,18 @@ func startApiServer(addr string) {
 	apiServer.router.HandleFunc("/api/v1/streams/statistics", nil) // 统计所有推拉流
 
 	if stream.AppConfig.GB28181.Enable {
-		apiServer.router.HandleFunc("/api/v1/gb28181/forward", filterRequestBodyParams(apiServer.OnGBSourceForward, &GBForwardParams{}))     // 设置级联转发目标，停止级联调用sink/close接口，级联断开会走on_play_done事件通知
-		apiServer.router.HandleFunc("/api/v1/gb28181/source/create", filterRequestBodyParams(apiServer.OnGBSourceCreate, &GBSourceParams{})) // 创建国标推流源
-		apiServer.router.HandleFunc("/api/v1/gb28181/source/connect", filterRequestBodyParams(apiServer.OnGBSourceConnect, &GBConnect{}))    // 为国标TCP主动推流，设置连接地址
+		apiServer.router.HandleFunc("/ws/v1/gb28181/talk", apiServer.OnGBTalk) // 对讲的主讲人WebSocket连接
+		apiServer.router.HandleFunc("/api/v1/gb28181/offer/create", filterRequestBodyParams(apiServer.OnGBOfferCreate, &SourceSDP{}))
+		apiServer.router.HandleFunc("/api/v1/gb28181/answer/create", filterRequestBodyParams(apiServer.OnGBAnswerCreate, &GBOffer{}))
+		apiServer.router.HandleFunc("/api/v1/gb28181/answer/set", filterRequestBodyParams(apiServer.OnGBSourceConnect, &SourceSDP{})) // active拉流模式下, 设置对方的地址
 	}
 
 	apiServer.router.HandleFunc("/api/v1/gc/force", func(writer http.ResponseWriter, request *http.Request) {
 		runtime.GC()
-		writer.WriteHeader(http.StatusOK)
 	})
 
-	apiServer.router.HandleFunc("/rtc.html", func(writer http.ResponseWriter, request *http.Request) {
-		http.ServeFile(writer, request, "./rtc.html")
-	})
+	apiServer.router.PathPrefix("/web/").Handler(http.StripPrefix("/web/", http.FileServer(http.Dir("./web"))))
+
 	http.Handle("/", apiServer.router)
 
 	srv := &http.Server{

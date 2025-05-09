@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/lkmio/avformat/bufio"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/gb28181"
 	"github.com/lkmio/lkm/log"
@@ -9,47 +10,41 @@ import (
 	"net"
 	"net/http"
 	"strconv"
-	"strings"
 )
 
 const (
-	InviteTypeLive = iota
-	InviteTypePlayback
-	InviteTypeDownload
-	InviteTypeBroadcast
-	InviteTypeTalk
+	InviteTypePlay      = "play"
+	InviteTypePlayback  = "playback"
+	InviteTypeDownload  = "download"
+	InviteTypeBroadcast = "broadcast"
+	InviteTypeTalk      = "talk"
 )
 
-type GBForwardParams struct {
-	Source     string `json:"source"` // GetSourceID
-	Addr       string `json:"addr"`
-	SSRC       uint32 `json:"ssrc"`
-	OfferSetup string `json:"offer_setup"`
-	Setup      string `json:"setup"`
-	Type       int    `json:"type"` // live/download/playback/talk/broadcast
+type SDP struct {
+	SessionName string `json:"session_name,omitempty"` // play/download/playback/talk/broadcast
+	Addr        string `json:"addr,omitempty"`         // 连接地址
+	SSRC        string `json:"ssrc,omitempty"`
+	Setup       string `json:"setup,omitempty"`     // active/passive
+	Transport   string `json:"transport,omitempty"` // tcp/udp
 }
 
-type GBSourceParams struct {
+type SourceSDP struct {
 	Source string `json:"source"` // GetSourceID
-	Setup  string `json:"setup"`  // active/passive
-	SSRC   uint32 `json:"ssrc,omitempty"`
-	Type   int    `json:"type"` // live/download/playback/talk/broadcast
+	SDP
 }
 
-type GBConnect struct {
-	Source     string `json:"source"` // GetSourceID
-	RemoteAddr string `json:"remote_addr"`
+type GBOffer struct {
+	SourceSDP
+	AnswerSetup string `json:"answer_setup,omitempty"` // 希望应答的连接方式
 }
 
-func (api *ApiServer) OnGBSourceCreate(v *GBSourceParams, w http.ResponseWriter, r *http.Request) {
+func (api *ApiServer) OnGBSourceCreate(v *SourceSDP, w http.ResponseWriter, r *http.Request) {
 	log.Sugar.Infof("创建国标源: %v", v)
 
 	// 返回收流地址
 	response := &struct {
-		IP   string   `json:"ip"`
-		Port int      `json:"port,omitempty"`
+		SDP
 		Urls []string `json:"urls"`
-		SSRC string   `json:"ssrc,omitempty"`
 	}{}
 
 	var err error
@@ -92,7 +87,7 @@ func (api *ApiServer) OnGBSourceCreate(v *GBSourceParams, w http.ResponseWriter,
 	}
 
 	var ssrc string
-	if v.Type == InviteTypeDownload || v.Type == InviteTypePlayback {
+	if v.SessionName == InviteTypeDownload || v.SessionName == InviteTypePlayback {
 		ssrc = gb28181.GetVodSSRC()
 	} else {
 		ssrc = gb28181.GetLiveSSRC()
@@ -104,14 +99,13 @@ func (api *ApiServer) OnGBSourceCreate(v *GBSourceParams, w http.ResponseWriter,
 		return
 	}
 
-	response.IP = stream.AppConfig.PublicIP
-	response.Port = port
+	response.Addr = net.JoinHostPort(stream.AppConfig.PublicIP, strconv.Itoa(port))
 	response.Urls = stream.GetStreamPlayUrls(v.Source)
 	response.SSRC = ssrc
 	httpResponseOK(w, response)
 }
 
-func (api *ApiServer) OnGBSourceConnect(v *GBConnect, w http.ResponseWriter, r *http.Request) {
+func (api *ApiServer) OnGBSourceConnect(v *SourceSDP, w http.ResponseWriter, r *http.Request) {
 	log.Sugar.Infof("设置国标主动拉流连接地址: %v", v)
 
 	var err error
@@ -135,7 +129,7 @@ func (api *ApiServer) OnGBSourceConnect(v *GBConnect, w http.ResponseWriter, r *
 		return
 	}
 
-	addr, err := net.ResolveTCPAddr("tcp", v.RemoteAddr)
+	addr, err := net.ResolveTCPAddr("tcp", v.Addr)
 	if err != nil {
 		return
 	}
@@ -145,62 +139,133 @@ func (api *ApiServer) OnGBSourceConnect(v *GBConnect, w http.ResponseWriter, r *
 	}
 }
 
-func (api *ApiServer) OnGBSourceForward(v *GBForwardParams, w http.ResponseWriter, r *http.Request) {
-	log.Sugar.Infof("设置国标级联转发: %v", v)
+func (api *ApiServer) OnGBOfferCreate(v *SourceSDP, w http.ResponseWriter, r *http.Request) {
+	// 预览下级设备
+	if v.SessionName == "" || v.SessionName == InviteTypePlay ||
+		v.SessionName == InviteTypePlayback ||
+		v.SessionName == InviteTypeDownload {
+		api.OnGBSourceCreate(v, w, r)
+	} else {
+		// 向上级转发广播和对讲, 或者是向设备发送invite talk
+	}
+}
 
+func (api *ApiServer) OnGBAnswerCreate(v *GBOffer, w http.ResponseWriter, r *http.Request) {
+	log.Sugar.Infof("创建应答 offer: %v", v)
+
+	var sink stream.Sink
 	var err error
 	// 响应错误消息
 	defer func() {
 		if err != nil {
-			log.Sugar.Errorf("设置级联转发失败 err: %s", err.Error())
+			log.Sugar.Errorf("创建应答失败 err: %s", err.Error())
 			httpResponseError(w, err.Error())
+
+			if sink != nil {
+				sink.Close()
+			}
 		}
 	}()
 
 	source := stream.SourceManager.Find(v.Source)
 	if source == nil {
 		err = fmt.Errorf("%s 源不存在", v.Source)
-	} else if source.GetType() != stream.SourceType28181 {
-		log.Sugar.Infof("%s 源不是国标推流类型", v.Source)
 		return
-	}
-
-	var setup gb28181.SetupType
-	switch strings.ToLower(v.Setup) {
-	case "active":
-		setup = gb28181.SetupActive
-		break
-	case "passive":
-		setup = gb28181.SetupPassive
-		break
-	default:
-		setup = gb28181.SetupUDP
-		break
 	}
 
 	addr, _ := net.ResolveTCPAddr("tcp", r.RemoteAddr)
 	sinkId := stream.NetAddr2SinkId(addr)
 
-	// 添加随机数
+	// sinkId添加随机数
 	if ipv4, ok := sinkId.(uint64); ok {
 		random := uint64(utils.RandomIntInRange(0x1000, 0xFFFF0000))
 		sinkId = (ipv4 & 0xFFFFFFFF00000000) | (random << 16) | (ipv4 & 0xFFFF)
 	}
 
-	sink, port, err := gb28181.NewForwardSink(v.SSRC, v.Addr, setup, sinkId, v.Source)
+	setup := gb28181.SetupTypeFromString(v.Setup)
+	if v.AnswerSetup != "" {
+		setup = gb28181.SetupTypeFromString(v.AnswerSetup)
+	}
+
+	var protocol stream.TransStreamProtocol
+	// 级联转发
+	if v.SessionName == "" || v.SessionName == InviteTypePlay ||
+		v.SessionName == InviteTypePlayback ||
+		v.SessionName == InviteTypeDownload {
+		protocol = stream.TransStreamGBCascadedForward
+	} else {
+		// 对讲广播转发
+		protocol = stream.TransStreamGBTalkForward
+	}
+
+	var port int
+	sink, port, err = stream.NewForwardSink(setup.TransportType(), protocol, sinkId, v.Source, v.Addr, gb28181.TransportManger)
 	if err != nil {
 		return
 	}
 
-	source.AddSink(sink)
-
-	log.Sugar.Infof("设置国标级联转发成功 ID: %s", sink.GetID())
+	log.Sugar.Infof("创建转发sink成功, sink: %s port: %d transport: %s", sink.GetID(), port, setup.TransportType())
+	_, state := stream.PreparePlaySink(sink)
+	if utils.HookStateOK != state {
+		err = fmt.Errorf("failed to prepare play sink")
+		return
+	}
 
 	response := struct {
 		Sink string `json:"sink"` //sink id
-		IP   string `json:"ip"`
-		Port int    `json:"port"`
-	}{Sink: stream.SinkId2String(sinkId), IP: stream.AppConfig.PublicIP, Port: port}
+		SDP
+	}{Sink: stream.SinkId2String(sinkId), SDP: SDP{Addr: net.JoinHostPort(stream.AppConfig.PublicIP, strconv.Itoa(port))}}
 
 	httpResponseOK(w, &response)
+}
+
+// OnGBTalk 国标广播/对讲流程:
+// 1. 浏览器使用WS携带source_id访问/api/v1/gb28181/talk, 如果source_id冲突, 直接断开ws连接
+// 2. WS链接建立后, 调用gb-cms接口/api/v1/broadcast/invite, 向设备发送广播请求
+func (api *ApiServer) OnGBTalk(w http.ResponseWriter, r *http.Request) {
+	conn, err := api.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Sugar.Errorf("升级为websocket失败 err: %s", err.Error())
+		conn.Close()
+		return
+	}
+
+	// 获取id
+	id := r.FormValue("source")
+
+	talkSource := gb28181.NewTalkSource(id, conn)
+	talkSource.Init(stream.TCPReceiveBufferQueueSize)
+	talkSource.SetUrlValues(r.Form)
+
+	_, state := stream.PreparePublishSource(talkSource, true)
+	if utils.HookStateOK != state {
+		log.Sugar.Errorf("对讲失败, source: %s", talkSource)
+		conn.Close()
+		return
+	}
+
+	log.Sugar.Infof("ws对讲连接成功, source: %s", talkSource)
+
+	go stream.LoopEvent(talkSource)
+
+	for {
+		_, bytes, err := conn.ReadMessage()
+		length := len(bytes)
+		if err != nil {
+			log.Sugar.Errorf("读取对讲音频包失败, source: %s err: %s", id, err.Error())
+			break
+		} else if length < 1 {
+			continue
+		}
+
+		for i := 0; i < length; {
+			data := stream.UDPReceiveBufferPool.Get().([]byte)
+			n := bufio.MinInt(stream.UDPReceiveBufferSize, length-i)
+			copy(data, bytes[:n])
+			_ = talkSource.PublishSource.Input(data[:n])
+			i += n
+		}
+	}
+
+	talkSource.Close()
 }

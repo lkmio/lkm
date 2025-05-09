@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0"/>
+    <meta name="apple-mobile-web-capable" content="yes"/>
+    <title>语音广播</title>
+</head>
+<body>
+<button id="intercomBegin">开始广播</button>
+<button id="intercomEnd">关闭广播</button>
+
+<input style="width: 100px;" id="device_id" type="text" value="34020000001320000001"/>
+<input style="width: 100px;" id="channel_id" type="text" value="34020000001320000001"/>
+
+<button id="invite" onclick="invite()">邀请</button>
+<button id="hangup" onclick="hangup()">挂断</button>
+
+</body>
+<script src="g711.js"></script>
+<script type="text/javascript">
+
+    var begin = document.getElementById('intercomBegin');
+    var end = document.getElementById('intercomEnd');
+
+    var ws = null; //实现WebSocket
+    var record = null; //多媒体对象，用来处理音频
+    var source = null;
+
+    function init(rec) {
+        record = rec;
+    }
+
+    function invite() {
+        let deviceId = document.getElementById("device_id").value;
+        let channelId = document.getElementById("channel_id").value;
+
+        let data = {
+            device_id: deviceId,
+            channel_id: channelId,
+            type: 1,
+            source: source
+        };
+
+        fetch("http://localhost:9000/api/v1/broadcast/invite", {
+            method: 'POST',
+            body: JSON.stringify(data),
+            headers: new Headers({
+                'Content-Type': 'application/json',
+            }),
+        }).then((res) => res.json())
+            .then((data) => {
+
+            })
+    }
+
+    function hangup() {
+        let deviceId = document.getElementById("device_id").value;
+        let channelId = document.getElementById("channel_id").value;
+
+        let data = {
+            device_id: deviceId,
+            channel_id: channelId,
+            source: source
+        };
+
+        fetch("http://localhost:9000/api/v1/broadcast/hangup", {
+            method: 'POST',
+            body: JSON.stringify(data),
+            headers: new Headers({
+                'Content-Type': 'application/json',
+            }),
+        }).then((res) => res.json())
+            .then((data) => {
+
+            })
+    }
+
+    //录音对象
+    var Recorder = function (stream) {
+        var sampleBits = 16; //输出采样数位 8, 16
+        var sampleRate = 8000; //输出采样率
+        var context = new AudioContext();
+        var audioInput = context.createMediaStreamSource(stream);
+        var recorder = context.createScriptProcessor(4096, 1, 1);
+        var audioData = {
+            size: 0, //录音文件长度
+            buffer: [], //录音缓存
+            inputSampleRate: 48000, //输入采样率
+            inputSampleBits: 16, //输入采样数位 8, 16
+            outputSampleRate: sampleRate, //输出采样数位
+            oututSampleBits: sampleBits, //输出采样率
+            clear: function () {
+                this.buffer = [];
+                this.size = 0;
+            },
+            input: function (data) {
+                this.buffer.push(new Float32Array(data));
+                this.size += data.length;
+            },
+            compress: function () { //合并压缩
+                //合并
+                var data = new Float32Array(this.size);
+                var offset = 0;
+                for (var i = 0; i < this.buffer.length; i++) {
+                    data.set(this.buffer[i], offset);
+                    offset += this.buffer[i].length;
+                }
+                //压缩
+                var compression = parseInt(this.inputSampleRate / this.outputSampleRate);
+                var length = data.length / compression;
+                var result = new Float32Array(length);
+                var index = 0,
+                    j = 0;
+                while (index < length) {
+                    result[index] = data[j];
+                    j += compression;
+                    index++;
+                }
+                return result;
+            },
+            encodePCM: function () { //这里不对采集到的数据进行其他格式处理，如有需要均交给服务器端处理。
+                var sampleRate = Math.min(this.inputSampleRate, this.outputSampleRate);
+                var sampleBits = Math.min(this.inputSampleBits, this.oututSampleBits);
+                var bytes = this.compress();
+                var dataLength = bytes.length * (sampleBits / 8);
+                var buffer = new ArrayBuffer(dataLength);
+                var data = new DataView(buffer);
+                var offset = 0;
+                for (var i = 0; i < bytes.length; i++, offset += 2) {
+                    var s = Math.max(-1, Math.min(1, bytes[i]));
+                    data.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+                }
+                return new Blob([data]);
+            }
+        };
+
+        var sendData = function () { //对以获取的数据进行处理(分包)
+            var reader = new FileReader();
+            reader.onload = e => {
+                var outbuffer = e.target.result;
+                var arr = new Uint16Array(outbuffer);
+                var dst = new Int8Array(arr.length);
+                pcm16_to_alaw(arr.byteLength, arr, dst);
+
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(dst);
+                } else {
+                    console.log('WebSocket not ready, state:', ws ? ws.readyState : 'null');
+                    record.stop(); // 停止录音
+                    if (ws) {
+                        ws.close(); // 确保关闭连接
+                    }
+                }
+            };
+
+            reader.readAsArrayBuffer(audioData.encodePCM());
+            audioData.clear();//每次发送完成则清理掉旧数据
+        };
+
+        this.start = function () {
+            audioInput.connect(recorder);
+            recorder.connect(context.destination);
+        }
+
+        this.stop = function () {
+            recorder.disconnect();
+        }
+
+        this.getBlob = function () {
+            return audioData.encodePCM();
+        }
+
+        this.clear = function () {
+            audioData.clear();
+        }
+
+        recorder.onaudioprocess = function (e) {
+            var inputBuffer = e.inputBuffer.getChannelData(0);
+            audioData.input(inputBuffer);
+            sendData();
+        }
+    }
+
+    function generateRandomAlphanumeric10() {
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+        let result = '';
+        for (let i = 0; i < 20; i++) {
+            result += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return result;
+    }
+
+    /*
+    * WebSocket
+    */
+    function connectWS() {
+        let secure = window.location.protocol === 'https:'
+        //source = generateRandomAlphanumeric10();
+        source = "unique_id";
+        let url = (secure ? "wss:" : "ws:") + "/" + window.location.host + "/ws/v1/gb28181/talk" + "?source=" + source
+        ws = new WebSocket(url);
+        ws.binaryType = 'arraybuffer'; //传输的是 ArrayBuffer 类型的数据
+
+        ws.onopen = function () {
+            console.log('ws连接成功');
+            record.start();
+        };
+
+        ws.onmessage = function (msg) {
+
+        }
+
+        ws.onerror = function (err) {
+            console.log('ws连接断开');
+            console.info(err)
+            record.stop()
+        }
+    }
+
+    /*
+    * 开始对讲
+    */
+    begin.onclick = function () {
+        navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia;
+        if (!navigator.getUserMedia) {
+            alert('浏览器不支持音频输入');
+        } else {
+            navigator.getUserMedia({
+                    audio: true
+                },
+
+                //获取到音频采集权限回调
+                function (mediaStream) {
+                    console.log('开始对讲');
+                    //初始化采集器
+                    init(new Recorder(mediaStream));
+                    //连接websocket
+                    connectWS();
+                },
+
+                function (error) {
+                    console.log(error);
+                    switch (error.message || error.name) {
+                        case 'PERMISSION_DENIED':
+                        case 'PermissionDeniedError':
+                            console.info('用户拒绝提供信息。');
+                            break;
+                        case 'NOT_SUPPORTED_ERROR':
+                        case 'NotSupportedError':
+                            console.info('浏览器不支持硬件设备。');
+                            break;
+                        case 'MANDATORY_UNSATISFIED_ERROR':
+                        case 'MandatoryUnsatisfiedError':
+                            console.info('无法发现指定的硬件设备。');
+                            break;
+                        default:
+                            console.info('无法打开麦克风。异常信息:' + (error.code || error.name));
+                            break;
+                    }
+                }
+            )
+        }
+    }
+
+    /*
+    * 关闭对讲
+    */
+    end.onclick = function () {
+        if (ws) {
+            ws.close();
+            record.stop();
+            console.log('关闭对讲以及WebSocket');
+        }
+    }
+</script>
+</html>

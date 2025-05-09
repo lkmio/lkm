@@ -288,7 +288,7 @@ func (s *PublishSource) CreateTransStream(id TransStreamID, protocol TransStream
 	_ = transStream.WriteHeader()
 
 	// 设置转发流
-	if TransStreamGBStreamForward == transStream.GetProtocol() {
+	if TransStreamGBCascadedForward == transStream.GetProtocol() {
 		s.ForwardTransStream = transStream
 	}
 
@@ -612,7 +612,7 @@ func (s *PublishSource) DoClose() {
 		transStreamID := sink.GetTransStreamID()
 		sink.SetTransStreamID(0)
 		if s.recordSink == sink {
-			return
+			continue
 		}
 
 		{

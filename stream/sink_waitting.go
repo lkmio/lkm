@@ -63,6 +63,13 @@ func PopWaitingSinks(sourceId string) []Sink {
 	return sinks
 }
 
+func CloseWaitingSinks(sourceId string) {
+	sinks := PopWaitingSinks(sourceId)
+	for _, sink := range sinks {
+		sink.Close()
+	}
+}
+
 func ExistSinkInWaitingQueue(sourceId string, sinkId SinkID) bool {
 	mutex.RLock()
 	defer mutex.RUnlock()

@@ -20,16 +20,18 @@ type TransStreamProtocol uint32
 type SessionState uint32
 
 const (
-	SourceTypeRtmp  = SourceType(1)
-	SourceType28181 = SourceType(2)
-	SourceType1078  = SourceType(3)
+	SourceTypeRtmp   = SourceType(1)
+	SourceType28181  = SourceType(2)
+	SourceType1078   = SourceType(3)
+	SourceTypeGBTalk = SourceType(4) // 国标广播/对讲
 
-	TransStreamRtmp            = TransStreamProtocol(1)
-	TransStreamFlv             = TransStreamProtocol(2)
-	TransStreamRtsp            = TransStreamProtocol(3)
-	TransStreamHls             = TransStreamProtocol(4)
-	TransStreamRtc             = TransStreamProtocol(5)
-	TransStreamGBStreamForward = TransStreamProtocol(6) // 国标级联转发
+	TransStreamRtmp              = TransStreamProtocol(1)
+	TransStreamFlv               = TransStreamProtocol(2)
+	TransStreamRtsp              = TransStreamProtocol(3)
+	TransStreamHls               = TransStreamProtocol(4)
+	TransStreamRtc               = TransStreamProtocol(5)
+	TransStreamGBCascadedForward = TransStreamProtocol(6) // 国标级联转发
+	TransStreamGBTalkForward     = TransStreamProtocol(7) // 国标广播/对讲转发
 )
 
 const (
@@ -49,6 +51,8 @@ func (s SourceType) String() string {
 		return "28181"
 	} else if SourceType1078 == s {
 		return "jt1078"
+	} else if SourceTypeGBTalk == s {
+		return "gb_talk"
 	}
 
 	panic(fmt.Sprintf("unknown source type %d", s))
@@ -65,8 +69,10 @@ func (p TransStreamProtocol) String() string {
 		return "hls"
 	} else if TransStreamRtc == p {
 		return "rtc"
-	} else if TransStreamGBStreamForward == p {
-		return "gb_stream_forward"
+	} else if TransStreamGBCascadedForward == p {
+		return "gb_cascaded_forward"
+	} else if TransStreamGBTalkForward == p {
+		return "gb_talk_forward"
 	}
 
 	panic(fmt.Sprintf("unknown stream protocol %d", p))

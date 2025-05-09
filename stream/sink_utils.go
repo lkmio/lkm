@@ -53,3 +53,13 @@ func SinkId2String(id SinkID) string {
 func CreateSinkDisconnectionMessage(sink Sink) string {
 	return fmt.Sprintf("%s sink断开连接. id: %s", sink.GetProtocol(), sink.GetID())
 }
+
+func ExecuteSyncEventOnSource(sourceId string, event func()) bool {
+	source := SourceManager.Find(sourceId)
+	if source != nil {
+		source.ExecuteSyncEvent(event)
+		return true
+	}
+
+	return false
+}

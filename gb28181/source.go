@@ -25,6 +25,43 @@ const (
 	JitterBufferSize  = 1024 * 1024
 )
 
+func (s SetupType) TransportType() stream.TransportType {
+	switch s {
+	case SetupUDP:
+		return stream.TransportTypeUDP
+	case SetupPassive:
+		return stream.TransportTypeTCPServer
+	case SetupActive:
+		return stream.TransportTypeTCPClient
+	default:
+		panic(fmt.Errorf("invalid setup type: %d", s))
+	}
+}
+
+func (s SetupType) String() string {
+	switch s {
+	case SetupUDP:
+		return "udp"
+	case SetupPassive:
+		return "passive"
+	case SetupActive:
+		return "active"
+	default:
+		panic(fmt.Errorf("invalid setup type: %d", s))
+	}
+}
+
+func SetupTypeFromString(setupType string) SetupType {
+	switch setupType {
+	case "passive":
+		return SetupPassive
+	case "active":
+		return SetupActive
+	default:
+		return SetupUDP
+	}
+}
+
 var (
 	TransportManger transport.Manager
 	SharedUDPServer *UDPServer
