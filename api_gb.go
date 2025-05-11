@@ -102,6 +102,8 @@ func (api *ApiServer) OnGBSourceCreate(v *SourceSDP, w http.ResponseWriter, r *h
 	response.Addr = net.JoinHostPort(stream.AppConfig.PublicIP, strconv.Itoa(port))
 	response.Urls = stream.GetStreamPlayUrls(v.Source)
 	response.SSRC = ssrc
+
+	log.Sugar.Infof("创建国标源成功, addr: %s, ssrc: %d", response.Addr, ssrcValue)
 	httpResponseOK(w, response)
 }
 

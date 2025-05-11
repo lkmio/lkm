@@ -472,7 +472,7 @@ func (s *PublishSource) doAddSink(sink Sink, resume bool) bool {
 	}
 
 	// 新建传输流，发送已经缓存的音视频帧
-	if !exist && AppConfig.GOPCache && s.existVideo {
+	if !exist && AppConfig.GOPCache && s.existVideo && TransStreamGBCascadedForward != transStream.GetProtocol() {
 		s.DispatchGOPBuffer(transStream)
 	}
 
@@ -828,7 +828,9 @@ func (s *PublishSource) OnPacket(packet *avformat.AVPacket) {
 
 		// 分发给各个传输流
 		for _, transStream := range s.TransStreams {
-			s.DispatchPacket(transStream, packet)
+			if TransStreamGBCascadedForward != transStream.GetProtocol() {
+				s.DispatchPacket(transStream, packet)
+			}
 		}
 	}
 
