@@ -36,6 +36,9 @@ func DecodeGBRTPOverTCPPacket(data []byte, source GBSource, decoder *transport.L
 		}
 
 		i += n
+		if bytes == nil {
+			break
+		}
 
 		// 单端口模式,ssrc匹配source
 		if source == nil || stream.SessionStateHandshakeSuccess == source.State() {

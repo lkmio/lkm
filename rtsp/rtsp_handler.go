@@ -1,6 +1,5 @@
 package rtsp
 
-
 import (
 	"fmt"
 	"github.com/lkmio/avformat/utils"
@@ -234,7 +233,7 @@ func (h handler) OnPlay(request Request) (*http.Response, []byte, error) {
 		return nil, nil, fmt.Errorf("Source with ID %s does not exist.", request.sourceId)
 	}
 
-	source.AddSink(sink)
+	source.GetTransStreamPublisher().AddSink(sink)
 	return response, nil, nil
 }
 

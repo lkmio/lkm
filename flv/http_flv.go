@@ -185,7 +185,7 @@ func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtoco
 	var prevTagSize uint32
 	var metaData *amf0.Object
 
-	endInfo := source.GetStreamEndInfo()
+	endInfo := source.GetTransStreamPublisher().GetStreamEndInfo()
 	if endInfo != nil {
 		prevTagSize = endInfo.FLVPrevTagSize
 	}

@@ -292,7 +292,7 @@ func NewTransStream(addr net.IPAddr, urlFormat string, oldTracks map[byte]uint16
 func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtocol, tracks []*stream.Track) (stream.TransStream, error) {
 	trackFormat := "?track=%d"
 	var oldTracks map[byte]uint16
-	if endInfo := source.GetStreamEndInfo(); endInfo != nil {
+	if endInfo := source.GetTransStreamPublisher().GetStreamEndInfo(); endInfo != nil {
 		oldTracks = endInfo.RtspTracks
 	}
 

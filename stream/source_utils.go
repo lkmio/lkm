@@ -133,97 +133,6 @@ func ParseUrl(name string) (string, url.Values) {
 	return name, nil
 }
 
-//
-//func ExtractVideoPacket(codec utils.AVCodecID, key, extractStream bool, data []byte, pts, dts int64, index, timebase int) (*avformat.AVStream, *avformat.AVPacket, error) {
-//	var stream *avformat.AVStream
-//
-//	if utils.AVCodecIdH264 == codec {
-//		//从关键帧中解析出sps和pps
-//		if key && extractStream {
-//			sps, pps, err := avc.ParseExtraDataFromKeyNALU(data)
-//			if err != nil {
-//				log.Sugar.Errorf("从关键帧中解析sps pps失败 data:%s", hex.EncodeToString(data))
-//				return nil, nil, err
-//			}
-//
-//			codecData, err := utils.NewAVCCodecData(sps, pps)
-//			if err != nil {
-//				log.Sugar.Errorf("解析sps pps失败 data:%s sps:%s, pps:%s", hex.EncodeToString(data), hex.EncodeToString(sps), hex.EncodeToString(pps))
-//				return nil, nil, err
-//			}
-//
-//			stream = avformat.NewAVStream(utils.AVMediaTypeVideo, 0, codec, codecData.AnnexBExtraData(), codecData)
-//		}
-//
-//	} else if utils.AVCodecIdH265 == codec {
-//		if key && extractStream {
-//			vps, sps, pps, err := hevc.ParseExtraDataFromKeyNALU(data)
-//			if err != nil {
-//				log.Sugar.Errorf("从关键帧中解析vps sps pps失败  data:%s", hex.EncodeToString(data))
-//				return nil, nil, err
-//			}
-//
-//			codecData, err := utils.NewHEVCCodecData(vps, sps, pps)
-//			if err != nil {
-//				log.Sugar.Errorf("解析sps pps失败 data:%s vps:%s sps:%s, pps:%s", hex.EncodeToString(data), hex.EncodeToString(vps), hex.EncodeToString(sps), hex.EncodeToString(pps))
-//				return nil, nil, err
-//			}
-//
-//			stream = avformat.NewAVStream(utils.AVMediaTypeVideo, 0, codec, codecData.AnnexBExtraData(), codecData)
-//		}
-//
-//	}
-//
-//	packet := avformat.NewVideoPacket(data, dts, pts, key, utils.PacketTypeAnnexB, codec, index, timebase)
-//	return stream, packet, nil
-//}
-//
-//func ExtractAudioPacket(codec utils.AVCodecID, extractStream bool, data []byte, pts, dts int64, index, timebase int) (*avformat.AVStream, *avformat.AVPacket, error) {
-//	var stream *avformat.AVStream
-//	var packet *avformat.AVPacket
-//	if utils.AVCodecIdAAC == codec {
-//		//必须包含ADTSHeader
-//		if len(data) < 7 {
-//			return nil, nil, fmt.Errorf("need more data")
-//		}
-//
-//		var skip int
-//		header, err := utils.ReadADtsFixedHeader(data)
-//		if err != nil {
-//			log.Sugar.Errorf("读取ADTSHeader失败 data:%s", hex.EncodeToString(data[:7]))
-//			return nil, nil, err
-//		} else {
-//			skip = 7
-//			//跳过ADtsHeader长度
-//			if header.ProtectionAbsent() == 0 {
-//				skip += 2
-//			}
-//		}
-//
-//		if extractStream {
-//			configData, err := utils.ADtsHeader2MpegAudioConfigData(header)
-//			config, err := utils.ParseMpeg4AudioConfig(configData)
-//			println(config)
-//			if err != nil {
-//				log.Sugar.Errorf("adt头转m4ac失败 data:%s", hex.EncodeToString(data[:7]))
-//				return nil, nil, err
-//			}
-//
-//			stream = avformat.NewAVStream(utils.AVMediaTypeAudio, index, codec, configData, nil)
-//		}
-//
-//		packet = utils.NewAudioPacket(data[skip:], dts, pts, codec, index, timebase)
-//	} else if utils.AVCodecIdPCMALAW == codec || utils.AVCodecIdPCMMULAW == codec {
-//		if extractStream {
-//			stream = avformat.NewAVStream(utils.AVMediaTypeAudio, index, codec, nil, nil)
-//		}
-//
-//		packet = utils.NewAudioPacket(data, dts, pts, codec, index, timebase)
-//	}
-//
-//	return stream, packet, nil
-//}
-
 // StartReceiveDataTimer 启动收流超时计时器
 // 收流超时, 客观上认为是流中断, 应该关闭Source. 如果开启了Hook, 并且Hook返回200应答, 则不关闭Source.
 func StartReceiveDataTimer(source Source) *time.Timer {
@@ -264,9 +173,9 @@ func StartIdleTimer(source Source) *time.Timer {
 
 	var idleTimer *time.Timer
 	idleTimer = time.AfterFunc(time.Duration(AppConfig.IdleTimeout), func() {
-		dis := time.Now().Sub(source.LastStreamEndTime())
+		dis := time.Now().Sub(source.GetTransStreamPublisher().LastStreamEndTime())
 
-		if source.SinkCount() < 1 && dis >= time.Duration(AppConfig.IdleTimeout) {
+		if source.GetTransStreamPublisher().SinkCount() < 1 && dis >= time.Duration(AppConfig.IdleTimeout) {
 			log.Sugar.Errorf("拉流空闲超时 source: %s", source.GetID())
 
 			// 此处不参考返回值err, 客观希望不关闭Source
@@ -334,7 +243,7 @@ func LoopEvent(source Source) {
 		}
 
 		var ok bool
-		source.ExecuteSyncEvent(func() {
+		source.executeSyncEvent(func() {
 			source.ProbeTimeout()
 			ok = len(source.OriginTracks()) > 0
 		})
@@ -344,6 +253,9 @@ func LoopEvent(source Source) {
 			return
 		}
 	})
+
+	// 启动协程, 生成发布传输流
+	go source.GetTransStreamPublisher().run()
 
 	for {
 		select {

@@ -404,7 +404,7 @@ func (api *ApiServer) OnSourceList(w http.ResponseWriter, r *http.Request) {
 			ID:        source.GetID(),
 			Protocol:  source.GetType().String(),
 			Time:      source.CreateTime(),
-			SinkCount: source.SinkCount(),
+			SinkCount: source.GetTransStreamPublisher().SinkCount(),
 			Bitrate:   strconv.Itoa(source.GetBitrateStatistics().PreviousSecond()/1024) + "KBS", // 后续开发
 			Tracks:    codecs,
 			Urls:      stream.GetStreamPlayUrls(source.GetID()),
@@ -430,7 +430,7 @@ func (api *ApiServer) OnSinkList(v *IDS, w http.ResponseWriter, r *http.Request)
 	}
 
 	var details []SinkDetails
-	sinks := source.Sinks()
+	sinks := source.GetTransStreamPublisher().Sinks()
 	for _, sink := range sinks {
 		details = append(details,
 			SinkDetails{
@@ -468,7 +468,7 @@ func (api *ApiServer) OnSinkClose(v *IDS, w http.ResponseWriter, r *http.Request
 	}
 
 	if source := stream.SourceManager.Find(v.Source); source != nil {
-		if sink := source.FindSink(sinkId); sink != nil {
+		if sink := source.GetTransStreamPublisher().FindSink(sinkId); sink != nil {
 			sink.Close()
 		}
 	} else {

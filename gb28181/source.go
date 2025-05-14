@@ -1,6 +1,7 @@
 package gb28181
 
 import (
+	"encoding/binary"
 	"fmt"
 	"github.com/lkmio/avformat"
 	"github.com/lkmio/avformat/utils"
@@ -97,6 +98,8 @@ type BaseGBSource struct {
 	audioPacketCreatedTime int64
 	videoPacketCreatedTime int64
 	isSystemClock          bool // 推流时间戳不正确, 是否使用系统时间.
+	lastRtpTimestamp       int64
+	sameTimePackets        [][]byte
 }
 
 func (source *BaseGBSource) Init(receiveQueueSize int) {
@@ -108,18 +111,39 @@ func (source *BaseGBSource) Init(receiveQueueSize int) {
 	source.SetType(stream.SourceType28181)
 	source.probeBuffer = mpeg.NewProbeBuffer(PsProbeBufferSize)
 	source.PublishSource.Init(receiveQueueSize)
+	source.lastRtpTimestamp = -1
 }
 
 // Input 输入rtp包, 处理PS流, 负责解析->封装->推流
 func (source *BaseGBSource) Input(data []byte) error {
-	// 国标级联转发
-	if source.ForwardTransStream != nil {
-		packet := avformat.AVPacket{Data: data}
-		source.DispatchPacket(source.ForwardTransStream, &packet)
-	}
-
 	packet := rtp.Packet{}
 	_ = packet.Unmarshal(data)
+
+	// 国标级联转发
+	if source.GetTransStreamPublisher().GetTransStreams() != nil {
+		if source.lastRtpTimestamp == -1 {
+			source.lastRtpTimestamp = int64(packet.Timestamp)
+		}
+
+		// 相同时间戳的RTP包, 积攒一起发送, 降低管道压力
+		length := len(data)
+		if int64(packet.Timestamp) != source.lastRtpTimestamp {
+			source.lastRtpTimestamp = int64(packet.Timestamp)
+			if len(source.sameTimePackets) > 0 {
+				source.GetTransStreamPublisher().Post(&stream.StreamEvent{Type: stream.StreamEventTypeRawPacket, Data: source.sameTimePackets})
+				source.sameTimePackets = nil
+			}
+		}
+
+		if stream.UDPReceiveBufferSize-2 < length {
+			log.Sugar.Errorf("rtp包过大, 不转发. source: %s ssrc: %x size: %d", source.ID, source.ssrc, len(data))
+		} else {
+			bytes := stream.UDPReceiveBufferPool.Get().([]byte)
+			copy(bytes[2:], data)
+			binary.BigEndian.PutUint16(bytes[:2], uint16(length))
+			source.sameTimePackets = append(source.sameTimePackets, bytes[:2+length])
+		}
+	}
 
 	var bytes []byte
 	var n int

@@ -299,7 +299,7 @@ func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtoco
 	var playlistFormat *string
 	startSeq := -1
 
-	endInfo := source.GetStreamEndInfo()
+	endInfo := source.GetTransStreamPublisher().GetStreamEndInfo()
 	if endInfo != nil && endInfo.M3U8Writer != nil {
 		writer = endInfo.M3U8Writer
 		playlistFormat = endInfo.PlaylistFormat

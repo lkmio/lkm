@@ -11,17 +11,18 @@ import (
 func PreparePublishSource(source Source, hook bool) (*http.Response, utils.HookState) {
 	var response *http.Response
 
+	if err := SourceManager.Add(source); err != nil {
+		return nil, utils.HookStateOccupy
+	}
+
 	if hook && AppConfig.Hooks.IsEnablePublishEvent() {
 		rep, state := HookPublishEvent(source)
 		if utils.HookStateOK != state {
+			_, _ = SourceManager.Remove(source.GetID())
 			return rep, state
 		}
 
 		response = rep
-	}
-
-	if err := SourceManager.Add(source); err != nil {
-		return nil, utils.HookStateOccupy
 	}
 
 	source.SetCreateTime(time.Now())

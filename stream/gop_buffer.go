@@ -10,30 +10,30 @@ import (
 type GOPBuffer interface {
 
 	// AddPacket Return bool 缓存帧是否成功, 如果首帧非关键帧, 缓存失败
-	AddPacket(packet *avformat.AVPacket) bool
+	AddPacket(packet *collections.ReferenceCounter[*avformat.AVPacket]) bool
 
-	PeekAll(handler func(packet *avformat.AVPacket))
+	PeekAll(handler func(*collections.ReferenceCounter[*avformat.AVPacket]))
 
-	Peek(index int) *avformat.AVPacket
+	Peek(index int) *collections.ReferenceCounter[*avformat.AVPacket]
 
-	PopAll(handler func(packet *avformat.AVPacket))
+	PopAll(handler func(*collections.ReferenceCounter[*avformat.AVPacket]))
 
-	RequiresClear(nextPacket *avformat.AVPacket) bool
+	RequiresClear(nextPacket *collections.ReferenceCounter[*avformat.AVPacket]) bool
 
 	Size() int
 }
 
 type streamBuffer struct {
-	buffer           collections.RingBuffer[*avformat.AVPacket]
+	buffer           collections.RingBuffer[*collections.ReferenceCounter[*avformat.AVPacket]]
 	hasVideoKeyFrame bool
 }
 
-func (s *streamBuffer) AddPacket(packet *avformat.AVPacket) bool {
-	if utils.AVMediaTypeVideo == packet.MediaType {
-		if packet.Key {
+func (s *streamBuffer) AddPacket(packet *collections.ReferenceCounter[*avformat.AVPacket]) bool {
+	if utils.AVMediaTypeVideo == packet.Get().MediaType {
+		if packet.Get().Key {
 			s.hasVideoKeyFrame = true
 		} else if !s.hasVideoKeyFrame {
-			// 丢弃首帧视频非关键帧
+			// 丢弃首帧非关键视频帧
 			return false
 		}
 	}
@@ -42,7 +42,7 @@ func (s *streamBuffer) AddPacket(packet *avformat.AVPacket) bool {
 	return true
 }
 
-func (s *streamBuffer) Peek(index int) *avformat.AVPacket {
+func (s *streamBuffer) Peek(index int) *collections.ReferenceCounter[*avformat.AVPacket] {
 	utils.Assert(index < s.buffer.Size())
 	head, tail := s.buffer.Data()
 
@@ -53,7 +53,7 @@ func (s *streamBuffer) Peek(index int) *avformat.AVPacket {
 	}
 }
 
-func (s *streamBuffer) PeekAll(handler func(packet *avformat.AVPacket)) {
+func (s *streamBuffer) PeekAll(handler func(packet *collections.ReferenceCounter[*avformat.AVPacket])) {
 	head, tail := s.buffer.Data()
 
 	if head != nil {
@@ -73,7 +73,7 @@ func (s *streamBuffer) Size() int {
 	return s.buffer.Size()
 }
 
-func (s *streamBuffer) PopAll(handler func(packet *avformat.AVPacket)) {
+func (s *streamBuffer) PopAll(handler func(packet *collections.ReferenceCounter[*avformat.AVPacket])) {
 	for s.buffer.Size() > 0 {
 		pkt := s.buffer.Pop()
 		handler(pkt)
@@ -82,10 +82,10 @@ func (s *streamBuffer) PopAll(handler func(packet *avformat.AVPacket)) {
 	s.hasVideoKeyFrame = false
 }
 
-func (s *streamBuffer) RequiresClear(nextPacket *avformat.AVPacket) bool {
-	return s.Size()+1 == s.buffer.Capacity() || (s.hasVideoKeyFrame && utils.AVMediaTypeVideo == nextPacket.MediaType && nextPacket.Key)
+func (s *streamBuffer) RequiresClear(nextPacket *collections.ReferenceCounter[*avformat.AVPacket]) bool {
+	return s.Size()+1 == s.buffer.Capacity() || (s.hasVideoKeyFrame && utils.AVMediaTypeVideo == nextPacket.Get().MediaType && nextPacket.Get().Key)
 }
 
 func NewStreamBuffer() GOPBuffer {
-	return &streamBuffer{buffer: collections.NewRingBuffer[*avformat.AVPacket](1000), hasVideoKeyFrame: false}
+	return &streamBuffer{buffer: collections.NewRingBuffer[*collections.ReferenceCounter[*avformat.AVPacket]](1000), hasVideoKeyFrame: false}
 }

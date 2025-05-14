@@ -43,7 +43,7 @@ func (f *ForwardSink) OnConnected(conn net.Conn) []byte {
 
 	// 如果f.Conn赋值后, 发送数据先于EnableAsyncWriteMode执行, 可能会panic
 	// 所以保险一点, 放在主协程执行
-	ExecuteSyncEventOnSource(f.SourceID, func() {
+	ExecuteSyncEventOnTransStreamPublisher(f.SourceID, func() {
 		f.Conn = conn
 		f.BaseSink.EnableAsyncWriteMode(512)
 	})

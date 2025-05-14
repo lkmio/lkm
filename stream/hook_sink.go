@@ -42,7 +42,7 @@ func PreparePlaySinkWithReady(sink Sink, ok bool) (*http.Response, utils.HookSta
 			}
 		}
 	} else {
-		source.AddSink(sink)
+		source.GetTransStreamPublisher().AddSink(sink)
 	}
 
 	return response, utils.HookStateOK
