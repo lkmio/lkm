@@ -207,8 +207,8 @@ func (api *ApiServer) OnGBAnswerCreate(v *GBOffer, w http.ResponseWriter, r *htt
 	}
 
 	log.Sugar.Infof("创建转发sink成功, sink: %s port: %d transport: %s", sink.GetID(), port, setup.TransportType())
-	_, state := stream.PreparePlaySink(sink)
-	if utils.HookStateOK != state {
+	ok := stream.SubscribeStream(sink, r.URL.Query())
+	if utils.HookStateOK != ok {
 		err = fmt.Errorf("failed to prepare play sink")
 		return
 	}

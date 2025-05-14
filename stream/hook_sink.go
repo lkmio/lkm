@@ -7,10 +7,6 @@ import (
 )
 
 func PreparePlaySink(sink Sink) (*http.Response, utils.HookState) {
-	return PreparePlaySinkWithReady(sink, true)
-}
-
-func PreparePlaySinkWithReady(sink Sink, ok bool) (*http.Response, utils.HookState) {
 	var response *http.Response
 
 	if AppConfig.Hooks.IsEnableOnPlay() {
@@ -24,7 +20,6 @@ func PreparePlaySinkWithReady(sink Sink, ok bool) (*http.Response, utils.HookSta
 		response = hook
 	}
 
-	sink.SetReady(ok)
 	source := SourceManager.Find(sink.GetSourceID())
 	if source == nil {
 		log.Sugar.Infof("添加%s sink到等待队列 id: %v source: %s", sink.GetProtocol().String(), sink.GetID(), sink.GetSourceID())

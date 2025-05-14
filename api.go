@@ -163,27 +163,25 @@ func (api *ApiServer) onFlv(sourceId string, w http.ResponseWriter, r *http.Requ
 func (api *ApiServer) onWSFlv(sourceId string, w http.ResponseWriter, r *http.Request) {
 	conn, err := api.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Sugar.Errorf("websocket头检查失败 err:%s", err.Error())
+		log.Sugar.Errorf("ws拉流失败 source: %s err: %s", sourceId, err.Error())
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
 	sink := flv.NewFLVSink(api.generateSinkID(r.RemoteAddr), sourceId, flv.NewWSConn(conn))
-	sink.SetUrlValues(r.URL.Query())
-	log.Sugar.Infof("ws-flv 连接 sink:%s", sink.String())
-
-	_, state := stream.PreparePlaySink(sink)
-	if utils.HookStateOK != state {
-		log.Sugar.Warnf("ws-flv 播放失败 sink:%s", sink.String())
-		w.WriteHeader(http.StatusForbidden)
-		return
+	ok := stream.SubscribeStream(sink, r.URL.Query())
+	if utils.HookStateOK != ok {
+		log.Sugar.Warnf("ws-flv 拉流失败 source: %s sink: %s", sourceId, sink.String())
+		_ = conn.Close()
+	} else {
+		log.Sugar.Infof("ws-flv 拉流成功 source: %s sink: %s", sourceId, sink.String())
 	}
 
 	netConn := conn.NetConn()
 	bytes := make([]byte, 64)
 	for {
 		if _, err := netConn.Read(bytes); err != nil {
-			log.Sugar.Infof("ws-flv 断开连接 sink:%s", sink.String())
+			log.Sugar.Infof("ws-flv 断开连接 source: %s sink:%s", sourceId, sink.String())
 			sink.Close()
 			break
 		}
@@ -195,28 +193,28 @@ func (api *ApiServer) onHttpFLV(sourceId string, w http.ResponseWriter, r *http.
 	w.Header().Set("Connection", "Keep-Alive")
 	w.Header().Set("Transfer-Encoding", "chunked")
 
-	hj, ok := w.(http.Hijacker)
-	if !ok {
+	var conn net.Conn
+	if hj, ok := w.(http.Hijacker); !ok {
+		log.Sugar.Errorf("http-flv 拉流失败 不支持hijacking. source: %s remote: %s", sourceId, r.RemoteAddr)
 		http.Error(w, "webserver doesn't support hijacking", http.StatusInternalServerError)
 		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	conn, _, err := hj.Hijack()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	} else {
+		w.WriteHeader(http.StatusOK)
+		var err error
+		if conn, _, err = hj.Hijack(); err != nil {
+			log.Sugar.Errorf("http-flv 拉流失败 source: %s remote: %s err: %s", sourceId, r.RemoteAddr, err.Error())
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	sink := flv.NewFLVSink(api.generateSinkID(r.RemoteAddr), sourceId, conn)
-	sink.SetUrlValues(r.URL.Query())
-	log.Sugar.Infof("http-flv 连接 sink:%s", sink.String())
-
-	_, state := stream.PreparePlaySink(sink)
-	if utils.HookStateOK != state {
-		log.Sugar.Warnf("http-flv 播放失败 sink:%s", sink.String())
-
-		w.WriteHeader(http.StatusForbidden)
+	ok := stream.SubscribeStream(sink, r.URL.Query())
+	if utils.HookStateOK != ok {
+		log.Sugar.Warnf("http-flv 拉流失败 source: %s sink: %s", sourceId, sink.String())
+		sink.Close()
+	} else {
+		log.Sugar.Infof("http-flv 拉流成功 source: %s sink: %s", sourceId, sink.String())
 		return
 	}
 
@@ -294,10 +292,9 @@ func (api *ApiServer) onHLS(source string, w http.ResponseWriter, r *http.Reques
 		m3u8Pipe <- m3u8
 	}, sid)
 
-	sink.SetUrlValues(r.URL.Query())
-	if _, state := stream.PreparePlaySink(sink); utils.HookStateOK != state {
-		log.Sugar.Warnf("m3u8拉流失败 sink: %s", sink.String())
-
+	ok := stream.SubscribeStream(sink, r.URL.Query())
+	if utils.HookStateOK != ok {
+		log.Sugar.Warnf("m3u8拉流失败 source: %s sink: %s", source, sink.String())
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
@@ -332,13 +329,11 @@ func (api *ApiServer) onRtc(sourceId string, w http.ResponseWriter, r *http.Requ
 
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Sugar.Errorf("rtc请求错误 err:%s remote:%s", err.Error(), r.RemoteAddr)
-
+		log.Sugar.Errorf("rtc拉流失败 err: %s remote: %s", err.Error(), r.RemoteAddr)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	} else if err := json.Unmarshal(data, &v); err != nil {
-		log.Sugar.Errorf("rtc请求错误 err:%s remote:%s", err.Error(), r.RemoteAddr)
-
+		log.Sugar.Errorf("rtc拉流失败 err: %s remote: %s", err.Error(), r.RemoteAddr)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -365,13 +360,11 @@ func (api *ApiServer) onRtc(sourceId string, w http.ResponseWriter, r *http.Requ
 		group.Done()
 	})
 
-	sink.SetUrlValues(r.URL.Query())
-	log.Sugar.Infof("rtc 请求 sink:%s sdp:%v", sink.String(), v.SDP)
+	log.Sugar.Infof("rtc拉流请求 source: %s sink: %s sdp:%v", sourceId, sink.String(), v.SDP)
 
-	_, state := stream.PreparePlaySink(sink)
-	if utils.HookStateOK != state {
-		log.Sugar.Warnf("rtc 播放失败 sink:%s", sink.String())
-
+	ok := stream.SubscribeStream(sink, r.URL.Query())
+	if utils.HookStateOK != ok {
+		log.Sugar.Warnf("rtc拉流失败 source: %s sink: %s", sourceId, sink.String())
 		w.WriteHeader(http.StatusForbidden)
 		group.Done()
 	}

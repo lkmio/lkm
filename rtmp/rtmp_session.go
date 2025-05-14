@@ -56,19 +56,18 @@ func (s *Session) OnPlay(app, stream_ string) utils.HookState {
 	streamName, values := stream.ParseUrl(stream_)
 
 	sourceId := s.generateSourceID(app, streamName)
-	sink := NewSink(stream.NetAddr2SinkId(s.conn.RemoteAddr()), sourceId, s.conn, s.stack)
-	sink.SetUrlValues(values)
+	sinkId := stream.NetAddr2SinkId(s.conn.RemoteAddr())
+	log.Sugar.Infof("rtmp onplay app: %s stream: %s sink: %v conn: %s", app, stream_, sinkId, s.conn.RemoteAddr().String())
 
-	log.Sugar.Infof("rtmp onplay app: %s stream: %s sink: %v conn: %s", app, stream_, sink.GetID(), s.conn.RemoteAddr().String())
-
-	_, state := stream.PreparePlaySink(sink)
-	if utils.HookStateOK != state {
+	sink := NewSink(sinkId, sourceId, s.conn, s.stack)
+	ok := stream.SubscribeStream(sink, values)
+	if utils.HookStateOK != ok {
 		log.Sugar.Errorf("rtmp拉流失败 source: %s sink: %s", sourceId, sink.GetID())
 	} else {
 		s.handle = sink
 	}
 
-	return state
+	return ok
 }
 
 func (s *Session) Input(data []byte) error {

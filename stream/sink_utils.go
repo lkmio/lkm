@@ -3,7 +3,9 @@ package stream
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/lkmio/avformat/utils"
 	"net"
+	"net/url"
 	"strconv"
 )
 
@@ -62,4 +64,15 @@ func ExecuteSyncEventOnTransStreamPublisher(sourceId string, event func()) bool 
 	}
 
 	return false
+}
+
+func SubscribeStream(sink Sink, values url.Values) utils.HookState {
+	return SubscribeStreamWithRead(sink, values, true)
+}
+
+func SubscribeStreamWithRead(sink Sink, values url.Values, ready bool) utils.HookState {
+	sink.SetReady(ready)
+	sink.SetUrlValues(values)
+	_, state := PreparePlaySink(sink)
+	return state
 }

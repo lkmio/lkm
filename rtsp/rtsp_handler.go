@@ -132,10 +132,9 @@ func (h handler) OnDescribe(request Request) (*http.Response, []byte, error) {
 		request.session.response(response, []byte(sdp))
 	})
 
-	sink.SetUrlValues(request.url.Query())
-	_, code := stream.PreparePlaySinkWithReady(sink, false)
-	if utils.HookStateOK != code {
-		return nil, nil, fmt.Errorf("hook failed. code: %d", code)
+	ok := stream.SubscribeStreamWithRead(sink, request.url.Query(), false)
+	if utils.HookStateOK != ok {
+		return nil, nil, fmt.Errorf("hook failed. code: %d", ok)
 	}
 
 	request.session.sink = sink.(*Sink)
