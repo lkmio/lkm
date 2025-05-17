@@ -314,7 +314,11 @@ func (s *PublishSource) OnPacket(packet *avformat.AVPacket) {
 	s.streamPublisher.Post(&StreamEvent{StreamEventTypePacket, packetPtr})
 
 	// 释放未引用的AVPacket
-	for old := packets.Get(0); old.UseCount() < 2; old = packets.Get(0) {
+	for packets.Size() > 0 {
+		if packets.Get(0).UseCount() > 1 {
+			break
+		}
+
 		packets.Remove(0).Release()
 		s.TransDemuxer.DiscardHeadPacket(packet.BufferIndex)
 	}
