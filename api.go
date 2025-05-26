@@ -215,7 +215,6 @@ func (api *ApiServer) onHttpFLV(sourceId string, w http.ResponseWriter, r *http.
 		sink.Close()
 	} else {
 		log.Sugar.Infof("http-flv 拉流成功 source: %s sink: %s", sourceId, sink.String())
-		return
 	}
 
 	bytes := make([]byte, 64)
