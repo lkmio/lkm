@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/lkmio/avformat/utils"
+	"strings"
 )
 
 const (
@@ -64,6 +65,7 @@ func (p *Packet) Unmarshal(data []byte) error {
 		simNumber += fmt.Sprintf("%02x", data[i])
 	}
 
+	simNumber = strings.TrimLeft(simNumber, "0")
 	// channel
 	channelNumber := data[10]
 	// subMark
