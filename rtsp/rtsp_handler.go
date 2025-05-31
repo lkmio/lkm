@@ -124,7 +124,7 @@ func (h handler) OnDescribe(request Request) (*http.Response, []byte, error) {
 		}
 	}
 
-	sinkId := stream.NetAddr2SinkId(request.session.conn.RemoteAddr())
+	sinkId := stream.NetAddr2SinkID(request.session.conn.RemoteAddr())
 	sink := NewSink(sinkId, request.sourceId, request.session.conn, func(sdp string) {
 		// 响应sdp回调
 		response = NewOKResponse(request.headers.Get("Cseq"))
@@ -132,7 +132,7 @@ func (h handler) OnDescribe(request Request) (*http.Response, []byte, error) {
 		request.session.response(response, []byte(sdp))
 	})
 
-	ok := stream.SubscribeStreamWithRead(sink, request.url.Query(), false)
+	ok := stream.SubscribeStreamWithOptions(sink, request.url.Query(), false, false)
 	if utils.HookStateOK != ok {
 		return nil, nil, fmt.Errorf("hook failed. code: %d", ok)
 	}

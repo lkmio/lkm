@@ -13,7 +13,7 @@ import (
 // 每个通知事件都需要携带的字段
 type eventInfo struct {
 	Stream     string `json:"stream"`      //stream GetID
-	Protocol   string `json:"protocol"`    //推拉流协议
+	Protocol   int    `json:"protocol"`    //推拉流协议
 	RemoteAddr string `json:"remote_addr"` //peer地址
 }
 
@@ -71,11 +71,11 @@ func Hook(event HookEvent, params string, body interface{}) (*http.Response, err
 }
 
 func NewHookPlayEventInfo(sink Sink) eventInfo {
-	return eventInfo{Stream: sink.GetSourceID(), Protocol: sink.GetProtocol().String(), RemoteAddr: sink.RemoteAddr()}
+	return eventInfo{Stream: sink.GetSourceID(), Protocol: int(sink.GetProtocol()), RemoteAddr: sink.RemoteAddr()}
 }
 
 func NewHookPublishEventInfo(source Source) eventInfo {
-	return eventInfo{Stream: source.GetID(), Protocol: source.GetType().String(), RemoteAddr: source.RemoteAddr()}
+	return eventInfo{Stream: source.GetID(), Protocol: int(source.GetType()), RemoteAddr: source.RemoteAddr()}
 }
 
 func NewRecordEventInfo(source Source, path string) interface{} {

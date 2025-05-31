@@ -1,12 +1,18 @@
 package stream
 
 import (
+	"context"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/log"
 	"net/http"
+	"time"
 )
 
-func PreparePlaySink(sink Sink) (*http.Response, utils.HookState) {
+const (
+	ForwardSinkWaitTimeout = 20
+)
+
+func PreparePlaySink(sink Sink, waitTimeout bool) (*http.Response, utils.HookState) {
 	var response *http.Response
 
 	if AppConfig.Hooks.IsEnableOnPlay() {
@@ -32,6 +38,16 @@ func PreparePlaySink(sink Sink) (*http.Response, utils.HookState) {
 				log.Sugar.Warnf("添加到%s sink到等待队列失败, sink已经断开连接 %s", sink.GetProtocol(), sink.GetID())
 				return response, utils.HookStateFailure
 			} else {
+				if waitTimeout {
+					go func() {
+						timeout := sink.StartWaitTimer(context.Background(), ForwardSinkWaitTimeout*time.Second)
+						if timeout {
+							log.Sugar.Warnf("在等待队列超时, 删除%s sink id: %v source: %s", sink.GetProtocol().String(), sink.GetID(), sink.GetSourceID())
+							sink.Close()
+						}
+					}()
+				}
+
 				sink.SetState(SessionStateWaiting)
 				AddSinkToWaitingQueue(sink.GetSourceID(), sink)
 			}
@@ -52,7 +68,7 @@ func HookPlayDoneEvent(sink Sink) (*http.Response, bool) {
 			Sink string `json:"sink"`
 		}{
 			eventInfo: NewHookPlayEventInfo(sink),
-			Sink:      SinkId2String(sink.GetID()),
+			Sink:      SinkID2String(sink.GetID()),
 		}
 
 		hook, err := Hook(HookEventPlayDone, sink.UrlValues().Encode(), body)

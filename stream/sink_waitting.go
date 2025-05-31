@@ -27,15 +27,21 @@ func AddSinkToWaitingQueue(streamId string, sink Sink) {
 }
 
 func RemoveSinkFromWaitingQueue(sourceId string, sinkId SinkID) (Sink, bool) {
+	var sink Sink
 	mutex.Lock()
-	defer mutex.Unlock()
+	defer func() {
+		mutex.Unlock()
+		if sink != nil {
+			sink.StopWaitTimer()
+		}
+	}()
 
 	m, ok := waitingSinks[sourceId]
 	if !ok {
 		return nil, false
 	}
 
-	sink, ok := m[sinkId]
+	sink, ok = m[sinkId]
 	if ok {
 		delete(m, sinkId)
 	}
@@ -44,15 +50,21 @@ func RemoveSinkFromWaitingQueue(sourceId string, sinkId SinkID) (Sink, bool) {
 }
 
 func PopWaitingSinks(sourceId string) []Sink {
+	var sinks []Sink
 	mutex.Lock()
-	defer mutex.Unlock()
+	defer func() {
+		mutex.Unlock()
+		for _, sink := range sinks {
+			sink.StopWaitTimer()
+		}
+	}()
 
 	source, ok := waitingSinks[sourceId]
 	if !ok {
 		return nil
 	}
 
-	sinks := make([]Sink, len(source))
+	sinks = make([]Sink, len(source))
 	var index = 0
 	for _, sink := range source {
 		sinks[index] = sink

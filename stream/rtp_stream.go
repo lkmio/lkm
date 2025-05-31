@@ -54,3 +54,7 @@ func NewRtpTransStream(protocol TransStreamProtocol, capacity int) *RtpStream {
 		rtpBuffers:      collections.NewQueue[*collections.ReferenceCounter[[]byte]](capacity),
 	}
 }
+
+func GBCascadedTransStreamFactory(source Source, protocol TransStreamProtocol, tracks []*Track) (TransStream, error) {
+	return NewRtpTransStream(TransStreamGBCascaded, 1024), nil
+}

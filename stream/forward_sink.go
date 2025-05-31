@@ -68,7 +68,9 @@ func (f *ForwardSink) Write(index int, data []*collections.ReferenceCounter[[]by
 	}
 
 	if TransportTypeUDP == f.transportType {
-		f.socket.(*transport.UDPClient).Write(data[0].Get()[2:])
+		for _, datum := range data {
+			f.socket.(*transport.UDPClient).Write(datum.Get()[2:])
+		}
 	} else {
 		return f.BaseSink.Write(index, data, ts, keyVideo)
 	}
@@ -91,7 +93,7 @@ func (f *ForwardSink) Close() {
 
 // StartReceiveTimer 启动tcp sever计时器, 如果计时器触发, 没有连接, 则关闭流
 func (f *ForwardSink) StartReceiveTimer() {
-	f.receiveTimer = time.AfterFunc(time.Second*10, func() {
+	f.receiveTimer = time.AfterFunc(ForwardSinkWaitTimeout*time.Second, func() {
 		if f.Conn == nil {
 			log.Sugar.Infof("%s 等待连接超时, 关闭sink", f.Protocol)
 			f.Close()

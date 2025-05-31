@@ -100,13 +100,13 @@ func startApiServer(addr string) {
 	apiServer.router.HandleFunc("/api/v1/source/close", filterRequestBodyParams(apiServer.OnSourceClose, &IDS{})) // 关闭推流源
 	apiServer.router.HandleFunc("/api/v1/sink/list", filterRequestBodyParams(apiServer.OnSinkList, &IDS{}))       // 查询某个推流源下，所有的拉流端列表
 	apiServer.router.HandleFunc("/api/v1/sink/close", filterRequestBodyParams(apiServer.OnSinkClose, &IDS{}))     // 关闭拉流端
+	apiServer.router.HandleFunc("/api/v1/sink/add", filterRequestBodyParams(apiServer.OnSinkAdd, &GBOffer{}))     // 级联/广播/JT转GB
 
 	apiServer.router.HandleFunc("/api/v1/streams/statistics", nil) // 统计所有推拉流
 
 	if stream.AppConfig.GB28181.Enable {
 		apiServer.router.HandleFunc("/ws/v1/gb28181/talk", apiServer.OnGBTalk) // 对讲的主讲人WebSocket连接
-		apiServer.router.HandleFunc("/api/v1/gb28181/offer/create", filterRequestBodyParams(apiServer.OnGBOfferCreate, &SourceSDP{}))
-		apiServer.router.HandleFunc("/api/v1/gb28181/answer/create", filterRequestBodyParams(apiServer.OnGBAnswerCreate, &GBOffer{}))
+		apiServer.router.HandleFunc("/api/v1/gb28181/source/create", filterRequestBodyParams(apiServer.OnGBOfferCreate, &SourceSDP{}))
 		apiServer.router.HandleFunc("/api/v1/gb28181/answer/set", filterRequestBodyParams(apiServer.OnGBSourceConnect, &SourceSDP{})) // active拉流模式下, 设置对方的地址
 	}
 
@@ -139,7 +139,7 @@ func (api *ApiServer) generateSinkID(remoteAddr string) stream.SinkID {
 		panic(err)
 	}
 
-	return stream.NetAddr2SinkId(tcpAddr)
+	return stream.NetAddr2SinkID(tcpAddr)
 }
 
 func (api *ApiServer) onFlv(sourceId string, w http.ResponseWriter, r *http.Request) {
@@ -426,7 +426,7 @@ func (api *ApiServer) OnSinkList(v *IDS, w http.ResponseWriter, r *http.Request)
 	for _, sink := range sinks {
 		details = append(details,
 			SinkDetails{
-				ID:       stream.SinkId2String(sink.GetID()),
+				ID:       stream.SinkID2String(sink.GetID()),
 				Protocol: sink.GetProtocol().String(),
 				Time:     sink.CreateTime(),
 			},

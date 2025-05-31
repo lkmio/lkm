@@ -31,7 +31,7 @@ func (s *TalkStream) Input(packet *avformat.AVPacket) ([]*collections.ReferenceC
 
 func NewTalkTransStream() (stream.TransStream, error) {
 	return &TalkStream{
-		RtpStream: stream.NewRtpTransStream(stream.TransStreamGBTalkForward, 1024),
+		RtpStream: stream.NewRtpTransStream(stream.TransStreamGBTalk, 1024),
 		muxer:     rtp.NewMuxer(8, 0, 0xFFFFFFFF),
 		packet:    make([]byte, 1500),
 	}, nil

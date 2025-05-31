@@ -4,9 +4,11 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/transport"
 	"net"
 	"net/url"
 	"strconv"
+	"time"
 )
 
 // SinkID IPV4使用uint64、IPV6使用string作为ID类型
@@ -20,8 +22,8 @@ func ipv4Addr2UInt64(ip uint32, port int) uint64 {
 	return (uint64(ip) << 32) | uint64(port)
 }
 
-// NetAddr2SinkId 根据网络地址生成SinkId IPV4使用一个uint64, IPV6使用String
-func NetAddr2SinkId(addr net.Addr) SinkID {
+// NetAddr2SinkID 根据网络地址生成SinkId IPV4使用一个uint64, IPV6使用String
+func NetAddr2SinkID(addr net.Addr) SinkID {
 	network := addr.Network()
 	if "tcp" == network {
 		to4 := addr.(*net.TCPAddr).IP.To4()
@@ -44,12 +46,16 @@ func NetAddr2SinkId(addr net.Addr) SinkID {
 	return addr.String()
 }
 
-func SinkId2String(id SinkID) string {
+func SinkID2String(id SinkID) string {
 	if i, ok := id.(uint64); ok {
 		return strconv.FormatUint(i, 10)
 	}
 
 	return id.(string)
+}
+
+func GenerateUint64SinkID() SinkID {
+	return uint64(time.Now().UnixNano()&0xFFFFFFFF)<<32 | uint64(utils.RandomIntInRange(0, 0xFFFFFFFF))
 }
 
 func CreateSinkDisconnectionMessage(sink Sink) string {
@@ -67,12 +73,34 @@ func ExecuteSyncEventOnTransStreamPublisher(sourceId string, event func()) bool 
 }
 
 func SubscribeStream(sink Sink, values url.Values) utils.HookState {
-	return SubscribeStreamWithRead(sink, values, true)
+	return SubscribeStreamWithOptions(sink, values, true, false)
 }
 
-func SubscribeStreamWithRead(sink Sink, values url.Values, ready bool) utils.HookState {
+func SubscribeStreamWithOptions(sink Sink, values url.Values, ready bool, timeout bool) utils.HookState {
 	sink.SetReady(ready)
 	sink.SetUrlValues(values)
-	_, state := PreparePlaySink(sink)
+	_, state := PreparePlaySink(sink, timeout)
 	return state
+}
+
+func ForwardStream(protocol TransStreamProtocol, transport TransportType, sourceId string, values url.Values, remoteAddr string, manager transport.Manager) (Sink, int, error) {
+	//source := SourceManager.Find(sourceId)
+	//if source == nil {
+	//	return nil, 0, fmt.Errorf("source %s 不存在", sourceId)
+	//}
+
+	sinkId := GenerateUint64SinkID()
+	var port int
+	sink, port, err := NewForwardSink(transport, protocol, sinkId, sourceId, remoteAddr, manager)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	state := SubscribeStreamWithOptions(sink, values, true, true)
+	if utils.HookStateOK != state {
+		sink.Close()
+		return nil, 0, fmt.Errorf("failed to prepare play sink")
+	}
+
+	return sink, port, nil
 }

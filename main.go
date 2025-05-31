@@ -28,8 +28,9 @@ func init() {
 	stream.RegisterTransStreamFactory(stream.TransStreamFlv, flv.TransStreamFactory)
 	stream.RegisterTransStreamFactory(stream.TransStreamRtsp, rtsp.TransStreamFactory)
 	stream.RegisterTransStreamFactory(stream.TransStreamRtc, rtc.TransStreamFactory)
-	stream.RegisterTransStreamFactory(stream.TransStreamGBCascadedForward, gb28181.CascadedTransStreamFactory)
-	stream.RegisterTransStreamFactory(stream.TransStreamGBTalkForward, gb28181.TalkTransStreamFactory)
+	stream.RegisterTransStreamFactory(stream.TransStreamGBCascaded, stream.GBCascadedTransStreamFactory)
+	stream.RegisterTransStreamFactory(stream.TransStreamGBTalk, gb28181.TalkTransStreamFactory)
+	stream.RegisterTransStreamFactory(stream.TransStreamGBGateway, gb28181.GatewayTransStreamFactory)
 	stream.SetRecordStreamFactory(record.NewFLVFileSink)
 	stream.StreamEndInfoBride = NewStreamEndInfo
 

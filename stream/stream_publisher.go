@@ -132,7 +132,7 @@ func (t *transStreamPublisher) run() {
 				t.OnPacket(event.Data.(*collections.ReferenceCounter[*avformat.AVPacket]))
 			case StreamEventTypeRawPacket:
 				// 发送原始数据包, 目前仅用于国标级联转发
-				if t.forwardTransStream != nil && t.forwardTransStream.GetProtocol() == TransStreamGBCascadedForward {
+				if t.forwardTransStream != nil && t.forwardTransStream.GetProtocol() == TransStreamGBCascaded {
 					packets := event.Data.([][]byte)
 					for _, data := range packets {
 						t.DispatchPacket(t.forwardTransStream, &avformat.AVPacket{Data: data[2:]})
@@ -233,7 +233,7 @@ func (t *transStreamPublisher) CreateTransStream(id TransStreamID, protocol Tran
 	_ = transStream.WriteHeader()
 
 	// 设置转发流
-	if TransStreamGBCascadedForward == transStream.GetProtocol() {
+	if TransStreamGBCascaded == transStream.GetProtocol() {
 		t.forwardTransStream = transStream
 	}
 
@@ -381,7 +381,7 @@ func (t *transStreamPublisher) doAddSink(sink Sink, resume bool) bool {
 
 	err := sink.StartStreaming(transStream)
 	if err != nil {
-		log.Sugar.Errorf("添加sink失败,开始推流发生err: %s sink: %s source: %s ", err.Error(), SinkId2String(sink.GetID()), t.source)
+		log.Sugar.Errorf("添加sink失败,开始推流发生err: %s sink: %s source: %s ", err.Error(), SinkID2String(sink.GetID()), t.source)
 		return false
 	}
 
@@ -417,7 +417,7 @@ func (t *transStreamPublisher) doAddSink(sink Sink, resume bool) bool {
 	}
 
 	// 新建传输流，发送已经缓存的音视频帧
-	if !exist && AppConfig.GOPCache && t.existVideo && TransStreamGBCascadedForward != transStream.GetProtocol() {
+	if !exist && AppConfig.GOPCache && t.existVideo && TransStreamGBCascaded != transStream.GetProtocol() {
 		t.DispatchGOPBuffer(transStream)
 	}
 
@@ -641,7 +641,7 @@ func (t *transStreamPublisher) OnPacket(packet *collections.ReferenceCounter[*av
 
 		// 分发给各个传输流
 		for _, transStream := range t.transStreams {
-			if TransStreamGBCascadedForward != transStream.GetProtocol() {
+			if TransStreamGBCascaded != transStream.GetProtocol() {
 				t.DispatchPacket(transStream, packet.Get())
 			}
 		}

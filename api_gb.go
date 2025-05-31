@@ -35,7 +35,8 @@ type SourceSDP struct {
 
 type GBOffer struct {
 	SourceSDP
-	AnswerSetup string `json:"answer_setup,omitempty"` // 希望应答的连接方式
+	AnswerSetup         string                     `json:"answer_setup,omitempty"` // 希望应答的连接方式
+	TransStreamProtocol stream.TransStreamProtocol `json:"trans_stream_protocol,omitempty"`
 }
 
 func (api *ApiServer) OnGBSourceCreate(v *SourceSDP, w http.ResponseWriter, r *http.Request) {
@@ -152,71 +153,21 @@ func (api *ApiServer) OnGBOfferCreate(v *SourceSDP, w http.ResponseWriter, r *ht
 	}
 }
 
-func (api *ApiServer) OnGBAnswerCreate(v *GBOffer, w http.ResponseWriter, r *http.Request) {
-	log.Sugar.Infof("创建应答 offer: %v", v)
-
-	var sink stream.Sink
-	var err error
-	// 响应错误消息
-	defer func() {
-		if err != nil {
-			log.Sugar.Errorf("创建应答失败 err: %s", err.Error())
-			httpResponseError(w, err.Error())
-
-			if sink != nil {
-				sink.Close()
-			}
-		}
-	}()
-
-	source := stream.SourceManager.Find(v.Source)
-	if source == nil {
-		err = fmt.Errorf("%s 源不存在", v.Source)
-		return
-	}
-
-	addr, _ := net.ResolveTCPAddr("tcp", r.RemoteAddr)
-	sinkId := stream.NetAddr2SinkId(addr)
-
-	// sinkId添加随机数
-	if ipv4, ok := sinkId.(uint64); ok {
-		random := uint64(utils.RandomIntInRange(0x1000, 0xFFFF0000))
-		sinkId = (ipv4 & 0xFFFFFFFF00000000) | (random << 16) | (ipv4 & 0xFFFF)
-	}
-
-	setup := gb28181.SetupTypeFromString(v.Setup)
-	if v.AnswerSetup != "" {
-		setup = gb28181.SetupTypeFromString(v.AnswerSetup)
-	}
-
-	var protocol stream.TransStreamProtocol
-	// 级联转发
-	if v.SessionName == "" || v.SessionName == InviteTypePlay ||
-		v.SessionName == InviteTypePlayback ||
-		v.SessionName == InviteTypeDownload {
-		protocol = stream.TransStreamGBCascadedForward
-	} else {
-		// 对讲广播转发
-		protocol = stream.TransStreamGBTalkForward
-	}
-
+func (api *ApiServer) AddForwardSink(protocol stream.TransStreamProtocol, transport stream.TransportType, sourceId string, remoteAddr string, w http.ResponseWriter, r *http.Request) {
 	var port int
-	sink, port, err = stream.NewForwardSink(setup.TransportType(), protocol, sinkId, v.Source, v.Addr, gb28181.TransportManger)
+	sink, port, err := stream.ForwardStream(protocol, transport, sourceId, r.URL.Query(), remoteAddr, gb28181.TransportManger)
 	if err != nil {
+		log.Sugar.Errorf("创建转发sink失败 err: %s", err.Error())
+		httpResponseError(w, err.Error())
 		return
 	}
 
-	log.Sugar.Infof("创建转发sink成功, sink: %s port: %d transport: %s", sink.GetID(), port, setup.TransportType())
-	ok := stream.SubscribeStream(sink, r.URL.Query())
-	if utils.HookStateOK != ok {
-		err = fmt.Errorf("failed to prepare play sink")
-		return
-	}
+	log.Sugar.Infof("创建转发sink成功, sink: %s port: %d transport: %s", sink.GetID(), port, transport)
 
 	response := struct {
-		Sink string `json:"sink"` //sink id
+		Sink string `json:"sink"` // sink id
 		SDP
-	}{Sink: stream.SinkId2String(sinkId), SDP: SDP{Addr: net.JoinHostPort(stream.AppConfig.PublicIP, strconv.Itoa(port))}}
+	}{Sink: stream.SinkID2String(sink.GetID()), SDP: SDP{Addr: net.JoinHostPort(stream.AppConfig.PublicIP, strconv.Itoa(port))}}
 
 	httpResponseOK(w, &response)
 }
@@ -270,4 +221,19 @@ func (api *ApiServer) OnGBTalk(w http.ResponseWriter, r *http.Request) {
 	}
 
 	talkSource.Close()
+}
+
+func (api *ApiServer) OnSinkAdd(v *GBOffer, w http.ResponseWriter, r *http.Request) {
+	log.Sugar.Infof("添加sink: %v", *v)
+	if stream.TransStreamGBCascaded != v.TransStreamProtocol && stream.TransStreamGBTalk != v.TransStreamProtocol && stream.TransStreamGBGateway != v.TransStreamProtocol {
+		httpResponseError(w, "不支持的协议")
+		return
+	}
+
+	setup := gb28181.SetupTypeFromString(v.Setup)
+	if v.AnswerSetup != "" {
+		setup = gb28181.SetupTypeFromString(v.AnswerSetup)
+	}
+
+	api.AddForwardSink(v.TransStreamProtocol, setup.TransportType(), v.Source, v.Addr, w, r)
 }

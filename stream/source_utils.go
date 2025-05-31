@@ -25,13 +25,14 @@ const (
 	SourceType1078   = SourceType(3)
 	SourceTypeGBTalk = SourceType(4) // 国标广播/对讲
 
-	TransStreamRtmp              = TransStreamProtocol(1)
-	TransStreamFlv               = TransStreamProtocol(2)
-	TransStreamRtsp              = TransStreamProtocol(3)
-	TransStreamHls               = TransStreamProtocol(4)
-	TransStreamRtc               = TransStreamProtocol(5)
-	TransStreamGBCascadedForward = TransStreamProtocol(6) // 国标级联转发
-	TransStreamGBTalkForward     = TransStreamProtocol(7) // 国标广播/对讲转发
+	TransStreamRtmp       = TransStreamProtocol(1)
+	TransStreamFlv        = TransStreamProtocol(2)
+	TransStreamRtsp       = TransStreamProtocol(3)
+	TransStreamHls        = TransStreamProtocol(4)
+	TransStreamRtc        = TransStreamProtocol(5)
+	TransStreamGBCascaded = TransStreamProtocol(6) // 国标级联转发
+	TransStreamGBTalk     = TransStreamProtocol(7) // 国标广播/对讲转发
+	TransStreamGBGateway  = TransStreamProtocol(8) // 国标网关
 )
 
 const (
@@ -48,7 +49,7 @@ func (s SourceType) String() string {
 	if SourceTypeRtmp == s {
 		return "rtmp"
 	} else if SourceType28181 == s {
-		return "28181"
+		return "gb28181"
 	} else if SourceType1078 == s {
 		return "jt1078"
 	} else if SourceTypeGBTalk == s {
@@ -69,10 +70,12 @@ func (p TransStreamProtocol) String() string {
 		return "hls"
 	} else if TransStreamRtc == p {
 		return "rtc"
-	} else if TransStreamGBCascadedForward == p {
-		return "gb_cascaded_forward"
-	} else if TransStreamGBTalkForward == p {
-		return "gb_talk_forward"
+	} else if TransStreamGBCascaded == p {
+		return "gb_cascaded"
+	} else if TransStreamGBTalk == p {
+		return "gb_talk"
+	} else if TransStreamGBGateway == p {
+		return "gb_gateway"
 	}
 
 	panic(fmt.Sprintf("unknown stream protocol %d", p))

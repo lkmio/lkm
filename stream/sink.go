@@ -97,6 +97,10 @@ type Sink interface {
 
 	// EnableAsyncWriteMode 开启异步发送
 	EnableAsyncWriteMode(queueSize int)
+
+	StartWaitTimer(ctx context.Context, duration time.Duration) bool
+
+	StopWaitTimer()
 }
 
 type BaseSink struct {
@@ -126,6 +130,9 @@ type BaseSink struct {
 
 	cancelFunc func()
 	cancelCtx  context.Context
+
+	waitCtx        context.Context
+	waitCancelFunc context.CancelFunc
 }
 
 func (s *BaseSink) GetID() SinkID {
@@ -326,7 +333,7 @@ func (s *BaseSink) DesiredVideoCodecId() utils.AVCodecID {
 // 1. Sink如果正在拉流, 删除任务交给Source处理, 否则直接从等待队列删除Sink.
 // 2. 发送PlayDoneHook事件
 func (s *BaseSink) Close() {
-	log.Sugar.Debugf("closing the %s sink. id: %s. current session state: %s", s.Protocol, SinkId2String(s.ID), s.State)
+	log.Sugar.Debugf("closing the %s sink. id: %s. current session state: %s", s.Protocol, SinkID2String(s.ID), s.State)
 
 	s.Lock()
 	defer func() {
@@ -432,4 +439,20 @@ func (s *BaseSink) CreateTime() time.Time {
 
 func (s *BaseSink) SetCreateTime(time time.Time) {
 	s.createTime = time
+}
+
+func (s *BaseSink) StartWaitTimer(ctx context.Context, duration time.Duration) bool {
+	s.waitCtx, s.waitCancelFunc = context.WithCancel(ctx)
+	select {
+	case <-time.After(duration):
+		return true
+	case <-s.waitCtx.Done():
+		return false
+	}
+}
+
+func (s *BaseSink) StopWaitTimer() {
+	if s.waitCancelFunc != nil {
+		s.waitCancelFunc()
+	}
 }

@@ -56,7 +56,7 @@ func (s *Session) OnPlay(app, stream_ string) utils.HookState {
 	streamName, values := stream.ParseUrl(stream_)
 
 	sourceId := s.generateSourceID(app, streamName)
-	sinkId := stream.NetAddr2SinkId(s.conn.RemoteAddr())
+	sinkId := stream.NetAddr2SinkID(s.conn.RemoteAddr())
 	log.Sugar.Infof("rtmp onplay app: %s stream: %s sink: %v conn: %s", app, stream_, sinkId, s.conn.RemoteAddr().String())
 
 	sink := NewSink(sinkId, sourceId, s.conn, s.stack)
