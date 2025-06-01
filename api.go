@@ -231,7 +231,7 @@ func (api *ApiServer) onTS(source string, w http.ResponseWriter, r *http.Request
 	sid := r.URL.Query().Get(hls.SessionIDKey)
 	var sink stream.Sink
 	if sid != "" {
-		sink = stream.SinkManager.Find(stream.SinkID(sid))
+		sink = hls.SinkManager.Find(stream.SinkID(sid))
 	}
 	if sink == nil {
 		log.Sugar.Errorf("hls session with id '%s' has expired.", sid)
@@ -252,7 +252,7 @@ func (api *ApiServer) onTS(source string, w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	sink.(*hls.M3U8Sink).RefreshPlayTime()
+	sink.(*hls.M3U8Sink).RefreshPlayingTime()
 	w.Header().Set("Content-Type", "video/MP2T")
 	http.ServeFile(w, r, tsPath)
 }
@@ -277,47 +277,34 @@ func (api *ApiServer) onHLS(source string, w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	sink := stream.SinkManager.Find(sid)
+	sink := hls.SinkManager.Find(sid)
+	if sink == nil {
+		// 创建sink
+		sink = hls.NewM3U8Sink(sid, source, sid)
+		sink.(*hls.M3U8Sink).RefreshPlayingTime()
+
+		if hls.SinkManager.Add(sink) {
+			ok := stream.SubscribeStream(sink, r.URL.Query())
+			if utils.HookStateOK != ok {
+				log.Sugar.Warnf("m3u8拉流失败 source: %s sink: %s", source, sink.String())
+				_ = hls.SinkManager.Remove(sink.GetID())
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+		}
+	}
+
 	// 更新最近的M3U8文件
-	if sink != nil {
-		w.Write([]byte(sink.(*hls.M3U8Sink).GetPlaylist()))
-		return
-	}
-
-	// 首次拉流
-	context := r.Context()
-	m3u8Pipe := make(chan []byte, 1)
-	sink = hls.NewM3U8Sink(sid, source, func(m3u8 []byte) {
-		m3u8Pipe <- m3u8
-	}, sid)
-
-	ok := stream.SubscribeStream(sink, r.URL.Query())
-	if utils.HookStateOK != ok {
-		log.Sugar.Warnf("m3u8拉流失败 source: %s sink: %s", source, sink.String())
-		w.WriteHeader(http.StatusForbidden)
-		return
-	}
-
-	err := stream.SinkManager.Add(sink)
-	utils.Assert(err == nil)
-
-	select {
-	case m3u8 := <-m3u8Pipe:
-		// 应答M3U8文件
-		if m3u8 == nil {
+	playlist := sink.(*hls.M3U8Sink).GetPlaylist(nil)
+	if playlist == "" {
+		if playlist = sink.(*hls.M3U8Sink).GetPlaylist(r.Context()); playlist == "" {
 			log.Sugar.Warnf("hls拉流失败 未能生成有效m3u8文件 sink: %s source: %s", sink.GetID(), sink.GetSourceID())
 			w.WriteHeader(http.StatusInternalServerError)
-			sink.Close()
-		} else {
-			w.Write(m3u8)
+			return
 		}
-		break
-	case <-context.Done():
-		// 拉流端断开拉流
-		log.Sugar.Infof(stream.CreateSinkDisconnectionMessage(sink))
-		sink.Close()
-		break
 	}
+
+	w.Write([]byte(playlist))
 }
 
 func (api *ApiServer) onRtc(sourceId string, w http.ResponseWriter, r *http.Request) {
@@ -462,6 +449,10 @@ func (api *ApiServer) OnSinkClose(v *IDS, w http.ResponseWriter, r *http.Request
 	if source := stream.SourceManager.Find(v.Source); source != nil {
 		if sink := source.GetTransStreamPublisher().FindSink(sinkId); sink != nil {
 			sink.Close()
+
+			if sink.GetProtocol() == stream.TransStreamHls {
+				_ = hls.SinkManager.Remove(sinkId)
+			}
 		}
 	} else {
 		log.Sugar.Warnf("Source with ID %s does not exist.", v.Source)

@@ -9,6 +9,7 @@ import (
 	"github.com/lkmio/lkm/rtsp"
 	"github.com/lkmio/transport"
 	"os"
+	"time"
 
 	"github.com/lkmio/lkm/gb28181"
 	"github.com/lkmio/lkm/log"
@@ -119,6 +120,11 @@ func main() {
 		}
 
 		log.Sugar.Info("启动rtsp服务成功 addr:", rtspAddr.String())
+	}
+
+	if stream.AppConfig.Hls.Enable {
+		// 每10秒检查一次hls拉流超时, 60秒内没有拉流的sink将被关闭
+		hls.SinkManager.StartPullStreamTimeoutTimer(10*time.Second, 60*time.Second)
 	}
 
 	log.Sugar.Info("启动http服务 addr:", stream.ListenAddr(stream.AppConfig.Http.Port))

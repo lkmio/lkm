@@ -1,6 +1,8 @@
 package stream
 
-import "sync"
+import (
+	"sync"
+)
 
 // 等待队列所有的Sink
 var waitingSinks map[string]map[SinkID]Sink
@@ -101,14 +103,4 @@ func ExistSourceInWaitingQueue(id string) bool {
 
 	_, ok := waitingSinks[id]
 	return ok
-}
-
-func ExistSink(sourceId string, sinkId SinkID) bool {
-	if sourceId != "" {
-		if exist := ExistSinkInWaitingQueue(sourceId, sinkId); exist {
-			return true
-		}
-	}
-
-	return SinkManager.Exist(sinkId)
 }

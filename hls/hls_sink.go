@@ -1,11 +1,12 @@
 package hls
 
 import (
+	"context"
 	"fmt"
-	"github.com/lkmio/avformat/utils"
-	"github.com/lkmio/lkm/log"
+	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/lkm/stream"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -15,63 +16,40 @@ const (
 
 type M3U8Sink struct {
 	stream.BaseSink
-	cb             func(m3u8 []byte) // 生成m3u8文件的发送回调
-	sessionId      string            // 拉流会话ID
-	playtime       time.Time
-	playTimer      *time.Timer
-	playlistFormat *string
+	playingTime     atomic.Value
+	sessionId       string // 拉流会话ID
+	playlistFormat  *string
+	m3u8ReadyCtx    context.Context
+	m3u8ReadyCancel func()
 }
 
-// SendM3U8Data 首次向拉流端应答M3U8文件， 后续更新M3U8文件, 通过调用@see GetPlaylist 函数获取最新的M3U8文件.
-func (s *M3U8Sink) SendM3U8Data(data *string) error {
-	utils.Assert(data != nil)
-	utils.Assert(s.playlistFormat == nil)
-
-	s.playlistFormat = data
-	s.cb([]byte(s.GetPlaylist()))
-
-	// 开启计时器, 长时间没有拉流关闭sink
-	timeout := time.Duration(stream.AppConfig.IdleTimeout)
-	if timeout < time.Second {
-		timeout = time.Duration(stream.AppConfig.Hls.Duration) * 2 * 3 * time.Second
-	}
-
-	s.playTimer = time.AfterFunc(timeout, func() {
-		sub := time.Now().Sub(s.playtime)
-		if sub > timeout {
-			log.Sugar.Errorf("hls拉流超时 sink: %s ", s.ID)
-
-			s.Close()
-			return
-		}
-
-		s.playTimer.Reset(timeout)
-	})
-
-	return nil
-}
-
-func (s *M3U8Sink) StartStreaming(transStream stream.TransStream) error {
-	if s.playlistFormat != nil {
-		return nil
-	}
-
-	hls := transStream.(*TransStream)
-	if hls.M3U8Writer.Size() > 0 && s.playlistFormat == nil {
-		if err := s.SendM3U8Data(hls.PlaylistFormat); err != nil {
-			return err
-		}
-	} else {
-		// m3u8文件中还没有切片时, 将sink添加到等待队列
-		hls.m3u8Sinks[s.GetID()] = s
+func (s *M3U8Sink) Write(index int, data []*collections.ReferenceCounter[[]byte], ts int64, keyVideo bool) error {
+	if s.playlistFormat == nil {
+		s.playlistFormat = bytesToStringPtr(data[0].Get())
+		s.m3u8ReadyCancel()
 	}
 
 	return nil
 }
 
-func (s *M3U8Sink) GetPlaylist() string {
+func (s *M3U8Sink) GetPlaylist(ctx context.Context) string {
 	// 更新拉流时间
-	//s.RefreshPlayTime()
+	s.RefreshPlayingTime()
+
+	if s.playlistFormat == nil {
+		if ctx == nil {
+			return ""
+		}
+
+		select {
+		case <-ctx.Done():
+			return ""
+		case <-s.m3u8ReadyCtx.Done():
+			if s.playlistFormat == nil {
+				return ""
+			}
+		}
+	}
 
 	// 替换每个sink唯一的拉流会话ID
 	param := fmt.Sprintf("?%s=%s", SessionIDKey, s.sessionId)
@@ -79,24 +57,30 @@ func (s *M3U8Sink) GetPlaylist() string {
 	return playlist
 }
 
-func (s *M3U8Sink) RefreshPlayTime() {
-	s.playtime = time.Now()
+func (s *M3U8Sink) RefreshPlayingTime() {
+	s.playingTime.Store(time.Now())
+}
+
+func (s *M3U8Sink) GetPlayingTime() time.Time {
+	if t := s.playingTime.Load(); t != nil {
+		return t.(time.Time)
+	}
+
+	return time.Time{}
 }
 
 func (s *M3U8Sink) Close() {
+	s.m3u8ReadyCancel()
 	s.BaseSink.Close()
-	stream.SinkManager.Remove(s.ID)
-
-	if s.playTimer != nil {
-		s.playTimer.Stop()
-		s.playTimer = nil
-	}
+	SinkManager.Remove(s.ID)
 }
 
-func NewM3U8Sink(id stream.SinkID, sourceId string, cb func(m3u8 []byte), sessionId string) stream.Sink {
+func NewM3U8Sink(id stream.SinkID, sourceId string, sessionId string) stream.Sink {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &M3U8Sink{
-		BaseSink:  stream.BaseSink{ID: id, SourceID: sourceId, Protocol: stream.TransStreamHls, TCPStreaming: true},
-		cb:        cb,
-		sessionId: sessionId,
+		BaseSink:        stream.BaseSink{ID: id, SourceID: sourceId, Protocol: stream.TransStreamHls, TCPStreaming: true},
+		sessionId:       sessionId,
+		m3u8ReadyCtx:    ctx,
+		m3u8ReadyCancel: cancel,
 	}
 }

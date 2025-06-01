@@ -467,12 +467,6 @@ func (t *transStreamPublisher) cleanupSinkStreaming(sink Sink) {
 	transStreamSinks := t.transStreamSinks[sink.GetTransStreamID()]
 	delete(transStreamSinks, sink.GetID())
 	t.lastStreamEndTime = time.Now()
-
-	if sink.GetProtocol() == TransStreamHls {
-		// 从HLS拉流队列删除Sink
-		_, _ = SinkManager.Remove(sink.GetID())
-	}
-
 	sink.StopStreaming(t.transStreams[sink.GetTransStreamID()])
 }
 

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"unsafe"
 )
 
 type TransStream struct {
@@ -34,13 +35,14 @@ type TransStream struct {
 	duration       int      // 切片时长, 单位秒
 	playlistLength int      // 最大切片文件个数
 
-	m3u8Sinks      map[stream.SinkID]*M3U8Sink // 保存还未生成mu38文件就拉流的sink, 发送一次后就删除.
-	PlaylistFormat *string                     // 位于内存中的播放列表，每个sink都引用指针地址.
+	PlaylistFormatPtr        *string                                 // 位于内存中的m3u8播放列表，每个sink都引用指针地址.
+	PlaylistFormatPtrCounter []*collections.ReferenceCounter[[]byte] // string指针转byte[], 方便发送给sink
 }
 
 func (t *TransStream) Input(packet *avformat.AVPacket) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
 	// 创建一下个切片
 	// 已缓存时长>=指定时长, 如果存在视频, 还需要等遇到关键帧才切片
+	var newSegment bool
 	if (!t.ExistVideo || utils.AVMediaTypeVideo == packet.MediaType && packet.Key) && float32(t.muxer.Duration())/90000 >= float32(t.duration) {
 		// 保存当前切片文件
 		if t.ctx.file != nil {
@@ -54,6 +56,8 @@ func (t *TransStream) Input(packet *avformat.AVPacket) ([]*collections.Reference
 		if err := t.createSegment(); err != nil {
 			return nil, -1, false, err
 		}
+
+		newSegment = true
 	}
 
 	pts := packet.ConvertPts(90000)
@@ -63,6 +67,7 @@ func (t *TransStream) Input(packet *avformat.AVPacket) ([]*collections.Reference
 		data = avformat.AVCCPacket2AnnexB(t.BaseTransStream.Tracks[packet.Index].Stream, packet)
 	}
 
+	// 写入ts切片
 	length := len(data)
 	capacity := cap(t.ctx.writeBuffer)
 	for i := 0; i < length; {
@@ -75,6 +80,12 @@ func (t *TransStream) Input(packet *avformat.AVPacket) ([]*collections.Reference
 		i += t.muxer.Input(bytes, packet.Index, data[i:], length, dts, pts, packet.Key, i == 0)
 		t.ctx.writeBufferSize += mpeg.TsPacketSize
 	}
+
+	// 缓存完第二个切片, 才响应发送m3u8文件. 如果一个切片就发, 播放器缓存少会卡顿.
+	if newSegment && t.M3U8Writer.Size() > 1 {
+		return t.PlaylistFormatPtrCounter, -1, true, nil
+	}
+
 	return nil, -1, true, nil
 }
 
@@ -126,7 +137,7 @@ func (t *TransStream) flushSegment(end bool) error {
 	//	m3u8Txt += "#EXT-X-ENDLIST"
 	//}
 
-	*t.PlaylistFormat = m3u8Txt
+	*t.PlaylistFormatPtr = m3u8Txt
 
 	// 写入最新的m3u8到文件
 	if t.m3u8File != nil {
@@ -137,16 +148,6 @@ func (t *TransStream) flushSegment(end bool) error {
 		} else if _, err = t.m3u8File.Write([]byte(m3u8Txt)); err != nil {
 			return err
 		}
-	}
-
-	// 通知等待m3u8的sink
-	// 缓存完第二个切片, 才响应发送m3u8文件. 如果一个切片就发, 播放器缓存少会卡顿.
-	if len(t.m3u8Sinks) > 0 && t.M3U8Writer.Size() > 1 {
-		for _, sink := range t.m3u8Sinks {
-			sink.SendM3U8Data(t.PlaylistFormat)
-		}
-
-		t.m3u8Sinks = make(map[stream.SinkID]*M3U8Sink, 0)
 	}
 
 	return nil
@@ -210,14 +211,17 @@ func (t *TransStream) Close() ([]*collections.ReferenceCounter[[]byte], int64, e
 		t.m3u8File = nil
 	}
 
-	// 如果关闭HLS输出流时, 没有有效切片(推流数据过少), 通知等待的sink
-	for _, sink := range t.m3u8Sinks {
-		sink.cb(nil)
-	}
-
-	t.m3u8Sinks = nil
-
 	return nil, 0, err
+}
+
+func stringPtrToBytes(ptr *string) []byte {
+	ptrAddr := uintptr(unsafe.Pointer(ptr))
+	return (*[unsafe.Sizeof(ptr)]byte)(unsafe.Pointer(&ptrAddr))[:]
+}
+
+func bytesToStringPtr(b []byte) *string {
+	ptrAddr := *(*uintptr)(unsafe.Pointer(&b[0]))
+	return (*string)(unsafe.Pointer(ptrAddr))
 }
 
 func DeleteOldSegments(id string) {
@@ -274,11 +278,13 @@ func NewTransStream(dir, m3u8Name, tsFormat, tsUrl string, segmentDuration, play
 	}
 
 	if playlistFormat != nil {
-		transStream.PlaylistFormat = playlistFormat
+		transStream.PlaylistFormatPtr = playlistFormat
 	} else {
-		transStream.PlaylistFormat = new(string)
+		transStream.PlaylistFormatPtr = new(string)
 	}
 
+	playlistFormatPtrCounter := collections.NewReferenceCounter[[]byte](stringPtrToBytes(transStream.PlaylistFormatPtr))
+	transStream.PlaylistFormatPtrCounter = append(transStream.PlaylistFormatPtrCounter, playlistFormatPtrCounter)
 	// 创建TS封装器
 	muxer := mpeg.NewTSMuxer()
 
@@ -288,7 +294,6 @@ func NewTransStream(dir, m3u8Name, tsFormat, tsUrl string, segmentDuration, play
 
 	transStream.muxer = muxer
 	transStream.m3u8File = file
-	transStream.m3u8Sinks = make(map[stream.SinkID]*M3U8Sink, 24)
 	return transStream, nil
 }
 

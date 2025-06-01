@@ -33,7 +33,7 @@ func NewStreamEndInfo(source string, tracks []*stream.Track, streams map[stream.
 		if stream.TransStreamHls == transStream.GetProtocol() {
 			if hls := transStream.(*hls.TransStream); hls.M3U8Writer.Size() > 0 {
 				info.M3U8Writer = hls.M3U8Writer
-				info.PlaylistFormat = hls.PlaylistFormat
+				info.PlaylistFormat = hls.PlaylistFormatPtr
 			}
 		} else if stream.TransStreamRtsp == transStream.GetProtocol() {
 			if rtsp := transStream.(*rtsp.TransStream); len(rtsp.Tracks) > 0 {
