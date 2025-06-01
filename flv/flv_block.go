@@ -3,6 +3,7 @@ package flv
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/lkmio/flv"
 )
 
 const (
@@ -30,6 +31,38 @@ func GetFLVTag(block []byte) []byte {
 	}
 
 	return block[offset : length-2]
+}
+
+type TagPacket struct {
+	flv.Tag
+	Raw    []byte
+	Offset int
+}
+
+// SplitHttpFlvBlock http-flv块分割为多个flv tag
+func SplitHttpFlvBlock(httpFlv []byte) []TagPacket {
+	data := GetFLVTag(httpFlv)
+	length := len(data)
+	start := len(httpFlv) - length - 2
+
+	var packets []TagPacket
+	for i := 0; i < length; {
+		tag := flv.UnmarshalTag(data[i:])
+
+		offset := i
+		i += flv.TagHeaderSize + tag.DataSize
+
+		// 目前只需要保留第一个和最后一个tag
+		if offset == 0 || i >= length {
+			packets = append(packets, TagPacket{
+				Tag:    tag,
+				Raw:    data[offset:i],
+				Offset: start + offset,
+			})
+		}
+	}
+
+	return packets
 }
 
 // 计算头部的无效数据, 返回http-flv的其实位置

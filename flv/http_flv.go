@@ -1,7 +1,6 @@
 package flv
 
 import (
-	"encoding/binary"
 	"github.com/lkmio/avformat"
 	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/avformat/utils"
@@ -14,10 +13,9 @@ import (
 type TransStream struct {
 	stream.TCPTransStream
 
-	Muxer                  *flv.Muxer
-	flvHeaderBlock         []byte // 单独保存9个字节长的flv头, 只发一次, 后续恢复推流不再发送
-	flvExtraDataBlock      []byte // metadata和sequence header
-	flvExtraDataPreTagSize uint32
+	Muxer             *flv.Muxer
+	flvHeaderBlock    []byte // 单独保存9个字节长的flv头, 只发一次, 后续恢复推流不再发送
+	flvExtraDataBlock []byte // metadata和sequence header
 }
 
 func (t *TransStream) Input(packet *avformat.AVPacket) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
@@ -119,8 +117,6 @@ func (t *TransStream) WriteHeader() error {
 	copy(t.flvHeaderBlock[HttpFlvBlockHeaderSize:], header[:9])
 	copy(t.flvExtraDataBlock[HttpFlvBlockHeaderSize:], tags)
 
-	t.flvExtraDataPreTagSize = t.Muxer.PrevTagSize()
-
 	// +2 加上末尾换行符
 	t.flvExtraDataBlock = t.flvExtraDataBlock[:HttpFlvBlockHeaderSize+size-9+2]
 	writeSeparator(t.flvHeaderBlock)
@@ -139,12 +135,6 @@ func (t *TransStream) ReadKeyFrameBuffer() ([]*collections.ReferenceCounter[[]by
 
 	// 发送当前内存池已有的合并写切片
 	t.MWBuffer.ReadSegmentsFromKeyFrameIndex(func(segment *collections.ReferenceCounter[[]byte]) {
-		// 修改第一个flv tag的pre tag size为sequence header tag size
-		bytes := segment.Get()
-		if t.OutBufferSize < 1 {
-			binary.BigEndian.PutUint32(GetFLVTag(bytes), t.flvExtraDataPreTagSize)
-		}
-
 		t.AppendOutStreamBuffer(segment)
 	})
 
