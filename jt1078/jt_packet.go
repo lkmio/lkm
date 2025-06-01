@@ -28,6 +28,7 @@ const (
 	PTAudioADPCMA = 26
 )
 
+// Packet 1078-2016音视频和透传包. 视频帧包头26个字节, 音频帧22个字节, 透传数据14个字节.
 type Packet struct {
 	pt            byte
 	packetType    byte
@@ -39,19 +40,26 @@ type Packet struct {
 }
 
 func (p *Packet) Unmarshal(data []byte) error {
-	if len(data) < 12 {
+	length := len(data)
+	if length < 12 {
 		return fmt.Errorf("invaild data")
 	}
 
 	packetType := data[11] >> 4 & 0x0F
-	// 忽略透传数据
-	if TransmissionDataMark == packetType {
-		return fmt.Errorf("invaild data")
-	}
-
-	// 忽略低于最低长度的数据包
-	if (AudioFrameMark == packetType && len(data) < 26) || (AudioFrameMark == packetType && len(data) < 22) {
-		return fmt.Errorf("invaild data")
+	if packetType < AudioFrameMark {
+		if length < 26 {
+			return fmt.Errorf("invaild data")
+		}
+	} else if AudioFrameMark == packetType {
+		if length < 22 {
+			return fmt.Errorf("invaild data")
+		}
+	} else if TransmissionDataMark == packetType {
+		if length < 14 {
+			return fmt.Errorf("invaild data")
+		}
+	} else {
+		return fmt.Errorf("unknown packet type %x", packetType)
 	}
 
 	// x扩展位,固定为0
@@ -73,11 +81,13 @@ func (p *Packet) Unmarshal(data []byte) error {
 	// 时间戳,单位ms
 	var ts uint64
 	n := 12
+	// 音视频帧才有时间戳字段
 	if TransmissionDataMark != packetType {
 		ts = binary.BigEndian.Uint64(data[n:])
 		n += 8
 	}
 
+	// 与上一帧的间隔时间戳, 视频帧才有此字段
 	if AudioFrameMark > packetType {
 		// iFrameInterval
 		_ = binary.BigEndian.Uint16(data[n:])
