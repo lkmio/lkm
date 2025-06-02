@@ -1,6 +1,6 @@
 ## 简介
 
-基于GoLang实现的流媒体服务器，支持RTMP、GB28181、1078推流，输出rtmp/http-flv/ws-flv/webrtc/hls/rtsp等拉流协议。支持如下编码器和流协议：
+基于GoLang实现的流媒体服务器，支持RTMP、GB28181、jt1078推流、jt1078转GB28181，输出rtmp/http-flv/ws-flv/webrtc/hls/rtsp等拉流协议。支持如下编码器和流协议：
 
 | Codec\Stream | RTMP | FLV | HLS | RTC | RTSP |
 | ------------ | ---- | --- | --- | --- | ---- |
