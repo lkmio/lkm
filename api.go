@@ -60,15 +60,16 @@ type IDS struct {
 	Source string `json:"source"`
 }
 
-func filterRequestBodyParams[T any](f func(params T, w http.ResponseWriter, req *http.Request), params interface{}) func(http.ResponseWriter, *http.Request) {
+func withJsonParams[T any](f func(params T, w http.ResponseWriter, req *http.Request), params interface{}) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, req *http.Request) {
-		if err := HttpDecodeJSONBody(w, req, params); err != nil {
+		newParams := new(T)
+		if err := HttpDecodeJSONBody(w, req, newParams); err != nil {
 			log.Sugar.Errorf("处理http请求失败 err: %s path: %s", err.Error(), req.URL.Path)
 			httpResponseError(w, err.Error())
 			return
 		}
 
-		f(params.(T), w, req)
+		f(*newParams, w, req)
 	}
 }
 
@@ -96,18 +97,18 @@ func startApiServer(addr string) {
 		apiServer.router.HandleFunc("/{source}/{stream}.rtc", filterSourceID(apiServer.onRtc, ".rtc"))
 	}
 
-	apiServer.router.HandleFunc("/api/v1/source/list", apiServer.OnSourceList)                                    // 查询所有推流源
-	apiServer.router.HandleFunc("/api/v1/source/close", filterRequestBodyParams(apiServer.OnSourceClose, &IDS{})) // 关闭推流源
-	apiServer.router.HandleFunc("/api/v1/sink/list", filterRequestBodyParams(apiServer.OnSinkList, &IDS{}))       // 查询某个推流源下，所有的拉流端列表
-	apiServer.router.HandleFunc("/api/v1/sink/close", filterRequestBodyParams(apiServer.OnSinkClose, &IDS{}))     // 关闭拉流端
-	apiServer.router.HandleFunc("/api/v1/sink/add", filterRequestBodyParams(apiServer.OnSinkAdd, &GBOffer{}))     // 级联/广播/JT转GB
+	apiServer.router.HandleFunc("/api/v1/source/list", apiServer.OnSourceList)                           // 查询所有推流源
+	apiServer.router.HandleFunc("/api/v1/source/close", withJsonParams(apiServer.OnSourceClose, &IDS{})) // 关闭推流源
+	apiServer.router.HandleFunc("/api/v1/sink/list", withJsonParams(apiServer.OnSinkList, &IDS{}))       // 查询某个推流源下，所有的拉流端列表
+	apiServer.router.HandleFunc("/api/v1/sink/close", withJsonParams(apiServer.OnSinkClose, &IDS{}))     // 关闭拉流端
+	apiServer.router.HandleFunc("/api/v1/sink/add", withJsonParams(apiServer.OnSinkAdd, &GBOffer{}))     // 级联/广播/JT转GB
 
 	apiServer.router.HandleFunc("/api/v1/streams/statistics", nil) // 统计所有推拉流
 
 	if stream.AppConfig.GB28181.Enable {
 		apiServer.router.HandleFunc("/ws/v1/gb28181/talk", apiServer.OnGBTalk) // 对讲的主讲人WebSocket连接
-		apiServer.router.HandleFunc("/api/v1/gb28181/source/create", filterRequestBodyParams(apiServer.OnGBOfferCreate, &SourceSDP{}))
-		apiServer.router.HandleFunc("/api/v1/gb28181/answer/set", filterRequestBodyParams(apiServer.OnGBSourceConnect, &SourceSDP{})) // active拉流模式下, 设置对方的地址
+		apiServer.router.HandleFunc("/api/v1/gb28181/source/create", withJsonParams(apiServer.OnGBOfferCreate, &SourceSDP{}))
+		apiServer.router.HandleFunc("/api/v1/gb28181/answer/set", withJsonParams(apiServer.OnGBSourceConnect, &SourceSDP{})) // active拉流模式下, 设置对方的地址
 	}
 
 	apiServer.router.HandleFunc("/api/v1/gc/force", func(writer http.ResponseWriter, request *http.Request) {
