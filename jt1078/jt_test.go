@@ -81,10 +81,7 @@ func (h Handler) OnPacket(packet *avformat.AVPacket) {
 	}
 }
 
-func publish() {
-	//path := "../../source_files/10352264314-2.bin"
-	path := "../../source_files/013800138000-1.bin"
-
+func publish(path string) {
 	client := transport.TCPClient{}
 	addr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:1078")
 	if err != nil {
@@ -152,7 +149,9 @@ func TestPublish(t *testing.T) {
 	})
 
 	t.Run("publish", func(t *testing.T) {
-		publish()
+		path := "../../source_files/10352264314-2.bin"
+		//path := "../../source_files/013800138000-1.bin"
+		publish(path)
 	})
 
 	// 1078->ps->rtp
@@ -230,8 +229,18 @@ func TestPublish(t *testing.T) {
 			}
 
 			fmt.Printf("on_invite sim_number: %s, channel_number: %s\r\n", v.SimNumber, v.ChannelNumber)
+
+			var path string
+			if v.SimNumber == "10352264314" {
+				path = "../../source_files/10352264314-2.bin"
+			} else if v.SimNumber == "13800138000" {
+				path = "../../source_files/013800138000-1.bin"
+			} else {
+				w.WriteHeader(http.StatusBadRequest)
+			}
+
 			w.WriteHeader(http.StatusOK)
-			go publish()
+			go publish(path)
 		})
 
 		server := &http.Server{

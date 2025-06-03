@@ -15,11 +15,9 @@ import (
 type GBGateway struct {
 	stream.BaseTransStream
 	ps       *mpeg.PSMuxer
+	rtp      rtp.Muxer
 	psBuffer []byte
-	tracks   map[utils.AVCodecID]struct {
-		index int
-		rtp   rtp.Muxer
-	}
+	tracks   map[utils.AVCodecID]int // codec->track index
 }
 
 func (s *GBGateway) WriteHeader() error {
@@ -32,9 +30,7 @@ func (s *GBGateway) WriteHeader() error {
 func (s *GBGateway) AddTrack(track *stream.Track) error {
 	s.BaseTransStream.AddTrack(track)
 
-	var muxer rtp.Muxer
 	if utils.AVCodecIdH264 == track.Stream.CodecID || utils.AVCodecIdH265 == track.Stream.CodecID || utils.AVCodecIdAAC == track.Stream.CodecID || utils.AVCodecIdPCMALAW == track.Stream.CodecID || utils.AVCodecIdPCMMULAW == track.Stream.CodecID {
-		muxer = rtp.NewMuxer(96, 0, 0xFFFFFFFF)
 	} else {
 		log.Sugar.Errorf("不支持的编码格式: %d", track.Stream.CodecID)
 		return nil
@@ -46,15 +42,12 @@ func (s *GBGateway) AddTrack(track *stream.Track) error {
 		return nil
 	}
 
-	s.tracks[track.Stream.CodecID] = struct {
-		index int
-		rtp   rtp.Muxer
-	}{index: index, rtp: muxer}
+	s.tracks[track.Stream.CodecID] = index
 	return nil
 }
 
 func (s *GBGateway) Input(packet *avformat.AVPacket) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
-	track, ok := s.tracks[packet.CodecID]
+	trackIndex, ok := s.tracks[packet.CodecID]
 	if !ok {
 		log.Sugar.Errorf("未找到对应的track: %d", packet.CodecID)
 		return nil, 0, false, nil
@@ -62,17 +55,21 @@ func (s *GBGateway) Input(packet *avformat.AVPacket) ([]*collections.ReferenceCo
 
 	dts := packet.ConvertDts(90000)
 	pts := packet.ConvertPts(90000)
-	data := avformat.AVCCPacket2AnnexB(s.BaseTransStream.Tracks[packet.Index].Stream, packet)
+
+	data := packet.Data
+	if utils.AVMediaTypeVideo == packet.MediaType {
+		data = avformat.AVCCPacket2AnnexB(s.BaseTransStream.Tracks[packet.Index].Stream, packet)
+	}
 
 	if cap(s.psBuffer) < len(data)+1024*64 {
 		s.psBuffer = make([]byte, len(data)*2)
 	}
 
-	n := s.ps.Input(s.psBuffer, track.index, packet.Key, data, &pts, &dts)
+	n := s.ps.Input(s.psBuffer, trackIndex, packet.Key, data, &pts, &dts)
 
 	var result []*collections.ReferenceCounter[[]byte]
 	var rtpBuffer []byte
-	track.rtp.Input(s.psBuffer[:n], uint32(dts), func() []byte {
+	s.rtp.Input(s.psBuffer[:n], uint32(dts), func() []byte {
 		rtpBuffer = stream.UDPReceiveBufferPool.Get().([]byte)
 		return rtpBuffer[2:]
 	}, func(bytes []byte) {
@@ -87,11 +84,9 @@ func (s *GBGateway) Input(packet *avformat.AVPacket) ([]*collections.ReferenceCo
 func NewGBGateway() *GBGateway {
 	return &GBGateway{
 		ps:       mpeg.NewPsMuxer(),
+		rtp:      rtp.NewMuxer(96, 0, 0xFFFFFFFF),
 		psBuffer: make([]byte, 1024*1024*2),
-		tracks: make(map[utils.AVCodecID]struct {
-			index int
-			rtp   rtp.Muxer
-		}),
+		tracks:   make(map[utils.AVCodecID]int),
 	}
 }
 
