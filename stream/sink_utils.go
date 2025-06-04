@@ -83,7 +83,7 @@ func SubscribeStreamWithOptions(sink Sink, values url.Values, ready bool, timeou
 	return state
 }
 
-func ForwardStream(protocol TransStreamProtocol, transport TransportType, sourceId string, values url.Values, remoteAddr string, manager transport.Manager) (Sink, int, error) {
+func ForwardStream(protocol TransStreamProtocol, transport TransportType, sourceId string, values url.Values, remoteAddr string, manager transport.Manager, ssrc uint32) (Sink, int, error) {
 	//source := SourceManager.Find(sourceId)
 	//if source == nil {
 	//	return nil, 0, fmt.Errorf("source %s 不存在", sourceId)
@@ -91,7 +91,7 @@ func ForwardStream(protocol TransStreamProtocol, transport TransportType, source
 
 	sinkId := GenerateUint64SinkID()
 	var port int
-	sink, port, err := NewForwardSink(transport, protocol, sinkId, sourceId, remoteAddr, manager)
+	sink, port, err := NewForwardSink(transport, protocol, sinkId, sourceId, remoteAddr, manager, ssrc)
 	if err != nil {
 		return nil, 0, err
 	}

@@ -78,6 +78,6 @@ func NewTransStream() stream.TransStream {
 	return t
 }
 
-func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtocol, tracks []*stream.Track) (stream.TransStream, error) {
+func TransStreamFactory(_ stream.Source, _ stream.TransStreamProtocol, _ []*stream.Track, _ stream.Sink) (stream.TransStream, error) {
 	return NewTransStream(), nil
 }

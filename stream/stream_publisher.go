@@ -187,7 +187,7 @@ func (t *transStreamPublisher) CreateDefaultOutStreams() {
 		utils.Assert(len(streams) > 0)
 
 		id := GenerateTransStreamID(TransStreamHls, streams...)
-		hlsStream, err := t.CreateTransStream(id, TransStreamHls, streams)
+		hlsStream, err := t.CreateTransStream(id, TransStreamHls, streams, nil)
 		if err != nil {
 			panic(err)
 		}
@@ -206,12 +206,12 @@ func IsSupportMux(protocol TransStreamProtocol, _, _ utils.AVCodecID) bool {
 	return true
 }
 
-func (t *transStreamPublisher) CreateTransStream(id TransStreamID, protocol TransStreamProtocol, tracks []*Track) (TransStream, error) {
+func (t *transStreamPublisher) CreateTransStream(id TransStreamID, protocol TransStreamProtocol, tracks []*Track, sink Sink) (TransStream, error) {
 	log.Sugar.Infof("创建%s-stream source: %s", protocol.String(), t.source)
 
 	source := SourceManager.Find(t.source)
 	utils.Assert(source != nil)
-	transStream, err := CreateTransStream(source, protocol, tracks)
+	transStream, err := CreateTransStream(source, protocol, tracks, sink)
 	if err != nil {
 		log.Sugar.Errorf("创建传输流失败 err: %s source: %s", err.Error(), t.source)
 		return nil, err
@@ -356,7 +356,7 @@ func (t *transStreamPublisher) doAddSink(sink Sink, resume bool) bool {
 	transStream, exist := t.transStreams[transStreamId]
 	if !exist {
 		var err error
-		transStream, err = t.CreateTransStream(transStreamId, sink.GetProtocol(), tracks)
+		transStream, err = t.CreateTransStream(transStreamId, sink.GetProtocol(), tracks, sink)
 		if err != nil {
 			log.Sugar.Errorf("添加sink失败,创建传输流发生err: %s source: %s", err.Error(), t.source)
 			return false

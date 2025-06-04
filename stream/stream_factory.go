@@ -4,7 +4,7 @@ import (
 	"fmt"
 )
 
-type TransStreamFactory func(source Source, protocol TransStreamProtocol, tracks []*Track) (TransStream, error)
+type TransStreamFactory func(source Source, protocol TransStreamProtocol, tracks []*Track, sink Sink) (TransStream, error)
 
 type RecordStreamFactory func(source string) (Sink, string, error)
 
@@ -35,13 +35,13 @@ func FindTransStreamFactory(protocol TransStreamProtocol) (TransStreamFactory, e
 	return f, nil
 }
 
-func CreateTransStream(source Source, protocol TransStreamProtocol, tracks []*Track) (TransStream, error) {
+func CreateTransStream(source Source, protocol TransStreamProtocol, tracks []*Track, sink Sink) (TransStream, error) {
 	factory, err := FindTransStreamFactory(protocol)
 	if err != nil {
 		return nil, err
 	}
 
-	return factory(source, protocol, tracks)
+	return factory(source, protocol, tracks, sink)
 }
 
 func SetRecordStreamFactory(factory RecordStreamFactory) {

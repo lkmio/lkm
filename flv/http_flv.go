@@ -171,7 +171,7 @@ func NewHttpTransStream(metadata *amf0.Object, prevTagSize uint32) stream.TransS
 	}
 }
 
-func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtocol, tracks []*stream.Track) (stream.TransStream, error) {
+func TransStreamFactory(source stream.Source, _ stream.TransStreamProtocol, _ []*stream.Track, _ stream.Sink) (stream.TransStream, error) {
 	var prevTagSize uint32
 	var metaData *amf0.Object
 

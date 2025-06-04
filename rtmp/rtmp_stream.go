@@ -238,7 +238,7 @@ func NewTransStream(chunkSize int, metaData *amf0.Object) stream.TransStream {
 	return &transStream{chunkSize: chunkSize, metaData: metaData}
 }
 
-func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtocol, tracks []*stream.Track) (stream.TransStream, error) {
+func TransStreamFactory(source stream.Source, _ stream.TransStreamProtocol, _ []*stream.Track, _ stream.Sink) (stream.TransStream, error) {
 	// 获取推流的元数据
 	var metaData *amf0.Object
 	if stream.SourceTypeRtmp == source.GetType() {

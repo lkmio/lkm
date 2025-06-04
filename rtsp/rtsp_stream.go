@@ -32,7 +32,7 @@ type TransStream struct {
 	oldTracks map[byte]uint16
 	sdp       string
 
-	rtpBuffers *collections.Queue[*collections.ReferenceCounter[[]byte]]
+	rtpBuffer *stream.RtpBuffer
 }
 
 func (t *TransStream) OverTCP(data []byte, channel int) {
@@ -42,20 +42,6 @@ func (t *TransStream) OverTCP(data []byte, channel int) {
 }
 
 func (t *TransStream) Input(packet *avformat.AVPacket) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
-	// 释放rtp包
-	for t.rtpBuffers.Size() > 0 {
-		rtp := t.rtpBuffers.Peek(0)
-		if rtp.UseCount() > 1 {
-			break
-		}
-
-		t.rtpBuffers.Pop()
-
-		// 放回池中
-		data := rtp.Get()
-		stream.UDPReceiveBufferPool.Put(data[:cap(data)])
-	}
-
 	var ts uint32
 	var result []*collections.ReferenceCounter[[]byte]
 	track := t.RtspTracks[packet.Index]
@@ -97,21 +83,29 @@ func (t *TransStream) ReadExtraData(ts int64) ([]*collections.ReferenceCounter[[
 func (t *TransStream) PackRtpPayload(track *Track, channel int, data []byte, timestamp uint32) []*collections.ReferenceCounter[[]byte] {
 	var result []*collections.ReferenceCounter[[]byte]
 	var packet []byte
+	var counter *collections.ReferenceCounter[[]byte]
 
 	// 保存开始序号
 	track.StartSeq = track.Muxer.GetHeader().Seq
 	track.Muxer.Input(data, timestamp, func() []byte {
-		packet = stream.UDPReceiveBufferPool.Get().([]byte)
+		counter = t.rtpBuffer.Get()
+		counter.Refer()
+
+		packet = counter.Get()
 		return packet[OverTcpHeaderSize:]
 	}, func(bytes []byte) {
 		track.EndSeq = track.Muxer.GetHeader().Seq
 		overTCPPacket := packet[:OverTcpHeaderSize+len(bytes)]
 		t.OverTCP(overTCPPacket, channel)
 
-		refPacket := collections.NewReferenceCounter(overTCPPacket)
-		result = append(result, refPacket)
-		t.rtpBuffers.Push(refPacket)
+		counter.ResetData(overTCPPacket)
+		result = append(result, counter)
 	})
+
+	// 引用计数保持为1
+	for _, pkt := range result {
+		pkt.Release()
+	}
 
 	return result
 }
@@ -154,9 +148,10 @@ func (t *TransStream) AddTrack(track *stream.Track) error {
 	packAndAdd := func(data []byte) {
 		packets := t.PackRtpPayload(rtspTrack, trackIndex, data, 0)
 		for _, packet := range packets {
-			extraDataPackets = append(extraDataPackets, packet)
-			// 出队列, 单独保存
-			t.rtpBuffers.Pop()
+			extra := packet.Get()
+			bytes := make([]byte, len(extra))
+			copy(bytes, extra)
+			extraDataPackets = append(extraDataPackets, collections.NewReferenceCounter(bytes))
 		}
 	}
 
@@ -274,10 +269,10 @@ func (t *TransStream) WriteHeader() error {
 
 func NewTransStream(addr net.IPAddr, urlFormat string, oldTracks map[byte]uint16) stream.TransStream {
 	t := &TransStream{
-		addr:       addr,
-		urlFormat:  urlFormat,
-		oldTracks:  oldTracks,
-		rtpBuffers: collections.NewQueue[*collections.ReferenceCounter[[]byte]](512),
+		addr:      addr,
+		urlFormat: urlFormat,
+		oldTracks: oldTracks,
+		rtpBuffer: stream.NewRtpBuffer(512),
 	}
 
 	if addr.IP.To4() != nil {
@@ -289,7 +284,7 @@ func NewTransStream(addr net.IPAddr, urlFormat string, oldTracks map[byte]uint16
 	return t
 }
 
-func TransStreamFactory(source stream.Source, protocol stream.TransStreamProtocol, tracks []*stream.Track) (stream.TransStream, error) {
+func TransStreamFactory(source stream.Source, _ stream.TransStreamProtocol, _ []*stream.Track, _ stream.Sink) (stream.TransStream, error) {
 	trackFormat := "?track=%d"
 	var oldTracks map[byte]uint16
 	if endInfo := source.GetTransStreamPublisher().GetStreamEndInfo(); endInfo != nil {

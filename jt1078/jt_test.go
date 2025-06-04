@@ -182,7 +182,7 @@ func TestPublish(t *testing.T) {
 			buffer:  make([]byte, 1024*1024*2),
 			fos:     openFile,
 			tracks:  make(map[int]int),
-			gateway: gb28181.NewGBGateway(),
+			gateway: gb28181.NewGBGateway(0xFFFFFFFF),
 			udp:     client,
 		})
 

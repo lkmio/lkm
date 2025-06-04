@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"encoding/binary"
 	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/transport"
@@ -29,11 +30,15 @@ func (t TransportType) String() string {
 	}
 }
 
+// ForwardSink 转发流Sink, 级联/对讲广播/JT1078转GB28181均使用
 type ForwardSink struct {
 	BaseSink
-	socket        transport.Transport
-	transportType TransportType
-	receiveTimer  *time.Timer
+	socket           transport.Transport
+	transportType    TransportType
+	receiveTimer     *time.Timer
+	ssrc             uint32
+	requireSSRCMatch bool // 如果ssrc要求一致, 发包时要检查ssrc是否一致, 不一致则重新拷贝一份
+	rtpBuffer        *RtpBuffer
 }
 
 func (f *ForwardSink) OnConnected(conn net.Conn) []byte {
@@ -67,18 +72,68 @@ func (f *ForwardSink) Write(index int, data []*collections.ReferenceCounter[[]by
 		return nil
 	}
 
+	var processedData []*collections.ReferenceCounter[[]byte]
+
+	// ssrc不一致, 重新拷贝一份, 修改为指定的ssrc
+	if f.requireSSRCMatch && f.ssrc != binary.BigEndian.Uint32(data[0].Get()[2+8:]) {
+		if TransportTypeUDP != f.transportType {
+			if f.rtpBuffer == nil {
+				f.rtpBuffer = NewRtpBuffer(1024)
+			}
+
+			processedData = make([]*collections.ReferenceCounter[[]byte], 0, len(data))
+		} else if f.rtpBuffer == nil {
+			f.rtpBuffer = NewRtpBuffer(1)
+		}
+
+		for i, datum := range data {
+			src := datum.Get()
+			counter := f.rtpBuffer.Get()
+			bytes := counter.Get()
+
+			length := len(src)
+			copy(bytes, src[:length])
+
+			// 修改ssrc
+			binary.BigEndian.PutUint32(bytes[2+8:], f.ssrc)
+
+			// UDP直接发送
+			if TransportTypeUDP == f.transportType {
+				_ = f.socket.(*transport.UDPClient).Write(bytes[2:length])
+			} else {
+				counter.ResetData(bytes[:length])
+				counter.Refer()
+				processedData[i] = counter
+			}
+		}
+
+		// UDP已经发送, 直接返回
+		if processedData == nil {
+			return nil
+		} else {
+			// 引用计数保持为1
+			for _, pkt := range processedData {
+				pkt.Release()
+			}
+		}
+	}
+
+	if processedData == nil {
+		processedData = data
+	}
+
 	if TransportTypeUDP == f.transportType {
-		for _, datum := range data {
+		for _, datum := range processedData {
 			f.socket.(*transport.UDPClient).Write(datum.Get()[2:])
 		}
 	} else {
-		return f.BaseSink.Write(index, data, ts, keyVideo)
+		return f.BaseSink.Write(index, processedData, ts, keyVideo)
 	}
 
 	return nil
 }
 
-// Close 关闭国标转发流
+// Close 关闭转发流
 func (f *ForwardSink) Close() {
 	f.BaseSink.Close()
 
@@ -88,6 +143,10 @@ func (f *ForwardSink) Close() {
 
 	if f.receiveTimer != nil {
 		f.receiveTimer.Stop()
+	}
+
+	if f.rtpBuffer != nil {
+		f.rtpBuffer.Clear()
 	}
 }
 
@@ -101,10 +160,16 @@ func (f *ForwardSink) StartReceiveTimer() {
 	})
 }
 
-func NewForwardSink(transportType TransportType, protocol TransStreamProtocol, sinkId SinkID, sourceId string, addr string, manager transport.Manager) (*ForwardSink, int, error) {
+func (f *ForwardSink) GetSSRC() uint32 {
+	return f.ssrc
+}
+
+func NewForwardSink(transportType TransportType, protocol TransStreamProtocol, sinkId SinkID, sourceId string, addr string, manager transport.Manager, ssrc uint32) (*ForwardSink, int, error) {
 	sink := &ForwardSink{
-		BaseSink:      BaseSink{ID: sinkId, SourceID: sourceId, State: SessionStateCreated, Protocol: protocol},
-		transportType: transportType,
+		BaseSink:         BaseSink{ID: sinkId, SourceID: sourceId, State: SessionStateCreated, Protocol: protocol},
+		transportType:    transportType,
+		ssrc:             ssrc,
+		requireSSRCMatch: true, // 默认要求ssrc一致
 	}
 
 	if transportType == TransportTypeUDP {

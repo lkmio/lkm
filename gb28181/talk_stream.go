@@ -29,14 +29,22 @@ func (s *TalkStream) Input(packet *avformat.AVPacket) ([]*collections.ReferenceC
 	return s.RtpStream.Input(packet)
 }
 
-func NewTalkTransStream() (stream.TransStream, error) {
+func NewTalkTransStream(ssrc uint32) (stream.TransStream, error) {
 	return &TalkStream{
 		RtpStream: stream.NewRtpTransStream(stream.TransStreamGBTalk, 1024),
-		muxer:     rtp.NewMuxer(8, 0, 0xFFFFFFFF),
+		muxer:     rtp.NewMuxer(8, 0, ssrc),
 		packet:    make([]byte, 1500),
 	}, nil
 }
 
-func TalkTransStreamFactory(source stream.Source, protocol stream.TransStreamProtocol, tracks []*stream.Track) (stream.TransStream, error) {
-	return NewTalkTransStream()
+func TalkTransStreamFactory(_ stream.Source, _ stream.TransStreamProtocol, _ []*stream.Track, sink stream.Sink) (stream.TransStream, error) {
+	var ssrc uint32 = 0xFFFFFFFF
+	if sink != nil {
+		forwardSink, ok := sink.(*stream.ForwardSink)
+		if ok {
+			ssrc = forwardSink.GetSSRC()
+		}
+	}
+
+	return NewTalkTransStream(ssrc)
 }

@@ -153,21 +153,49 @@ func (api *ApiServer) OnGBOfferCreate(v *SourceSDP, w http.ResponseWriter, r *ht
 	}
 }
 
-func (api *ApiServer) AddForwardSink(protocol stream.TransStreamProtocol, transport stream.TransportType, sourceId string, remoteAddr string, w http.ResponseWriter, r *http.Request) {
+func (api *ApiServer) AddForwardSink(protocol stream.TransStreamProtocol, transport stream.TransportType, sourceId string, remoteAddr string, ssrc, sessionName string, w http.ResponseWriter, r *http.Request) {
+	// 解析或生成应答的ssrc
+	var ssrcOffer int
+	var ssrcAnswer string
+	if ssrc != "" {
+		var err error
+		ssrcOffer, err = strconv.Atoi(ssrc)
+		if err != nil {
+			log.Sugar.Errorf("解析ssrc失败 err: %s ssrc: %s", err.Error(), ssrc)
+		} else {
+			ssrcAnswer = ssrc
+		}
+	}
+
+	if ssrcAnswer == "" {
+		if "download" != sessionName && "playback" != sessionName {
+			ssrcAnswer = gb28181.GetLiveSSRC()
+		} else {
+			ssrcAnswer = gb28181.GetVodSSRC()
+		}
+
+		var err error
+		ssrcOffer, err = strconv.Atoi(ssrcAnswer)
+		// 严重错误, 直接panic
+		if err != nil {
+			panic(err)
+		}
+	}
+
 	var port int
-	sink, port, err := stream.ForwardStream(protocol, transport, sourceId, r.URL.Query(), remoteAddr, gb28181.TransportManger)
+	sink, port, err := stream.ForwardStream(protocol, transport, sourceId, r.URL.Query(), remoteAddr, gb28181.TransportManger, uint32(ssrcOffer))
 	if err != nil {
 		log.Sugar.Errorf("创建转发sink失败 err: %s", err.Error())
 		httpResponseError(w, err.Error())
 		return
 	}
 
-	log.Sugar.Infof("创建转发sink成功, sink: %s port: %d transport: %s", sink.GetID(), port, transport)
+	log.Sugar.Infof("创建转发sink成功, sink: %s port: %d transport: %s ssrc: %s", sink.GetID(), port, transport, ssrcAnswer)
 
 	response := struct {
 		Sink string `json:"sink"` // sink id
 		SDP
-	}{Sink: stream.SinkID2String(sink.GetID()), SDP: SDP{Addr: net.JoinHostPort(stream.AppConfig.PublicIP, strconv.Itoa(port))}}
+	}{Sink: stream.SinkID2String(sink.GetID()), SDP: SDP{Addr: net.JoinHostPort(stream.AppConfig.PublicIP, strconv.Itoa(port)), SSRC: ssrcAnswer}}
 
 	httpResponseOK(w, &response)
 }
@@ -235,5 +263,5 @@ func (api *ApiServer) OnSinkAdd(v *GBOffer, w http.ResponseWriter, r *http.Reque
 		setup = gb28181.SetupTypeFromString(v.AnswerSetup)
 	}
 
-	api.AddForwardSink(v.TransStreamProtocol, setup.TransportType(), v.Source, v.Addr, w, r)
+	api.AddForwardSink(v.TransStreamProtocol, setup.TransportType(), v.Source, v.Addr, v.SSRC, v.SessionName, w, r)
 }
