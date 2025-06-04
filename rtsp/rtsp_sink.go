@@ -86,16 +86,13 @@ func (s *Sink) Write(index int, data []*collections.ReferenceCounter[[]byte], rt
 		return nil
 	}
 
-	for i, bytes := range data {
+	for _, bytes := range data {
 		sender := s.senders[index]
 		sender.PktCount++
 		sender.OctetCount += len(bytes.Get())
 		if s.TCPStreaming {
-			// 一次发送会花屏?
-			// return s.BaseSink.Write(index, data, rtpTime)
-			s.BaseSink.Write(index, data[i:i+1], rtpTime, keyVideo)
-			//s.Conn.Write(bytes.Get())
-		} else {
+			return s.BaseSink.Write(index, data, rtpTime, keyVideo)
+		} else if sender.RtpConn != nil {
 			// 发送rtcp sr包
 			sender.RtpConn.Write(bytes.Get()[OverTcpHeaderSize:])
 
