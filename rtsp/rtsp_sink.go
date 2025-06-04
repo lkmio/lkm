@@ -54,7 +54,6 @@ func (s *Sink) AddSender(index int, tcp bool, ssrc uint32) (uint16, uint16, erro
 
 	if tcp {
 		s.TCPStreaming = true
-		s.BaseSink.EnableAsyncWriteMode(512)
 	} else {
 		sender.Rtp, err = TransportManger.NewUDPServer()
 		if err != nil {
