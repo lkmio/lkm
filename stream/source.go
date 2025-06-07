@@ -27,7 +27,7 @@ type Source interface {
 	SetID(id string)
 
 	// Input 输入推流数据
-	Input(data []byte) error
+	Input(data []byte) (int, error)
 
 	// GetType 返回推流类型
 	GetType() SourceType
@@ -47,7 +47,7 @@ type Source interface {
 	// IsCompleted 所有推流track是否解析完毕
 	IsCompleted() bool
 
-	Init(receiveQueueSize int)
+	Init()
 
 	RemoteAddr() string
 
@@ -61,21 +61,12 @@ type Source interface {
 	// SetUrlValues 设置推流url参数
 	SetUrlValues(values url.Values)
 
-	// PostEvent 切换到主协程执行当前函数
-	postEvent(cb func())
-
-	executeSyncEvent(cb func())
-
 	// LastPacketTime 返回最近收流时间戳
 	LastPacketTime() time.Time
 
 	SetLastPacketTime(time2 time.Time)
 
 	IsClosed() bool
-
-	StreamPipe() chan []byte
-
-	MainContextEvents() chan func()
 
 	CreateTime() time.Time
 
@@ -86,6 +77,12 @@ type Source interface {
 	ProbeTimeout()
 
 	GetTransStreamPublisher() TransStreamPublisher
+
+	StartTimers(source Source)
+
+	ExecuteSyncEvent(cb func())
+
+	UpdateReceiveStats(dataLen int)
 }
 
 type PublishSource struct {
@@ -94,9 +91,7 @@ type PublishSource struct {
 	state SessionState
 	Conn  net.Conn
 
-	streamPipe        *NonBlockingChannel[[]byte] // 推流数据管道
-	mainContextEvents chan func()                 // 切换到主协程执行函数的事件管道
-	streamPublisher   TransStreamPublisher        // 解析出来的AVStream和AVPacket, 交由streamPublisher处理
+	streamPublisher TransStreamPublisher // 解析出来的AVStream和AVPacket, 交由streamPublisher处理
 
 	TransDemuxer avformat.Demuxer // 负责从推流协议中解析出AVStream和AVPacket
 	originTracks TrackManager     // 推流的音视频Streams
@@ -110,6 +105,14 @@ type PublishSource struct {
 	createTime     time.Time          // source创建时间
 	statistics     *BitrateStatistics // 码流统计
 	streamLogger   avformat.OnUnpackStream2FileHandler
+	//	streamLock     sync.RWMutex
+	streamLock sync.Mutex
+
+	timers struct {
+		receiveTimer *time.Timer // 收流超时计时器
+		idleTimer    *time.Timer // 空闲超时计时器
+		probeTimer   *time.Timer // tack探测超时计时器
+	}
 }
 
 func (s *PublishSource) SetLastPacketTime(time2 time.Time) {
@@ -118,14 +121,6 @@ func (s *PublishSource) SetLastPacketTime(time2 time.Time) {
 
 func (s *PublishSource) IsClosed() bool {
 	return s.closed.Load()
-}
-
-func (s *PublishSource) StreamPipe() chan []byte {
-	return s.streamPipe.Channel
-}
-
-func (s *PublishSource) MainContextEvents() chan func() {
-	return s.mainContextEvents
 }
 
 func (s *PublishSource) LastPacketTime() time.Time {
@@ -143,23 +138,35 @@ func (s *PublishSource) SetID(id string) {
 	}
 }
 
-func (s *PublishSource) Init(receiveQueueSize int) {
+func (s *PublishSource) Init() {
 	s.SetState(SessionStateHandshakeSuccess)
 
-	// 初始化事件接收管道
-	// -2是为了保证从管道取到流, 到处理完流整个过程安全的, 不会被覆盖
-	s.streamPipe = NewNonBlockingChannel[[]byte](receiveQueueSize - 1)
-	s.mainContextEvents = make(chan func(), 128)
 	s.statistics = NewBitrateStatistics()
 	s.streamPublisher = NewTransStreamPublisher(s.ID)
 	// 设置探测时长
 	s.TransDemuxer.SetProbeDuration(AppConfig.ProbeTimeout)
 }
 
-func (s *PublishSource) Input(data []byte) error {
-	s.streamPipe.Post(data)
-	s.statistics.Input(len(data))
-	return nil
+func (s *PublishSource) UpdateReceiveStats(dataLen int) {
+	s.statistics.Input(dataLen)
+	if AppConfig.ReceiveTimeout > 0 {
+		s.SetLastPacketTime(time.Now())
+	}
+}
+
+func (s *PublishSource) Input(data []byte) (int, error) {
+	s.UpdateReceiveStats(len(data))
+	var n int
+	var err error
+	s.ExecuteSyncEvent(func() {
+		if s.closed.Load() {
+			err = fmt.Errorf("source closed")
+		} else {
+			n, err = s.TransDemuxer.Input(data)
+		}
+	})
+
+	return n, err
 }
 
 func (s *PublishSource) OriginTracks() []*Track {
@@ -177,12 +184,31 @@ func (s *PublishSource) DoClose() {
 		return
 	}
 
-	s.closed.Store(true)
+	var closed bool
+	s.ExecuteSyncEvent(func() {
+		closed = s.closed.Swap(true)
+	})
+
+	if closed {
+		return
+	}
+
+	// 关闭各种超时计时器
+	if s.timers.receiveTimer != nil {
+		s.timers.receiveTimer.Stop()
+	}
+
+	if s.timers.idleTimer != nil {
+		s.timers.idleTimer.Stop()
+	}
+
+	if s.timers.probeTimer != nil {
+		s.timers.probeTimer.Stop()
+	}
 
 	// 关闭推流源的解复用器, 不再接收数据
 	if s.TransDemuxer != nil {
 		s.TransDemuxer.Close()
-		s.TransDemuxer = nil
 	}
 
 	// 等传输流发布器关闭结束
@@ -210,14 +236,7 @@ func (s *PublishSource) DoClose() {
 }
 
 func (s *PublishSource) Close() {
-	if s.closed.Load() {
-		return
-	}
-
-	// 同步执行, 确保close后, 主协程已经退出, 不会再处理任何推拉流、查询等任何事情.
-	s.executeSyncEvent(func() {
-		s.DoClose()
-	})
+	s.DoClose()
 }
 
 // 解析完所有track后, 创建各种输出流
@@ -233,7 +252,8 @@ func (s *PublishSource) writeHeader() {
 
 	if len(s.originTracks.All()) == 0 {
 		log.Sugar.Errorf("没有一路track, 删除source: %s", s.ID)
-		s.DoClose()
+		// 异步执行ProbeTimeout函数中还没释放锁
+		go s.DoClose()
 		return
 	}
 }
@@ -356,20 +376,11 @@ func (s *PublishSource) SetUrlValues(values url.Values) {
 	s.urlValues = values
 }
 
-func (s *PublishSource) postEvent(cb func()) {
-	s.mainContextEvents <- cb
-}
-
-func (s *PublishSource) executeSyncEvent(cb func()) {
-	group := sync.WaitGroup{}
-	group.Add(1)
-
-	s.postEvent(func() {
-		cb()
-		group.Done()
-	})
-
-	group.Wait()
+func (s *PublishSource) ExecuteSyncEvent(cb func()) {
+	// 无竞争情况下, 接近原子操作
+	s.streamLock.Lock()
+	defer s.streamLock.Unlock()
+	cb()
 }
 
 func (s *PublishSource) CreateTime() time.Time {
@@ -386,10 +397,37 @@ func (s *PublishSource) GetBitrateStatistics() *BitrateStatistics {
 
 func (s *PublishSource) ProbeTimeout() {
 	if s.TransDemuxer != nil {
-		s.TransDemuxer.ProbeComplete()
+		s.ExecuteSyncEvent(func() {
+			if !s.closed.Load() {
+				s.TransDemuxer.ProbeComplete()
+			}
+		})
 	}
 }
 
 func (s *PublishSource) GetTransStreamPublisher() TransStreamPublisher {
 	return s.streamPublisher
+}
+
+func (s *PublishSource) StartTimers(source Source) {
+
+	// 开启收流超时计时器
+	if AppConfig.ReceiveTimeout > 0 {
+		s.timers.receiveTimer = StartReceiveDataTimer(source)
+	}
+
+	// 开启拉流空闲超时计时器
+	if AppConfig.Hooks.IsEnableOnIdleTimeout() && AppConfig.IdleTimeout > 0 {
+		s.timers.idleTimer = StartIdleTimer(source)
+	}
+
+	// 开启探测超时计时器
+	s.timers.probeTimer = time.AfterFunc(time.Duration(AppConfig.ProbeTimeout)*time.Millisecond, func() {
+		if source.IsCompleted() {
+			return
+		}
+
+		source.ProbeTimeout()
+	})
+
 }

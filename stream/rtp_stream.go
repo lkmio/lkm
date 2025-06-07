@@ -27,7 +27,7 @@ func (f *RtpStream) Input(packet *avformat.AVPacket) ([]*collections.ReferenceCo
 	bytes := counter.Get()
 	binary.BigEndian.PutUint16(bytes, size-2)
 	copy(bytes[2:], packet.Data)
-	counter.ResetData(bytes)
+	counter.ResetData(bytes[:2+len(bytes)])
 
 	// 每帧都当关键帧, 直接发给上级
 	return []*collections.ReferenceCounter[[]byte]{counter}, -1, true, nil

@@ -215,7 +215,7 @@ func (api *ApiServer) OnGBTalk(w http.ResponseWriter, r *http.Request) {
 	id := r.FormValue("source")
 
 	talkSource := gb28181.NewTalkSource(id, conn)
-	talkSource.Init(stream.TCPReceiveBufferQueueSize)
+	talkSource.Init()
 	talkSource.SetUrlValues(r.Form)
 
 	_, state := stream.PreparePublishSource(talkSource, true)
@@ -227,7 +227,9 @@ func (api *ApiServer) OnGBTalk(w http.ResponseWriter, r *http.Request) {
 
 	log.Sugar.Infof("ws对讲连接成功, source: %s", talkSource)
 
-	go stream.LoopEvent(talkSource)
+	stream.LoopEvent(talkSource)
+
+	data := stream.UDPReceiveBufferPool.Get().([]byte)
 
 	for {
 		_, bytes, err := conn.ReadMessage()
@@ -240,10 +242,9 @@ func (api *ApiServer) OnGBTalk(w http.ResponseWriter, r *http.Request) {
 		}
 
 		for i := 0; i < length; {
-			data := stream.UDPReceiveBufferPool.Get().([]byte)
 			n := bufio.MinInt(stream.UDPReceiveBufferSize, length-i)
 			copy(data, bytes[:n])
-			_ = talkSource.PublishSource.Input(data[:n])
+			_, _ = talkSource.PublishSource.Input(data[:n])
 			i += n
 		}
 	}

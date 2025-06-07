@@ -12,10 +12,6 @@ type Publisher struct {
 	Stack *rtmp.ServerStack
 }
 
-func (p *Publisher) Input(data []byte) error {
-	return p.Stack.Input(p.Conn, data)
-}
-
 func (p *Publisher) Close() {
 	p.PublishSource.Close()
 	p.Stack = nil

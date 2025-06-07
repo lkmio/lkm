@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/lkmio/avformat"
+	"github.com/lkmio/avformat/bufio"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/mpeg"
 	"github.com/lkmio/transport"
@@ -69,8 +70,7 @@ func createSource(source, setup string, ssrc uint32) (string, uint16, uint32) {
 		panic(err)
 	}
 
-	//request, err := http.NewRequest("POST", "http://localhost:8080/api/v1/gb28181/source/create", bytes.NewBuffer(marshal))
-	request, err := http.NewRequest("POST", "http://localhost:8080/api/v1/gb28181/offer/create", bytes.NewBuffer(marshal))
+	request, err := http.NewRequest("POST", "http://localhost:8080/api/v1/gb28181/source/create", bytes.NewBuffer(marshal))
 	if err != nil {
 		panic(err)
 	}
@@ -314,5 +314,35 @@ func TestPublish(t *testing.T) {
 		}
 
 		connectSource(id, fmt.Sprintf("%s:%d", ip, port))
+	})
+}
+
+func TestDecode(t *testing.T) {
+	t.Run("decode_raw", func(t *testing.T) {
+		file, err2 := os.ReadFile("../dump/gb28181-192.168.2.103.37841")
+		if err2 != nil {
+			panic(err2)
+		}
+
+		filter := NewSingleFilter(NewPassiveSource())
+		session := NewTCPSession(nil, filter)
+		reader := bufio.NewBytesReader(file)
+
+		for {
+			size, err2 := reader.ReadUint32()
+			if err2 != nil {
+				break
+			}
+
+			bytes, err2 := reader.ReadBytes(int(size))
+			if err2 != nil {
+				break
+			}
+
+			err2 = session.DecodeGBRTPOverTCPPacket(bytes, filter, nil)
+			if err2 != nil {
+				break
+			}
+		}
 	})
 }

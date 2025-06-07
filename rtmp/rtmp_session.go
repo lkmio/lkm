@@ -35,7 +35,7 @@ func (s *Session) OnPublish(app, stream_ string) utils.HookState {
 	source := NewPublisher(sourceId, s.stack, s.conn)
 
 	// 初始化放在add source前面, 以防add后再init, 空窗期拉流队列空指针.
-	source.Init(stream.TCPReceiveBufferQueueSize)
+	source.Init()
 	source.SetUrlValues(values)
 
 	// 统一处理source推流事件, source是否已经存在, hook回调....
@@ -46,7 +46,7 @@ func (s *Session) OnPublish(app, stream_ string) utils.HookState {
 		s.handle = source
 		s.isPublisher = true
 
-		go stream.LoopEvent(source)
+		stream.LoopEvent(source)
 	}
 
 	return state
@@ -73,7 +73,14 @@ func (s *Session) OnPlay(app, stream_ string) utils.HookState {
 func (s *Session) Input(data []byte) error {
 	// 推流会话, 收到的包都将交由主协程处理
 	if s.isPublisher {
-		return s.handle.(*Publisher).PublishSource.Input(data)
+		s.handle.(*Publisher).UpdateReceiveStats(len(data))
+
+		var err error
+		s.handle.(*Publisher).ExecuteSyncEvent(func() {
+			err = s.stack.Input(s.conn, data)
+		})
+
+		return err
 	} else {
 		return s.stack.Input(s.conn, data)
 	}

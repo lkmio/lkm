@@ -19,7 +19,8 @@ func (u *UDPSource) SetupType() SetupType {
 // OnOrderedRtp 有序RTP包回调
 func (u *UDPSource) OnOrderedRtp(packet *rtp.Packet) {
 	// 此时还在网络收流携程, 交给Source的主协程处理
-	u.PublishSource.Input(packet.Raw)
+	u.ProcessPacket(packet.Raw)
+	stream.UDPReceiveBufferPool.Put(packet.Raw[:cap(packet.Raw)])
 }
 
 // InputRtpPacket 将RTP包排序后，交给Source的主协程处理

@@ -35,35 +35,21 @@ func (T *TCPServer) OnCloseSession(session *TCPSession) {
 
 func (T *TCPServer) OnConnected(conn net.Conn) []byte {
 	T.StreamServer.OnConnected(conn)
-	return stream.TCPReceiveBufferPool.Get().([]byte)
+	return conn.(*transport.Conn).Data.(*TCPSession).receiveBuffer
 }
 
 func (T *TCPServer) OnPacket(conn net.Conn, data []byte) []byte {
 	T.StreamServer.OnPacket(conn, data)
 	session := conn.(*transport.Conn).Data.(*TCPSession)
 
-	// 单端口推流时, 先解析出SSRC找到GBSource. 后序将推流数据交给stream.Source处理
-	if session.source == nil {
-		source, err := DecodeGBRTPOverTCPPacket(data, nil, session.decoder, T.filter, conn)
-		if err != nil {
-			log.Sugar.Errorf("解析rtp失败 err: %s conn: %s data: %s", err.Error(), conn.RemoteAddr().String(), hex.EncodeToString(data))
-			_ = conn.Close()
-			return nil
-		}
-
-		if source != nil {
-			session.Init(source)
-		}
-	} else {
-		// 将流交给Source的主协程处理，主协程最终会调用PassiveSource的Input函数处理
-		if session.source.SetupType() == SetupPassive {
-			session.source.(*PassiveSource).PublishSource.Input(data)
-		} else {
-			session.source.(*ActiveSource).PublishSource.Input(data)
-		}
+	err := session.DecodeGBRTPOverTCPPacket(data, T.filter, conn)
+	if err != nil {
+		log.Sugar.Errorf("解析rtp失败 err: %s conn: %s data: %s", err.Error(), conn.RemoteAddr().String(), hex.EncodeToString(data))
+		_ = conn.Close()
+		return nil
 	}
 
-	return stream.TCPReceiveBufferPool.Get().([]byte)
+	return session.receiveBuffer
 }
 
 func NewTCPServer(filter Filter) (*TCPServer, error) {

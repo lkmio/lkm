@@ -1,7 +1,6 @@
 package gb28181
 
 import (
-	"github.com/lkmio/transport"
 	"net"
 )
 
@@ -35,9 +34,6 @@ func NewActiveSource() (*ActiveSource, int, error) {
 	})
 
 	return &ActiveSource{
-		PassiveSource: PassiveSource{
-			decoder: transport.NewLengthFieldFrameDecoder(0xFFFF, 2),
-		},
 		port: port,
 	}, port, nil
 }

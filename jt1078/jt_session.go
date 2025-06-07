@@ -11,15 +11,16 @@ import (
 
 type Session struct {
 	stream.PublishSource
-	decoder *transport.DelimiterFrameDecoder
+	decoder       *transport.DelimiterFrameDecoder
+	receiveBuffer []byte
 }
 
-func (s *Session) Input(data []byte) error {
+func (s *Session) Input(data []byte) (int, error) {
 	var n int
 	for length := len(data); n < length; {
 		i, bytes, err := s.decoder.Input(data[n:])
 		if err != nil {
-			return err
+			return -1, err
 		} else if len(bytes) < 1 {
 			break
 		}
@@ -27,9 +28,9 @@ func (s *Session) Input(data []byte) error {
 		n += i
 		demuxer := s.TransDemuxer.(*Demuxer)
 		firstOfPacket := demuxer.prevPacket == nil
-		_, err = demuxer.Input(bytes)
+		_, err = s.PublishSource.Input(bytes)
 		if err != nil {
-			return err
+			return -1, err
 		}
 
 		// 首包处理, hook通知
@@ -49,7 +50,7 @@ func (s *Session) Input(data []byte) error {
 		}
 	}
 
-	return nil
+	return 0, nil
 }
 
 func (s *Session) Close() {
@@ -61,6 +62,7 @@ func (s *Session) Close() {
 	}
 
 	s.PublishSource.Close()
+	stream.TCPReceiveBufferPool.Put(s.receiveBuffer[:cap(s.receiveBuffer)])
 }
 
 func NewSession(conn net.Conn) *Session {
@@ -72,11 +74,12 @@ func NewSession(conn net.Conn) *Session {
 			TransDemuxer: NewDemuxer(),
 		},
 
-		decoder: transport.NewDelimiterFrameDecoder(1024*1024*2, delimiter[:]),
+		decoder:       transport.NewDelimiterFrameDecoder(1024*1024*2, delimiter[:]),
+		receiveBuffer: stream.TCPReceiveBufferPool.Get().([]byte),
 	}
 
 	session.TransDemuxer.SetHandler(&session)
-	session.Init(stream.TCPReceiveBufferQueueSize)
-	go stream.LoopEvent(&session)
+	session.Init()
+	stream.LoopEvent(&session)
 	return &session
 }

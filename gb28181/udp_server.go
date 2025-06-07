@@ -16,18 +16,11 @@ type UDPServer struct {
 	filter Filter
 }
 
-func (U *UDPServer) OnNewSession(conn net.Conn) *UDPSource {
+func (U *UDPServer) OnNewSession(_ net.Conn) *UDPSource {
 	return nil
 }
 
-func (U *UDPServer) OnCloseSession(session *UDPSource) {
-	U.filter.RemoveSource(session.SSRC())
-	session.Close()
-
-	if stream.AppConfig.GB28181.IsMultiPort() {
-		U.udp.Close()
-		U.Handler = nil
-	}
+func (U *UDPServer) OnCloseSession(_ *UDPSource) {
 }
 
 func (U *UDPServer) OnPacket(conn net.Conn, data []byte) []byte {
@@ -52,7 +45,7 @@ func (U *UDPServer) OnPacket(conn net.Conn, data []byte) []byte {
 	}
 
 	packet.Raw = data
-	source.(*UDPSource).InputRtpPacket(&packet)
+	_ = source.(*UDPSource).InputRtpPacket(&packet)
 	return nil
 }
 

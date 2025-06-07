@@ -46,11 +46,6 @@ type TalkSource struct {
 	stream.PublishSource
 }
 
-func (s *TalkSource) Input(data []byte) error {
-	_, err := s.PublishSource.TransDemuxer.Input(data)
-	return err
-}
-
 func (s *TalkSource) Close() {
 	s.PublishSource.Close()
 	// 关闭所有对讲设备的会话

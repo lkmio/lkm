@@ -10,9 +10,10 @@ import (
 
 // TCPSession 国标TCP主被动推流Session, 统一处理TCP粘包.
 type TCPSession struct {
-	conn    net.Conn
-	source  GBSource
-	decoder *transport.LengthFieldFrameDecoder
+	conn          net.Conn
+	source        GBSource
+	decoder       *transport.LengthFieldFrameDecoder
+	receiveBuffer []byte
 }
 
 func (t *TCPSession) Init(source GBSource) {
@@ -25,14 +26,17 @@ func (t *TCPSession) Close() {
 		t.source.Close()
 		t.source = nil
 	}
+
+	stream.TCPReceiveBufferPool.Put(t.receiveBuffer[:cap(t.receiveBuffer)])
 }
 
-func DecodeGBRTPOverTCPPacket(data []byte, source GBSource, decoder *transport.LengthFieldFrameDecoder, filter Filter, conn net.Conn) (GBSource, error) {
+func (t *TCPSession) DecodeGBRTPOverTCPPacket(data []byte, filter Filter, conn net.Conn) error {
 	length := len(data)
 	for i := 0; i < length; {
-		n, bytes, err := decoder.Input(data[i:])
+		// 解析粘包数据
+		n, bytes, err := t.decoder.Input(data[i:])
 		if err != nil {
-			return source, err
+			return err
 		}
 
 		i += n
@@ -41,40 +45,38 @@ func DecodeGBRTPOverTCPPacket(data []byte, source GBSource, decoder *transport.L
 		}
 
 		// 单端口模式,ssrc匹配source
-		if source == nil || stream.SessionStateHandshakeSuccess == source.State() {
+		if t.source == nil || stream.SessionStateHandshakeSuccess == t.source.State() {
 			packet := rtp.Packet{}
-			if err := packet.Unmarshal(bytes); err != nil {
-				return nil, err
-			} else if source == nil {
-				source = filter.FindSource(packet.SSRC)
+			if err = packet.Unmarshal(bytes); err != nil {
+				return err
+			} else if t.source == nil {
+				t.source = filter.FindSource(packet.SSRC)
 			}
 
-			if source == nil {
+			if t.source == nil {
 				// ssrc 匹配不到Source
-				return nil, fmt.Errorf("gb28181推流失败 ssrc: %x 匹配不到source", packet.SSRC)
+				return fmt.Errorf("gb28181推流失败 ssrc: %x 匹配不到source", packet.SSRC)
 			}
 
-			if stream.SessionStateHandshakeSuccess == source.State() {
-				source.PreparePublish(conn, packet.SSRC, source)
+			if stream.SessionStateHandshakeSuccess == t.source.State() {
+				t.source.PreparePublish(conn, packet.SSRC, t.source)
 			}
 		}
 
-		// 如果是单端口推流, 并且刚才与source绑定, 此时正位于网络收流协程, 否则都位于主协程
-		if source.SetupType() == SetupPassive {
-			source.(*PassiveSource).BaseGBSource.Input(bytes)
-		} else {
-			source.(*ActiveSource).BaseGBSource.Input(bytes)
+		if err = t.source.ProcessPacket(bytes); err != nil {
+			return err
 		}
 	}
 
-	return source, nil
+	return nil
 }
 
 func NewTCPSession(conn net.Conn, filter Filter) *TCPSession {
 	session := &TCPSession{
 		conn: conn,
 		// filter:  filter,
-		decoder: transport.NewLengthFieldFrameDecoder(0xFFFF, 2),
+		decoder:       transport.NewLengthFieldFrameDecoder(0xFFFF, 2),
+		receiveBuffer: stream.TCPReceiveBufferPool.Get().([]byte),
 	}
 
 	// 多端口收流, Source已知, 直接初始化Session

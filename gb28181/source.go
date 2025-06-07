@@ -83,15 +83,16 @@ type GBSource interface {
 	SetSSRC(ssrc uint32)
 
 	SSRC() uint32
+
+	ProcessPacket(data []byte) error
 }
 
 type BaseGBSource struct {
 	stream.PublishSource
 
+	transport   transport.Transport
 	probeBuffer *mpeg.PSProbeBuffer
-
-	ssrc      uint32
-	transport transport.Transport
+	ssrc        uint32
 
 	audioTimestamp         int64
 	videoTimestamp         int64
@@ -102,7 +103,7 @@ type BaseGBSource struct {
 	sameTimePackets        [][]byte
 }
 
-func (source *BaseGBSource) Init(receiveQueueSize int) {
+func (source *BaseGBSource) Init() {
 	source.TransDemuxer = mpeg.NewPSDemuxer(false)
 	source.TransDemuxer.SetHandler(source)
 	source.TransDemuxer.SetOnPreprocessPacketHandler(func(packet *avformat.AVPacket) {
@@ -110,12 +111,12 @@ func (source *BaseGBSource) Init(receiveQueueSize int) {
 	})
 	source.SetType(stream.SourceType28181)
 	source.probeBuffer = mpeg.NewProbeBuffer(PsProbeBufferSize)
-	source.PublishSource.Init(receiveQueueSize)
+	source.PublishSource.Init()
 	source.lastRtpTimestamp = -1
 }
 
-// Input 输入rtp包, 处理PS流, 负责解析->封装->推流
-func (source *BaseGBSource) Input(data []byte) error {
+// ProcessPacket 输入rtp包, 处理PS流, 负责解析->封装->推流
+func (source *BaseGBSource) ProcessPacket(data []byte) error {
 	packet := rtp.Packet{}
 	_ = packet.Unmarshal(data)
 
@@ -150,7 +151,7 @@ func (source *BaseGBSource) Input(data []byte) error {
 	var err error
 	bytes, err = source.probeBuffer.Input(packet.Payload)
 	if err == nil {
-		n, err = source.TransDemuxer.Input(bytes)
+		n, err = source.PublishSource.Input(bytes)
 	}
 
 	// 非解析缓冲区满的错误, 继续解析
@@ -347,20 +348,13 @@ func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, int, 
 		}
 	}
 
-	var queueSize int
-	if active || tcp {
-		queueSize = stream.TCPReceiveBufferQueueSize
-	} else {
-		queueSize = stream.UDPReceiveBufferQueueSize
-	}
-
 	source.SetID(id)
 	source.SetSSRC(ssrc)
-	source.Init(queueSize)
+	source.Init()
 	if _, state := stream.PreparePublishSource(source, false); utils.HookStateOK != state {
 		return nil, 0, fmt.Errorf("error code %d", state)
 	}
 
-	go stream.LoopEvent(source)
+	stream.LoopEvent(source)
 	return source, port, err
 }
