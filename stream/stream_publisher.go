@@ -87,13 +87,14 @@ type transStreamPublisher struct {
 	sinks              map[SinkID]Sink                   // 保存所有Sink
 	transStreamSinks   map[TransStreamID]map[SinkID]Sink // 输出流对应的Sink
 
-	existVideo           bool        // 是否存在视频
-	completed            atomic.Bool // 所有推流track是否解析完毕, @see writeHeader 函数中赋值为true
-	closed               atomic.Bool
-	streamEndInfo        *StreamEndInfo // 之前推流源信息
-	accumulateTimestamps bool           // 是否累加时间戳
-	timestampModeDecided bool           // 是否已经决定使用推流的时间戳，或者累加时间戳
-	lastStreamEndTime    time.Time      // 最近拉流端结束拉流的时间
+	existVideo            bool        // 是否存在视频
+	completed             atomic.Bool // 所有推流track是否解析完毕, @see writeHeader 函数中赋值为true
+	closed                atomic.Bool
+	streamEndInfo         *StreamEndInfo             // 之前推流源信息
+	accumulateTimestamps  bool                       // 是否累加时间戳
+	timestampModeDecided  bool                       // 是否已经决定使用推流的时间戳，或者累加时间戳
+	lastStreamEndTime     time.Time                  // 最近拉流端结束拉流的时间
+	bitstreamFilterBuffer *collections.RBBlockBuffer // annexb和avcc转换的缓冲区
 }
 
 func (t *transStreamPublisher) Post(event *StreamEvent) {
@@ -493,9 +494,7 @@ func (t *transStreamPublisher) doClose() {
 
 	// 释放GOP缓存
 	if t.gopBuffer != nil {
-		t.gopBuffer.PopAll(func(packet *collections.ReferenceCounter[*avformat.AVPacket]) {
-			packet.Release()
-		})
+		t.ClearGopBuffer()
 		t.gopBuffer = nil
 	}
 
@@ -597,9 +596,7 @@ func (t *transStreamPublisher) WriteHeader() {
 
 	// 如果不存在视频帧, 清空GOP缓存
 	if !t.existVideo {
-		t.gopBuffer.PopAll(func(c *collections.ReferenceCounter[*avformat.AVPacket]) {
-			c.Refer()
-		})
+		t.ClearGopBuffer()
 		t.gopBuffer = nil
 	}
 }
@@ -616,14 +613,30 @@ func (t *transStreamPublisher) Sinks() []Sink {
 	return sinks
 }
 
+func (t *transStreamPublisher) ClearGopBuffer() {
+	t.gopBuffer.PopAll(func(packet *collections.ReferenceCounter[*avformat.AVPacket]) {
+		packet.Release()
+
+		if t.bitstreamFilterBuffer != nil {
+			t.bitstreamFilterBuffer.Pop()
+		}
+	})
+}
+
 func (t *transStreamPublisher) OnPacket(packet *collections.ReferenceCounter[*avformat.AVPacket]) {
 	// 保存到GOP缓存
 	if (AppConfig.GOPCache && t.existVideo) || !t.completed.Load() {
+		packet.Get().OnBufferAlloc = func(size int) []byte {
+			if t.bitstreamFilterBuffer == nil {
+				t.bitstreamFilterBuffer = collections.NewRBBlockBuffer(1024 * 1024 * 2)
+			}
+
+			return t.bitstreamFilterBuffer.Alloc(size)
+		}
+
 		// GOP队列溢出
 		if t.gopBuffer.RequiresClear(packet) {
-			t.gopBuffer.PopAll(func(packet *collections.ReferenceCounter[*avformat.AVPacket]) {
-				packet.Release()
-			})
+			t.ClearGopBuffer()
 		}
 
 		t.gopBuffer.AddPacket(packet)
@@ -639,11 +652,11 @@ func (t *transStreamPublisher) OnPacket(packet *collections.ReferenceCounter[*av
 				t.DispatchPacket(transStream, packet.Get())
 			}
 		}
-	}
 
-	// 未开启GOP缓存或只存在音频流, 立即释放
-	if !AppConfig.GOPCache || !t.existVideo {
-		packet.Release()
+		// 未开启GOP缓存或只存在音频流, 立即释放
+		if !AppConfig.GOPCache || !t.existVideo {
+			packet.Release()
+		}
 	}
 }
 
