@@ -65,11 +65,7 @@ func (s *server) OnPacket(conn net.Conn, data []byte) []byte {
 		_ = conn.Close()
 	}
 
-	if session.isPublisher {
-		return stream.TCPReceiveBufferPool.Get().([]byte)
-	}
-
-	return nil
+	return session.receiveBuffer
 }
 
 func NewServer() Server {
