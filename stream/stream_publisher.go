@@ -464,7 +464,7 @@ func (t *transStreamPublisher) FindSink(id SinkID) Sink {
 	return result
 }
 
-func (t *transStreamPublisher) cleanupSinkStreaming(sink Sink) {
+func (t *transStreamPublisher) clearSinkStreaming(sink Sink) {
 	transStreamSinks := t.transStreamSinks[sink.GetTransStreamID()]
 	delete(transStreamSinks, sink.GetID())
 	t.lastStreamEndTime = time.Now()
@@ -472,7 +472,7 @@ func (t *transStreamPublisher) cleanupSinkStreaming(sink Sink) {
 }
 
 func (t *transStreamPublisher) doRemoveSink(sink Sink) bool {
-	t.cleanupSinkStreaming(sink)
+	t.clearSinkStreaming(sink)
 	delete(t.sinks, sink.GetID())
 
 	t.sinkCount--
@@ -494,7 +494,7 @@ func (t *transStreamPublisher) doClose() {
 
 	// 释放GOP缓存
 	if t.gopBuffer != nil {
-		t.ClearGopBuffer()
+		t.ClearGopBuffer(true)
 		t.gopBuffer = nil
 	}
 
@@ -596,7 +596,7 @@ func (t *transStreamPublisher) WriteHeader() {
 
 	// 如果不存在视频帧, 清空GOP缓存
 	if !t.existVideo {
-		t.ClearGopBuffer()
+		t.ClearGopBuffer(false)
 		t.gopBuffer = nil
 	}
 }
@@ -613,10 +613,14 @@ func (t *transStreamPublisher) Sinks() []Sink {
 	return sinks
 }
 
-func (t *transStreamPublisher) ClearGopBuffer() {
+// ClearGopBuffer 清空GOP缓存, 在关闭stream publisher时, free为true, AVPacket放回池中. 如果free为false, 由Source放回池中.
+func (t *transStreamPublisher) ClearGopBuffer(free bool) {
 	t.gopBuffer.PopAll(func(packet *collections.ReferenceCounter[*avformat.AVPacket]) {
-		packet.Release()
+		if packet.Release() && free {
+			avformat.FreePacket(packet.Get())
+		}
 
+		// 释放annexb和avcc格式转换的缓存
 		if t.bitstreamFilterBuffer != nil {
 			t.bitstreamFilterBuffer.Pop()
 		}
@@ -636,7 +640,7 @@ func (t *transStreamPublisher) OnPacket(packet *collections.ReferenceCounter[*av
 
 		// GOP队列溢出
 		if t.gopBuffer.RequiresClear(packet) {
-			t.ClearGopBuffer()
+			t.ClearGopBuffer(false)
 		}
 
 		t.gopBuffer.AddPacket(packet)
