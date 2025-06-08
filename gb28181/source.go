@@ -121,7 +121,7 @@ func (source *BaseGBSource) ProcessPacket(data []byte) error {
 	_ = packet.Unmarshal(data)
 
 	// 国标级联转发
-	if source.GetTransStreamPublisher().GetTransStreams() != nil {
+	if source.GetTransStreamPublisher().GetForwardTransStream() != nil {
 		if source.lastRtpTimestamp == -1 {
 			source.lastRtpTimestamp = int64(packet.Timestamp)
 		}
