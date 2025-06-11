@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"fmt"
 	"github.com/lkmio/avformat"
 	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/avformat/utils"
@@ -190,7 +191,8 @@ func (t *transStreamPublisher) CreateDefaultOutStreams() {
 		id := GenerateTransStreamID(TransStreamHls, streams...)
 		hlsStream, err := t.CreateTransStream(id, TransStreamHls, streams, nil)
 		if err != nil {
-			panic(err)
+			log.Sugar.Errorf("创建HLS输出流失败 source: %s err: %s", t.source, err.Error())
+			return
 		}
 
 		t.DispatchGOPBuffer(hlsStream)
@@ -214,16 +216,34 @@ func (t *transStreamPublisher) CreateTransStream(id TransStreamID, protocol Tran
 	utils.Assert(source != nil)
 	transStream, err := CreateTransStream(source, protocol, tracks, sink)
 	if err != nil {
-		log.Sugar.Errorf("创建传输流失败 err: %s source: %s", err.Error(), t.source)
 		return nil, err
 	}
 
 	for _, track := range tracks {
+		supportedCodecs, ok := SupportedCodes[protocol]
+		if !ok {
+			panic(fmt.Sprintf("unknown protocol %s", protocol.String()))
+		}
+
+		_, ok = supportedCodecs[track.Stream.CodecID]
+		if !ok {
+			log.Sugar.Warnf("不支持的编码器 %s %s", protocol.String(), track.Stream.CodecID)
+		}
+
+		var index int
 		// 重新拷贝一个track，传输流内部使用track的时间戳，
 		newTrack := *track
-		if err = transStream.AddTrack(&newTrack); err != nil {
-			return nil, err
+		if index, err = transStream.AddTrack(&newTrack); err != nil {
+			log.Sugar.Errorf("添加track失败 err: %s source: %s stream: %s, codec: %s ", err.Error(), t.source, protocol, track.Stream.CodecID)
+			continue
 		}
+
+		// stream index->muxer track index
+		transStream.SetMuxerTrack(index, &newTrack)
+	}
+
+	if transStream.TrackSize() == 0 {
+		return nil, fmt.Errorf("not found track")
 	}
 
 	transStream.SetID(id)
@@ -251,12 +271,17 @@ func (t *transStreamPublisher) DispatchGOPBuffer(transStream TransStream) {
 
 // DispatchPacket 分发AVPacket
 func (t *transStreamPublisher) DispatchPacket(transStream TransStream, packet *avformat.AVPacket) {
-	data, timestamp, videoKey, err := transStream.Input(packet)
+	trackIndex, ok := transStream.FindMuxerTrackIndex(packet.Index)
+	if !ok {
+		return
+	}
+
+	data, timestamp, videoKey, err := transStream.Input(packet, trackIndex)
 	if err != nil || len(data) < 1 {
 		return
 	}
 
-	t.DispatchBuffer(transStream, packet.Index, data, timestamp, videoKey)
+	t.DispatchBuffer(transStream, trackIndex, data, timestamp, videoKey)
 }
 
 // DispatchBuffer 分发传输流
@@ -370,14 +395,14 @@ func (t *transStreamPublisher) doAddSink(sink Sink, resume bool) bool {
 
 	{
 		sink.Lock()
-		defer sink.UnLock()
-
 		if SessionStateClosed == sink.GetState() {
+			sink.UnLock()
 			log.Sugar.Warnf("添加sink失败, sink已经断开连接 %s", sink.String())
 			return false
 		} else {
 			sink.SetState(SessionStateTransferring)
 		}
+		sink.UnLock()
 	}
 
 	err := sink.StartStreaming(transStream)
@@ -408,13 +433,13 @@ func (t *transStreamPublisher) doAddSink(sink Sink, resume bool) bool {
 
 	// 发送已有的缓存数据
 	// 此处发送缓存数据，必须要存在关键帧的输出流才发，否则等DispatchPacket时再发送extra。
-	data, timestamp, _ := transStream.ReadKeyFrameBuffer()
-	if len(data) > 0 {
+	keyBuffer, timestamp, _ := transStream.ReadKeyFrameBuffer()
+	if len(keyBuffer) > 0 {
 		if extraData, _, _ := transStream.ReadExtraData(timestamp); len(extraData) > 0 {
 			t.write(sink, 0, extraData, timestamp, false)
 		}
 
-		t.write(sink, 0, data, timestamp, true)
+		t.write(sink, 0, keyBuffer, timestamp, true)
 	}
 
 	// 新建传输流，发送已经缓存的音视频帧

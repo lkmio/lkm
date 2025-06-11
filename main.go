@@ -2,11 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	flv2 "github.com/lkmio/flv"
 	"github.com/lkmio/lkm/flv"
 	"github.com/lkmio/lkm/hls"
 	"github.com/lkmio/lkm/jt1078"
 	"github.com/lkmio/lkm/record"
 	"github.com/lkmio/lkm/rtsp"
+	"github.com/lkmio/mpeg"
+	"github.com/lkmio/rtp"
 	"github.com/lkmio/transport"
 	"os"
 	"time"
@@ -24,14 +27,14 @@ import (
 )
 
 func init() {
-	stream.RegisterTransStreamFactory(stream.TransStreamRtmp, rtmp.TransStreamFactory)
-	stream.RegisterTransStreamFactory(stream.TransStreamHls, hls.TransStreamFactory)
-	stream.RegisterTransStreamFactory(stream.TransStreamFlv, flv.TransStreamFactory)
-	stream.RegisterTransStreamFactory(stream.TransStreamRtsp, rtsp.TransStreamFactory)
-	stream.RegisterTransStreamFactory(stream.TransStreamRtc, rtc.TransStreamFactory)
-	stream.RegisterTransStreamFactory(stream.TransStreamGBCascaded, stream.GBCascadedTransStreamFactory)
-	stream.RegisterTransStreamFactory(stream.TransStreamGBTalk, gb28181.TalkTransStreamFactory)
-	stream.RegisterTransStreamFactory(stream.TransStreamGBGateway, gb28181.GatewayTransStreamFactory)
+	stream.RegisterTransStreamFactory(stream.TransStreamRtmp, rtmp.TransStreamFactory, flv2.SupportedCodecs)
+	stream.RegisterTransStreamFactory(stream.TransStreamHls, hls.TransStreamFactory, mpeg.SupportedCodecs)
+	stream.RegisterTransStreamFactory(stream.TransStreamFlv, flv.TransStreamFactory, flv2.SupportedCodecs)
+	stream.RegisterTransStreamFactory(stream.TransStreamRtsp, rtsp.TransStreamFactory, rtp.SupportedCodecs)
+	stream.RegisterTransStreamFactory(stream.TransStreamRtc, rtc.TransStreamFactory, rtc.SupportedCodecs)
+	stream.RegisterTransStreamFactory(stream.TransStreamGBCascaded, stream.GBCascadedTransStreamFactory, mpeg.SupportedCodecs)
+	stream.RegisterTransStreamFactory(stream.TransStreamGBTalk, gb28181.TalkTransStreamFactory, mpeg.SupportedCodecs)
+	stream.RegisterTransStreamFactory(stream.TransStreamGBGateway, gb28181.GatewayTransStreamFactory, mpeg.SupportedCodecs)
 	stream.SetRecordStreamFactory(record.NewFLVFileSink)
 	stream.StreamEndInfoBride = NewStreamEndInfo
 

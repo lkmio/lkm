@@ -37,9 +37,9 @@ func NewStreamEndInfo(source string, tracks []*stream.Track, streams map[stream.
 			}
 		} else if stream.TransStreamRtsp == transStream.GetProtocol() {
 			if rtsp := transStream.(*rtsp.TransStream); len(rtsp.Tracks) > 0 {
-				info.RtspTracks = make(map[byte]uint16, len(tracks))
+				info.RtspTracks = make(map[int]uint16, len(tracks))
 				for _, track := range rtsp.RtspTracks {
-					info.RtspTracks[track.PT] = track.EndSeq
+					info.RtspTracks[int(track.CodecID)] = track.EndSeq
 				}
 			}
 		} else if stream.TransStreamFlv == transStream.GetProtocol() {

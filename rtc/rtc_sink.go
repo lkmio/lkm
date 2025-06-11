@@ -41,27 +41,11 @@ func (s *Sink) StartStreaming(transStream stream.TransStream) error {
 
 	tracks := transStream.GetTracks()
 	for index, track := range tracks {
-		var mimeType string
 		var id string
 		codecId := track.Stream.CodecID
-		if utils.AVCodecIdH264 == codecId {
-			mimeType = webrtc.MimeTypeH264
-		} else if utils.AVCodecIdH265 == codecId {
-			mimeType = webrtc.MimeTypeH265
-		} else if utils.AVCodecIdAV1 == codecId {
-			mimeType = webrtc.MimeTypeAV1
-		} else if utils.AVCodecIdVP8 == codecId {
-			mimeType = webrtc.MimeTypeVP8
-		} else if utils.AVCodecIdVP9 == codecId {
-			mimeType = webrtc.MimeTypeVP9
-		} else if utils.AVCodecIdOPUS == codecId {
-			mimeType = webrtc.MimeTypeOpus
-		} else if utils.AVCodecIdPCMALAW == codecId {
-			mimeType = webrtc.MimeTypePCMA
-		} else if utils.AVCodecIdPCMMULAW == codecId {
-			mimeType = webrtc.MimeTypePCMU
-		} else {
-			log.Sugar.Errorf("codec %s not compatible with webrtc", codecId)
+		mimeType, ok := SupportedCodecs[codecId]
+		if !ok {
+			log.Sugar.Errorf("unsupported codec: %s", codecId)
 			continue
 		}
 
@@ -71,7 +55,7 @@ func (s *Sink) StartStreaming(transStream stream.TransStream) error {
 			id = "video"
 		}
 
-		remoteTrack, err = webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: mimeType}, id, "pion")
+		remoteTrack, err = webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: mimeType.(string)}, id, "pion")
 		if err != nil {
 			return err
 		}

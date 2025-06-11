@@ -21,11 +21,12 @@ func init() {
 		int(utils.AVCodecIdVP8):  0x5,
 		int(utils.AVCodecIdVP9):  0x6,
 
-		int(utils.AVCodecIdAAC):      101,
-		int(utils.AVCodecIdMP3):      102,
-		int(utils.AVCodecIdOPUS):     103,
-		int(utils.AVCodecIdPCMALAW):  104,
-		int(utils.AVCodecIdPCMMULAW): 105,
+		int(utils.AVCodecIdAAC):       101,
+		int(utils.AVCodecIdMP3):       102,
+		int(utils.AVCodecIdOPUS):      103,
+		int(utils.AVCodecIdPCMALAW):   104,
+		int(utils.AVCodecIdPCMMULAW):  105,
+		int(utils.AVCodecIdADPCMG722): 106,
 	}
 }
 
@@ -58,7 +59,9 @@ func GenerateTransStreamID(protocol TransStreamProtocol, tracks ...*Track) Trans
 
 	for i, track := range tracks {
 		id, ok := narrowCodecIds[int(track.Stream.CodecID)]
-		utils.Assert(ok)
+		if ok {
+			id = byte(track.Stream.CodecID)
+		}
 
 		streamId |= uint64(id) << (48 - i*8)
 	}

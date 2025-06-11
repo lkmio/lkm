@@ -29,7 +29,7 @@ type TransStream struct {
 
 	RtspTracks []*Track
 	//oldTracks  []*Track
-	oldTracks map[byte]uint16
+	oldTracks map[int]uint16
 	sdp       string
 
 	rtpBuffer *stream.RtpBuffer
@@ -41,18 +41,18 @@ func (t *TransStream) OverTCP(data []byte, channel int) {
 	binary.BigEndian.PutUint16(data[2:], uint16(len(data)-4))
 }
 
-func (t *TransStream) Input(packet *avformat.AVPacket) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
+func (t *TransStream) Input(packet *avformat.AVPacket, trackIndex int) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
 	var ts uint32
 	var result []*collections.ReferenceCounter[[]byte]
-	track := t.RtspTracks[packet.Index]
+	track := t.RtspTracks[trackIndex]
 	if utils.AVMediaTypeAudio == packet.MediaType {
-		ts = uint32(packet.ConvertPts(track.Rate))
-		result = t.PackRtpPayload(track, packet.Index, packet.Data, ts)
+		ts = uint32(packet.ConvertPts(track.payload.ClockRate))
+		result = t.PackRtpPayload(track, trackIndex, packet.Data, ts)
 	} else if utils.AVMediaTypeVideo == packet.MediaType {
-		ts = uint32(packet.ConvertPts(track.Rate))
-		annexBData := avformat.AVCCPacket2AnnexB(t.BaseTransStream.Tracks[packet.Index].Stream, packet)
+		ts = uint32(packet.ConvertPts(track.payload.ClockRate))
+		annexBData := avformat.AVCCPacket2AnnexB(t.BaseTransStream.Tracks[trackIndex].Stream, packet)
 		data := avc.RemoveStartCode(annexBData)
-		result = t.PackRtpPayload(track, packet.Index, data, ts)
+		result = t.PackRtpPayload(track, trackIndex, data, ts)
 	}
 
 	return result, int64(ts), utils.AVMediaTypeVideo == packet.MediaType && packet.Key, nil
@@ -110,36 +110,24 @@ func (t *TransStream) PackRtpPayload(track *Track, channel int, data []byte, tim
 	return result
 }
 
-func (t *TransStream) AddTrack(track *stream.Track) error {
-	if err := t.BaseTransStream.AddTrack(track); err != nil {
-		return err
-	}
-
-	payloadType, ok := rtp.CodecIdPayloads[track.Stream.CodecID]
-	if !ok {
-		return fmt.Errorf("no payload type was found for codecid: %d", track.Stream.CodecID)
-	}
-
+func (t *TransStream) AddTrack(track *stream.Track) (int, error) {
 	// 恢复上次拉流的序号
 	var startSeq uint16
 	if t.oldTracks != nil {
-		startSeq, ok = t.oldTracks[byte(payloadType.Pt)]
+		var ok bool
+		startSeq, ok = t.oldTracks[int(track.Stream.CodecID)]
 		utils.Assert(ok)
 	}
 
-	// 创建RTP封装器
-	var muxer rtp.Muxer
-	if utils.AVCodecIdH264 == track.Stream.CodecID {
-		muxer = rtp.NewH264Muxer(payloadType.Pt, int(startSeq), 0xFFFFFFFF)
-	} else if utils.AVCodecIdH265 == track.Stream.CodecID {
-		muxer = rtp.NewH265Muxer(payloadType.Pt, int(startSeq), 0xFFFFFFFF)
-	} else if utils.AVCodecIdAAC == track.Stream.CodecID {
-		muxer = rtp.NewAACMuxer(payloadType.Pt, int(startSeq), 0xFFFFFFFF)
-	} else if utils.AVCodecIdPCMALAW == track.Stream.CodecID || utils.AVCodecIdPCMMULAW == track.Stream.CodecID {
-		muxer = rtp.NewMuxer(payloadType.Pt, int(startSeq), 0xFFFFFFFF)
-	}
+	// 查找RTP封装器和PayloadType
+	newMuxerFunc := rtp.SupportedCodecs[track.Stream.CodecID]
+	utils.Assert(newMuxerFunc != nil)
 
-	rtspTrack := NewRTSPTrack(muxer, byte(payloadType.Pt), payloadType.ClockRate, track.Stream.MediaType)
+	// 创建RTP封装器
+	muxer, payload := newMuxerFunc.(func(seq int, ssrc uint32) (rtp.Muxer, rtp.PayloadType))(int(startSeq), 0xFFFFFFFF)
+
+	// 创建track
+	rtspTrack := NewRTSPTrack(muxer, payload, track.Stream.MediaType, track.Stream.CodecID)
 	t.RtspTracks = append(t.RtspTracks, rtspTrack)
 	trackIndex := len(t.RtspTracks) - 1
 
@@ -170,7 +158,7 @@ func (t *TransStream) AddTrack(track *stream.Track) error {
 		t.RtspTracks[trackIndex].ExtraDataBuffer = extraDataPackets
 	}
 
-	return nil
+	return trackIndex, nil
 }
 
 func (t *TransStream) Close() ([]*collections.ReferenceCounter[[]byte], int64, error) {
@@ -206,8 +194,7 @@ func (t *TransStream) WriteHeader() error {
 		},
 	}
 
-	for i, track := range t.Tracks {
-		payloadType, _ := rtp.CodecIdPayloads[track.Stream.CodecID]
+	for i, track := range t.RtspTracks {
 		mediaDescription := sdp.MediaDescription{
 			ConnectionInformation: &sdp.ConnectionInformation{
 				NetworkType: "IN",
@@ -218,17 +205,17 @@ func (t *TransStream) WriteHeader() error {
 			Attributes: []sdp.Attribute{
 				sdp.NewAttribute("recvonly", ""),
 				sdp.NewAttribute("control:"+fmt.Sprintf(t.urlFormat, i), ""),
-				sdp.NewAttribute(fmt.Sprintf("rtpmap:%d %s/%d", payloadType.Pt, payloadType.Encoding, payloadType.ClockRate), ""),
+				sdp.NewAttribute(fmt.Sprintf("rtpmap:%d %s/%d", track.payload.Pt, track.payload.Encoding, track.payload.ClockRate), ""),
 			},
 		}
 
 		mediaDescription.MediaName.Protos = []string{"RTP", "AVP"}
-		mediaDescription.MediaName.Formats = []string{strconv.Itoa(payloadType.Pt)}
+		mediaDescription.MediaName.Formats = []string{strconv.Itoa(track.payload.Pt)}
 
-		if utils.AVMediaTypeAudio == track.Stream.MediaType {
+		if utils.AVMediaTypeAudio == track.MediaType {
 			mediaDescription.MediaName.Media = "audio"
 
-			if utils.AVCodecIdAAC == track.Stream.CodecID {
+			if utils.AVCodecIdAAC == track.CodecID {
 				//[14496-3], [RFC6416] profile-level-id:
 				//1 : Main Audio Profile Level 1
 				//9 : Speech Audio Profile Level 1
@@ -267,7 +254,7 @@ func (t *TransStream) WriteHeader() error {
 	return nil
 }
 
-func NewTransStream(addr net.IPAddr, urlFormat string, oldTracks map[byte]uint16) stream.TransStream {
+func NewTransStream(addr net.IPAddr, urlFormat string, oldTracks map[int]uint16) stream.TransStream {
 	t := &TransStream{
 		addr:      addr,
 		urlFormat: urlFormat,
@@ -286,7 +273,7 @@ func NewTransStream(addr net.IPAddr, urlFormat string, oldTracks map[byte]uint16
 
 func TransStreamFactory(source stream.Source, _ stream.TransStreamProtocol, _ []*stream.Track, _ stream.Sink) (stream.TransStream, error) {
 	trackFormat := "?track=%d"
-	var oldTracks map[byte]uint16
+	var oldTracks map[int]uint16
 	if endInfo := source.GetTransStreamPublisher().GetStreamEndInfo(); endInfo != nil {
 		oldTracks = endInfo.RtspTracks
 	}

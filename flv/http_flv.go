@@ -18,7 +18,7 @@ type TransStream struct {
 	flvExtraDataBlock []byte // metadata和sequence header
 }
 
-func (t *TransStream) Input(packet *avformat.AVPacket) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
+func (t *TransStream) Input(packet *avformat.AVPacket, _ int) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
 	t.ClearOutStreamBuffer()
 
 	var flvTagSize int
@@ -94,20 +94,19 @@ func (t *TransStream) Input(packet *avformat.AVPacket) ([]*collections.Reference
 	return t.OutBuffer[:t.OutBufferSize], 0, keyBuffer, nil
 }
 
-func (t *TransStream) AddTrack(track *stream.Track) error {
-	if err := t.BaseTransStream.AddTrack(track); err != nil {
-		return err
-	}
-
+func (t *TransStream) AddTrack(track *stream.Track) (int, error) {
+	var index int
+	var err error
 	if utils.AVMediaTypeAudio == track.Stream.MediaType {
-		t.Muxer.AddAudioTrack(track.Stream)
+		index, err = t.Muxer.AddAudioTrack(track.Stream)
 	} else if utils.AVMediaTypeVideo == track.Stream.MediaType {
-		t.Muxer.AddVideoTrack(track.Stream)
+		index, err = t.Muxer.AddVideoTrack(track.Stream)
 
 		t.Muxer.MetaData().AddNumberProperty("width", float64(track.Stream.CodecParameters.Width()))
 		t.Muxer.MetaData().AddNumberProperty("height", float64(track.Stream.CodecParameters.Height()))
 	}
-	return nil
+
+	return index, err
 }
 
 func (t *TransStream) WriteHeader() error {

@@ -12,11 +12,7 @@ type RtpStream struct {
 	rtpBuffer *RtpBuffer
 }
 
-func (f *RtpStream) WriteHeader() error {
-	return nil
-}
-
-func (f *RtpStream) Input(packet *avformat.AVPacket) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
+func (f *RtpStream) Input(packet *avformat.AVPacket, _ int) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
 	size := 2 + uint16(len(packet.Data))
 	if size > UDPReceiveBufferSize {
 		log.Sugar.Errorf("转发%s流失败 rtp包过长, 长度：%d, 最大允许：%d", f.Protocol, len(packet.Data), UDPReceiveBufferSize)

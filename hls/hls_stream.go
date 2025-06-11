@@ -39,7 +39,7 @@ type TransStream struct {
 	PlaylistFormatPtrCounter []*collections.ReferenceCounter[[]byte] // string指针转byte[], 方便发送给sink
 }
 
-func (t *TransStream) Input(packet *avformat.AVPacket) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
+func (t *TransStream) Input(packet *avformat.AVPacket, index int) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
 	// 创建一下个切片
 	// 已缓存时长>=指定时长, 如果存在视频, 还需要等遇到关键帧才切片
 	var newSegment bool
@@ -64,7 +64,7 @@ func (t *TransStream) Input(packet *avformat.AVPacket) ([]*collections.Reference
 	dts := packet.ConvertDts(90000)
 	data := packet.Data
 	if utils.AVMediaTypeVideo == packet.MediaType {
-		data = avformat.AVCCPacket2AnnexB(t.BaseTransStream.Tracks[packet.Index].Stream, packet)
+		data = avformat.AVCCPacket2AnnexB(t.FindTrackWithStreamIndex(packet.Index).Stream, packet)
 	}
 
 	// 写入ts切片
@@ -77,7 +77,7 @@ func (t *TransStream) Input(packet *avformat.AVPacket) ([]*collections.Reference
 		}
 
 		bytes := t.ctx.writeBuffer[t.ctx.writeBufferSize : t.ctx.writeBufferSize+mpeg.TsPacketSize]
-		i += t.muxer.Input(bytes, packet.Index, data[i:], length, dts, pts, packet.Key, i == 0)
+		i += t.muxer.Input(bytes, index, data[i:], length, dts, pts, packet.Key, i == 0)
 		t.ctx.writeBufferSize += mpeg.TsPacketSize
 	}
 
@@ -89,25 +89,20 @@ func (t *TransStream) Input(packet *avformat.AVPacket) ([]*collections.Reference
 	return nil, -1, true, nil
 }
 
-func (t *TransStream) AddTrack(track *stream.Track) error {
-	if err := t.BaseTransStream.AddTrack(track); err != nil {
-		return err
-	}
-
+func (t *TransStream) AddTrack(track *stream.Track) (int, error) {
 	var err error
+	var trackIndex int
 	if utils.AVMediaTypeVideo == track.Stream.MediaType {
 		data := track.Stream.CodecParameters.AnnexBExtraData()
-		_, err = t.muxer.AddTrack(track.Stream.MediaType, track.Stream.CodecID, data)
+		trackIndex, err = t.muxer.AddTrack(track.Stream.MediaType, track.Stream.CodecID, data)
 	} else {
-		_, err = t.muxer.AddTrack(track.Stream.MediaType, track.Stream.CodecID, track.Stream.Data)
+		trackIndex, err = t.muxer.AddTrack(track.Stream.MediaType, track.Stream.CodecID, track.Stream.Data)
 	}
-	return err
+
+	return trackIndex, err
 }
 
 func (t *TransStream) WriteHeader() error {
-	//if packet.Index >= t.muxer.TrackCount() {
-	//	return nil, -1, false, fmt.Errorf("track not available")
-	//}
 	return t.createSegment()
 }
 

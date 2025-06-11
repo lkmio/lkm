@@ -6,6 +6,10 @@ import (
 	"github.com/lkmio/avformat/utils"
 )
 
+var (
+	SupportedCodes = map[TransStreamProtocol]map[utils.AVCodecID]interface{}{}
+)
+
 // TransStream 将AVPacket封装成传输流
 type TransStream interface {
 	GetID() TransStreamID
@@ -13,13 +17,19 @@ type TransStream interface {
 	SetID(id TransStreamID)
 
 	// Input 封装传输流, 返回合并写块、时间戳、合并写块是否包含视频关键帧
-	Input(packet *avformat.AVPacket) ([]*collections.ReferenceCounter[[]byte], int64, bool, error)
+	Input(packet *avformat.AVPacket, trackIndex int) ([]*collections.ReferenceCounter[[]byte], int64, bool, error)
 
-	AddTrack(track *Track) error
+	AddTrack(track *Track) (int, error)
+
+	SetMuxerTrack(muxerIndex int, track *Track)
+
+	FindMuxerTrackIndex(streamIndex int) (int, bool)
 
 	TrackSize() int
 
 	GetTracks() []*Track
+
+	FindTrackWithStreamIndex(streamIndex int) *Track
 
 	// WriteHeader track添加完毕, 通过调用此函数告知
 	WriteHeader() error
@@ -48,6 +58,7 @@ type TransStream interface {
 type BaseTransStream struct {
 	ID         TransStreamID
 	Tracks     []*Track
+	MuxerIndex map[int]int // stream index->muxer track index
 	Completed  bool
 	ExistVideo bool
 	Protocol   TransStreamProtocol
@@ -64,14 +75,46 @@ func (t *BaseTransStream) SetID(id TransStreamID) {
 	t.ID = id
 }
 
-func (t *BaseTransStream) Input(packet *avformat.AVPacket) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
+func (t *BaseTransStream) WriteHeader() error {
+	return nil
+}
+
+func (t *BaseTransStream) Input(trackIndex, packet *avformat.AVPacket) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
 	return nil, -1, false, nil
 }
 
-func (t *BaseTransStream) AddTrack(track *Track) error {
+func (t *BaseTransStream) AddTrack(track *Track) (int, error) {
+	return len(t.Tracks), nil
+}
+
+func (t *BaseTransStream) SetMuxerTrack(muxerIndex int, track *Track) {
 	t.Tracks = append(t.Tracks, track)
 	if utils.AVMediaTypeVideo == track.Stream.MediaType {
 		t.ExistVideo = true
+	}
+
+	if t.MuxerIndex == nil {
+		t.MuxerIndex = make(map[int]int)
+	}
+
+	// 如果muxerIndex为-1, 意味着复用器封装流时并不需要指定track index, 比如flv.
+	if muxerIndex > -1 {
+		t.MuxerIndex[track.Stream.Index] = muxerIndex
+	} else {
+		t.MuxerIndex[track.Stream.Index] = len(t.Tracks) - 1
+	}
+}
+
+func (t *BaseTransStream) FindMuxerTrackIndex(streamIndex int) (int, bool) {
+	index, ok := t.MuxerIndex[streamIndex]
+	return index, ok
+}
+
+func (t *BaseTransStream) FindTrackWithStreamIndex(streamIndex int) *Track {
+	for _, track := range t.Tracks {
+		if track.Stream.Index == streamIndex {
+			return track
+		}
 	}
 	return nil
 }

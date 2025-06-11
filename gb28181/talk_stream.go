@@ -17,7 +17,7 @@ func (s *TalkStream) WriteHeader() error {
 	return nil
 }
 
-func (s *TalkStream) Input(packet *avformat.AVPacket) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
+func (s *TalkStream) Input(packet *avformat.AVPacket, index int) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
 	var size int
 	s.muxer.Input(packet.Data, uint32(packet.Dts), func() []byte {
 		return s.packet
@@ -26,7 +26,7 @@ func (s *TalkStream) Input(packet *avformat.AVPacket) ([]*collections.ReferenceC
 	})
 
 	packet = &avformat.AVPacket{Data: s.packet[:size]}
-	return s.RtpStream.Input(packet)
+	return s.RtpStream.Input(packet, index)
 }
 
 func NewTalkTransStream(ssrc uint32) (stream.TransStream, error) {

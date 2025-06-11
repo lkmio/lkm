@@ -21,7 +21,7 @@ type transStream struct {
 	metaData   *amf0.Object // 推流方携带的元数据
 }
 
-func (t *transStream) Input(packet *avformat.AVPacket) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
+func (t *transStream) Input(packet *avformat.AVPacket, _ int) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
 	t.ClearOutStreamBuffer()
 
 	var data []byte

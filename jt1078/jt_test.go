@@ -67,7 +67,7 @@ func (h Handler) OnPacket(packet *avformat.AVPacket) {
 		h.fos.Write(h.buffer[:n])
 	}
 
-	packets, _, _, err := h.gateway.Input(packet)
+	packets, _, _, err := h.gateway.Input(packet, i)
 	if err != nil {
 		panic(err)
 	}

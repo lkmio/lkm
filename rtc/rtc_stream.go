@@ -12,19 +12,31 @@ import (
 
 var (
 	webrtcApi *webrtc.API
+
+	SupportedCodecs = map[utils.AVCodecID]interface{}{
+		utils.AVCodecIdH264:      webrtc.MimeTypeH264,
+		utils.AVCodecIdH265:      webrtc.MimeTypeH265,
+		utils.AVCodecIdAV1:       webrtc.MimeTypeAV1,
+		utils.AVCodecIdVP8:       webrtc.MimeTypeVP8,
+		utils.AVCodecIdVP9:       webrtc.MimeTypeVP9,
+		utils.AVCodecIdOPUS:      webrtc.MimeTypeOpus,
+		utils.AVCodecIdPCMALAW:   webrtc.MimeTypePCMA,
+		utils.AVCodecIdPCMMULAW:  webrtc.MimeTypePCMU,
+		utils.AVCodecIdADPCMG722: webrtc.MimeTypeG722,
+	}
 )
 
 type transStream struct {
 	stream.BaseTransStream
 }
 
-func (t *transStream) Input(packet *avformat.AVPacket) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
+func (t *transStream) Input(packet *avformat.AVPacket, _ int) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
 	t.ClearOutStreamBuffer()
 
 	if utils.AVMediaTypeAudio == packet.MediaType {
 		t.AppendOutStreamBuffer(collections.NewReferenceCounter(packet.Data))
 	} else if utils.AVMediaTypeVideo == packet.MediaType {
-		avStream := t.BaseTransStream.Tracks[packet.Index].Stream
+		avStream := t.FindTrackWithStreamIndex(packet.Index).Stream
 		if packet.Key {
 			extra := avStream.CodecParameters.AnnexBExtraData()
 			t.AppendOutStreamBuffer(collections.NewReferenceCounter(extra))
