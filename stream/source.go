@@ -211,6 +211,11 @@ func (s *PublishSource) DoClose() {
 		s.TransDemuxer.Close()
 	}
 
+	// 释放packet
+	for _, track := range s.originTracks.All() {
+		s.clearUnusedPackets(track.Packets)
+	}
+
 	// 等传输流发布器关闭结束
 	s.streamPublisher.close()
 
@@ -334,13 +339,23 @@ func (s *PublishSource) OnPacket(packet *avformat.AVPacket) {
 	s.streamPublisher.Post(&StreamEvent{StreamEventTypePacket, packetPtr})
 
 	// 释放未引用的AVPacket
+	s.clearUnusedPackets(packets)
+}
+
+func (s *PublishSource) clearUnusedPackets(packets *collections.LinkedList[*collections.ReferenceCounter[*avformat.AVPacket]]) {
 	for packets.Size() > 0 {
 		if packets.Get(0).UseCount() > 1 {
 			break
 		}
 
-		packets.Remove(0).Release()
-		s.TransDemuxer.DiscardHeadPacket(packet.BufferIndex)
+		unusedPacketPtr := packets.Remove(0)
+		bufferIndex := unusedPacketPtr.Get().BufferIndex
+		// 引用计数减1
+		unusedPacketPtr.Release()
+		// AVPacket放回池中, 减少AVPacket分配
+		avformat.FreePacket(unusedPacketPtr.Get())
+		// 释放AVPacket的Data缓冲区
+		s.TransDemuxer.DiscardHeadPacket(bufferIndex)
 	}
 }
 
