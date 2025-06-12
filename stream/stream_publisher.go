@@ -201,14 +201,6 @@ func (t *transStreamPublisher) CreateDefaultOutStreams() {
 	}
 }
 
-func IsSupportMux(protocol TransStreamProtocol, _, _ utils.AVCodecID) bool {
-	if TransStreamRtmp == protocol || TransStreamFlv == protocol {
-
-	}
-
-	return true
-}
-
 func (t *transStreamPublisher) CreateTransStream(id TransStreamID, protocol TransStreamProtocol, tracks []*Track, sink Sink) (TransStream, error) {
 	log.Sugar.Infof("创建%s-stream source: %s", protocol.String(), t.source)
 
@@ -227,7 +219,8 @@ func (t *transStreamPublisher) CreateTransStream(id TransStreamID, protocol Tran
 
 		_, ok = supportedCodecs[track.Stream.CodecID]
 		if !ok {
-			log.Sugar.Warnf("不支持的编码器 %s %s", protocol.String(), track.Stream.CodecID)
+			log.Sugar.Warnf("不支持的编码器 source: %s stream: %s codec: %s", t.source, protocol.String(), track.Stream.CodecID)
+			continue
 		}
 
 		var index int
@@ -258,7 +251,7 @@ func (t *transStreamPublisher) CreateTransStream(id TransStreamID, protocol Tran
 		t.forwardTransStream = transStream
 	}
 
-	return transStream, err
+	return transStream, nil
 }
 
 func (t *transStreamPublisher) DispatchGOPBuffer(transStream TransStream) {
@@ -346,7 +339,7 @@ func (t *transStreamPublisher) doAddSink(sink Sink, resume bool) bool {
 	}
 
 	// 不支持对期望编码的流封装. 降级
-	if (utils.AVCodecIdNONE != audioCodecId || utils.AVCodecIdNONE != videoCodecId) && !IsSupportMux(sink.GetProtocol(), audioCodecId, videoCodecId) {
+	if utils.AVCodecIdNONE != audioCodecId || utils.AVCodecIdNONE != videoCodecId {
 		audioCodecId = utils.AVCodecIdNONE
 		videoCodecId = utils.AVCodecIdNONE
 	}
