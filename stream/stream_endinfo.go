@@ -26,9 +26,9 @@ type StreamEndInfo struct {
 }
 
 func EqualsTracks(info *StreamEndInfo, tracks []*Track) bool {
-	if len(info.Timestamps) != len(tracks) {
-		return false
-	}
+	//if len(info.Timestamps) != len(tracks) {
+	//	return false
+	//}
 
 	for _, track := range tracks {
 		if _, ok := info.Timestamps[track.Stream.CodecID]; !ok {

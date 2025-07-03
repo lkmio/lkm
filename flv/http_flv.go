@@ -121,7 +121,7 @@ func (t *TransStream) WriteHeader() error {
 	writeSeparator(t.flvHeaderBlock)
 	writeSeparator(t.flvExtraDataBlock)
 
-	t.MWBuffer = stream.NewMergeWritingBuffer(t.ExistVideo)
+	t.MWBuffer = stream.NewMergeWritingBuffer(t.HasVideo())
 	return nil
 }
 

@@ -2,32 +2,19 @@ package stream
 
 import "github.com/lkmio/avformat/utils"
 
-// TransStreamID 每个传输流的唯一Id，根据输出流协议ID+流包含的音视频编码器ID生成
-// 输出流协议ID占用高8位
+// TransStreamID 每个传输流的唯一Id，根据输出流协议ID+track index生成
+// 输出流协议占低8位
 // 每个音视频编译器ID占用8位. 意味着每个输出流至多7路流.
 type TransStreamID uint64
 
-var (
-	// AVCodecID转为byte的对应关系
-	narrowCodecIds map[int]byte
-)
-
-func init() {
-	narrowCodecIds = map[int]byte{
-		int(utils.AVCodecIdH263): 0x1,
-		int(utils.AVCodecIdH264): 0x2,
-		int(utils.AVCodecIdH265): 0x3,
-		int(utils.AVCodecIdAV1):  0x4,
-		int(utils.AVCodecIdVP8):  0x5,
-		int(utils.AVCodecIdVP9):  0x6,
-
-		int(utils.AVCodecIdAAC):       101,
-		int(utils.AVCodecIdMP3):       102,
-		int(utils.AVCodecIdOPUS):      103,
-		int(utils.AVCodecIdPCMALAW):   104,
-		int(utils.AVCodecIdPCMMULAW):  105,
-		int(utils.AVCodecIdADPCMG722): 106,
+func (id TransStreamID) HasTrack(index int) bool {
+	for i := 1; i < 8; i++ {
+		if int(id>>(i*8))&0xFF == index {
+			return true
+		}
 	}
+
+	return false
 }
 
 // GenerateTransStreamID 根据传入的推拉流协议和编码器ID生成StreamId
@@ -54,16 +41,9 @@ func GenerateTransStreamID(protocol TransStreamProtocol, tracks ...*Track) Trans
 	len_ := len(tracks)
 	utils.Assert(len_ > 0 && len_ < 8)
 
-	var streamId uint64
-	streamId = uint64(protocol) << 56
-
+	var streamId = uint64(protocol) & 0xFF
 	for i, track := range tracks {
-		id, ok := narrowCodecIds[int(track.Stream.CodecID)]
-		if ok {
-			id = byte(track.Stream.CodecID)
-		}
-
-		streamId |= uint64(id) << (48 - i*8)
+		streamId |= uint64(track.Stream.Index) << ((i + 1) * 8)
 	}
 
 	return TransStreamID(streamId)

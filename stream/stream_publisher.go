@@ -72,29 +72,27 @@ type transStreamPublisher struct {
 	streamEvents      *NonBlockingChannel[*StreamEvent]
 	mainContextEvents chan func()
 
-	sinkCount int
+	sinkCount int       // 拉流计数
 	gopBuffer GOPBuffer // GOP缓存, 音频和视频混合使用, 以视频关键帧为界, 缓存第二个视频关键帧时, 释放前一组gop
 
-	recordSink      Sink                   // 每个Source的录制流
-	recordFilePath  string                 // 录制流文件路径
-	hlsStream       TransStream            // HLS传输流, 如果开启, 在@see writeHeader 函数中直接创建, 如果等拉流时再创建, 会进一步加大HLS延迟.
-	_               []transcode.Transcoder // 音频解码器
-	_               []transcode.Transcoder // 视频解码器
-	originTracks    TrackManager           // 推流的音视频Streams
-	allStreamTracks TrackManager           // 推流Streams+转码器获得的Stream
+	recordSink      Sink                                // 每个Source的录制流
+	recordFilePath  string                              // 录制流文件路径
+	hlsStream       TransStream                         // HLS传输流
+	originTracks    TrackManager                        // 推流的原始track
+	transcodeTracks map[utils.AVCodecID]*TranscodeTrack // 转码Track
 
 	transStreams       map[TransStreamID]TransStream     // 所有输出流
 	forwardTransStream TransStream                       // 转发流
-	sinks              map[SinkID]Sink                   // 保存所有Sink
+	sinks              map[SinkID]Sink                   // 所有拉流Sink
 	transStreamSinks   map[TransStreamID]map[SinkID]Sink // 输出流对应的Sink
 
-	existVideo            bool        // 是否存在视频
-	completed             atomic.Bool // 所有推流track是否解析完毕, @see writeHeader 函数中赋值为true
+	hasVideo              bool        // 是否存在视频
+	completed             atomic.Bool // 推流track是否解析完毕
 	closed                atomic.Bool
 	streamEndInfo         *StreamEndInfo             // 之前推流源信息
 	accumulateTimestamps  bool                       // 是否累加时间戳
 	timestampModeDecided  bool                       // 是否已经决定使用推流的时间戳，或者累加时间戳
-	lastStreamEndTime     time.Time                  // 最近拉流端结束拉流的时间
+	lastStreamEndTime     time.Time                  // 最近结束拉流的时间
 	bitstreamFilterBuffer *collections.RBBlockBuffer // annexb和avcc转换的缓冲区
 }
 
@@ -109,6 +107,7 @@ func (t *transStreamPublisher) run() {
 	t.transStreams = make(map[TransStreamID]TransStream, 10)
 	t.sinks = make(map[SinkID]Sink, 128)
 	t.transStreamSinks = make(map[TransStreamID]map[SinkID]Sink, len(transStreamFactories)+1)
+	t.transcodeTracks = make(map[utils.AVCodecID]*TranscodeTrack, 4)
 
 	defer func() {
 		// 清空管道
@@ -137,7 +136,7 @@ func (t *transStreamPublisher) run() {
 				if t.forwardTransStream != nil && t.forwardTransStream.GetProtocol() == TransStreamGBCascaded {
 					packets := event.Data.([][]byte)
 					for _, data := range packets {
-						t.DispatchPacket(t.forwardTransStream, &avformat.AVPacket{Data: data[2:]})
+						t.DispatchPacketToStream(t.forwardTransStream, &avformat.AVPacket{Data: data[2:]})
 						UDPReceiveBufferPool.Put(data[:cap(data)])
 					}
 				}
@@ -188,8 +187,7 @@ func (t *transStreamPublisher) CreateDefaultOutStreams() {
 		streams := t.originTracks.All()
 		utils.Assert(len(streams) > 0)
 
-		id := GenerateTransStreamID(TransStreamHls, streams...)
-		hlsStream, err := t.CreateTransStream(id, TransStreamHls, streams, nil)
+		hlsStream, err := t.CreateTransStream(TransStreamHls, streams, nil)
 		if err != nil {
 			log.Sugar.Errorf("创建HLS输出流失败 source: %s err: %s", t.source, err.Error())
 			return
@@ -197,20 +195,24 @@ func (t *transStreamPublisher) CreateDefaultOutStreams() {
 
 		t.DispatchGOPBuffer(hlsStream)
 		t.hlsStream = hlsStream
-		t.transStreams[id] = t.hlsStream
 	}
 }
 
-func (t *transStreamPublisher) CreateTransStream(id TransStreamID, protocol TransStreamProtocol, tracks []*Track, sink Sink) (TransStream, error) {
-	log.Sugar.Infof("创建%s-stream source: %s", protocol.String(), t.source)
-
-	source := SourceManager.Find(t.source)
-	utils.Assert(source != nil)
-	transStream, err := CreateTransStream(source, protocol, tracks, sink)
-	if err != nil {
-		return nil, err
+// 转码GOPBuffer中的音频
+func (t *transStreamPublisher) transcodeGOPBuffer(track *TranscodeTrack) {
+	if t.gopBuffer != nil {
+		t.gopBuffer.PeekAll(func(packet *collections.ReferenceCounter[*avformat.AVPacket]) {
+			if utils.AVMediaTypeAudio != packet.Get().MediaType {
+				return
+			}
+			track.Input(packet.Get())
+		})
 	}
+}
 
+func (t *transStreamPublisher) CreateTransStream(protocol TransStreamProtocol, tracks []*Track, sink Sink) (TransStream, error) {
+	// 匹配和创建适合TransStream流协议的track
+	var finalTracks []*Track
 	for _, track := range tracks {
 		supportedCodecs, ok := SupportedCodes[protocol]
 		if !ok {
@@ -220,28 +222,94 @@ func (t *transStreamPublisher) CreateTransStream(id TransStreamID, protocol Tran
 		_, ok = supportedCodecs[track.Stream.CodecID]
 		if !ok {
 			log.Sugar.Warnf("不支持的编码器 source: %s stream: %s codec: %s", t.source, protocol.String(), track.Stream.CodecID)
-			continue
+			// 尝试音频转码
+			if utils.AVMediaTypeAudio != track.Stream.MediaType || transcode.CreateAudioTranscoder == nil {
+				continue
+			}
+
+			transcodeTrack := t.transcodeTracks[track.Stream.CodecID]
+			if transcodeTrack == nil {
+				// 创建音频转码器
+				var codecs []utils.AVCodecID
+				for codec := range SupportedCodes[protocol] {
+					codecs = append(codecs, codec)
+				}
+
+				transcoder, stream, err := transcode.CreateAudioTranscoder(track.Stream, codecs)
+				if err != nil {
+					log.Sugar.Errorf("创建音频转码器失败 source: %s stream: %s codec: %s err: %s", t.source, protocol.String(), track.Stream.CodecID, err.Error())
+					continue
+				}
+
+				log.Sugar.Infof("创建音频转码器成功 source: %s stream: %s src: %s dst: %s", t.source, protocol.String(), track.Stream.CodecID, transcoder.GetEncoderID())
+
+				stream.Index = len(t.originTracks.tracks) + len(t.transcodeTracks)
+				newTrack := &Track{Stream: stream}
+
+				// 如果之前有转码过, 则使用之前的时间戳
+				if t.streamEndInfo != nil {
+					oldTimestamps, ok := t.streamEndInfo.Timestamps[transcoder.GetEncoderID()]
+					if ok {
+						newTrack.Dts = oldTimestamps[0]
+						newTrack.Pts = oldTimestamps[1]
+					}
+				}
+
+				transcodeTrack = NewTranscodeTrack(newTrack, transcoder)
+				t.transcodeTracks[track.Stream.CodecID] = transcodeTrack
+
+				// 转码GOPBuffer中的音频
+				t.transcodeGOPBuffer(transcodeTrack)
+			}
+
+			track = transcodeTrack.track
 		}
 
-		var index int
 		// 重新拷贝一个track，传输流内部使用track的时间戳，
 		newTrack := *track
-		if index, err = transStream.AddTrack(&newTrack); err != nil {
+		finalTracks = append(finalTracks, &newTrack)
+	}
+
+	if len(finalTracks) < 1 {
+		return nil, fmt.Errorf("not found track")
+	}
+
+	id := GenerateTransStreamID(protocol, finalTracks...)
+	// 如果已经存在该id的输出流, 则直接返回
+	oldTransStream := t.transStreams[id]
+	if oldTransStream != nil {
+		return oldTransStream, nil
+	}
+
+	log.Sugar.Infof("创建%s-stream source: %s", protocol.String(), t.source)
+
+	source := SourceManager.Find(t.source)
+	utils.Assert(source != nil)
+	transStream, err := CreateTransStream(source, protocol, tracks, sink)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, track := range finalTracks {
+		index, err := transStream.AddTrack(track)
+		if err != nil {
 			log.Sugar.Errorf("添加track失败 err: %s source: %s stream: %s, codec: %s ", err.Error(), t.source, protocol, track.Stream.CodecID)
 			continue
 		}
 
 		// stream index->muxer track index
-		transStream.SetMuxerTrack(index, &newTrack)
+		transStream.SetMuxerTrack(index, track)
 	}
 
 	if transStream.TrackSize() == 0 {
 		return nil, fmt.Errorf("not found track")
 	}
 
+	id = GenerateTransStreamID(protocol, transStream.GetTracks()...)
 	transStream.SetID(id)
 	transStream.SetProtocol(protocol)
 
+	t.transStreams[id] = transStream
 	// 创建输出流对应的拉流队列
 	t.transStreamSinks[id] = make(map[SinkID]Sink, 128)
 	_ = transStream.WriteHeader()
@@ -257,15 +325,35 @@ func (t *transStreamPublisher) CreateTransStream(id TransStreamID, protocol Tran
 func (t *transStreamPublisher) DispatchGOPBuffer(transStream TransStream) {
 	if t.gopBuffer != nil {
 		t.gopBuffer.PeekAll(func(packet *collections.ReferenceCounter[*avformat.AVPacket]) {
-			t.DispatchPacket(transStream, packet.Get())
+			t.DispatchPacketToStream(transStream, packet.Get())
 		})
+
+		// 发送转码包
+		for _, track := range t.transcodeTracks {
+			size := track.packets.Size()
+			for i := 0; i < size; i++ {
+				t.DispatchPacketToStream(transStream, track.packets.Peek(i))
+			}
+		}
 	}
 }
 
-// DispatchPacket 分发AVPacket
-func (t *transStreamPublisher) DispatchPacket(transStream TransStream, packet *avformat.AVPacket) {
+func (t *transStreamPublisher) DispatchPacket(packet *avformat.AVPacket) {
+	for _, transStream := range t.transStreams {
+		if TransStreamGBCascaded == transStream.GetProtocol() {
+			continue
+		}
+
+		t.DispatchPacketToStream(transStream, packet)
+	}
+}
+
+// DispatchPacketToStream 分发AVPacket
+func (t *transStreamPublisher) DispatchPacketToStream(transStream TransStream, packet *avformat.AVPacket) {
 	trackIndex, ok := transStream.FindMuxerTrackIndex(packet.Index)
 	if !ok {
+		return
+	} else if !transStream.GetID().HasTrack(packet.Index) {
 		return
 	}
 
@@ -280,7 +368,7 @@ func (t *transStreamPublisher) DispatchPacket(transStream TransStream, packet *a
 // DispatchBuffer 分发传输流
 func (t *transStreamPublisher) DispatchBuffer(transStream TransStream, index int, data []*collections.ReferenceCounter[[]byte], timestamp int64, keyVideo bool) {
 	sinks := t.transStreamSinks[transStream.GetID()]
-	exist := transStream.IsExistVideo()
+	exist := transStream.HasVideo()
 
 	for _, sink := range sinks {
 
@@ -371,20 +459,17 @@ func (t *transStreamPublisher) doAddSink(sink Sink, resume bool) bool {
 		tracks = append(tracks, track)
 	}
 
-	transStreamId := GenerateTransStreamID(sink.GetProtocol(), tracks...)
-	transStream, exist := t.transStreams[transStreamId]
+	transStream, exist := t.transStreams[GenerateTransStreamID(sink.GetProtocol(), tracks...)]
 	if !exist {
 		var err error
-		transStream, err = t.CreateTransStream(transStreamId, sink.GetProtocol(), tracks, sink)
+		transStream, err = t.CreateTransStream(sink.GetProtocol(), tracks, sink)
 		if err != nil {
 			log.Sugar.Errorf("添加sink失败,创建传输流发生err: %s source: %s", err.Error(), t.source)
 			return false
 		}
-
-		t.transStreams[transStreamId] = transStream
 	}
 
-	sink.SetTransStreamID(transStreamId)
+	sink.SetTransStreamID(transStream.GetID())
 
 	{
 		sink.Lock()
@@ -398,6 +483,7 @@ func (t *transStreamPublisher) doAddSink(sink Sink, resume bool) bool {
 		sink.UnLock()
 	}
 
+	// 开始推流
 	err := sink.StartStreaming(transStream)
 	if err != nil {
 		log.Sugar.Errorf("添加sink失败,开始推流发生err: %s sink: %s source: %s ", err.Error(), SinkID2String(sink.GetID()), t.source)
@@ -416,7 +502,7 @@ func (t *transStreamPublisher) doAddSink(sink Sink, resume bool) bool {
 	}
 
 	t.sinks[sink.GetID()] = sink
-	t.transStreamSinks[transStreamId][sink.GetID()] = sink
+	t.transStreamSinks[transStream.GetID()][sink.GetID()] = sink
 
 	// TCP拉流开启异步发包, 一旦出现网络不好的链路, 其余正常链路不受影响.
 	_, ok := sink.GetConn().(*transport.Conn)
@@ -436,7 +522,7 @@ func (t *transStreamPublisher) doAddSink(sink Sink, resume bool) bool {
 	}
 
 	// 新建传输流，发送已经缓存的音视频帧
-	if !exist && AppConfig.GOPCache && t.existVideo && TransStreamGBCascaded != transStream.GetProtocol() {
+	if !exist && AppConfig.GOPCache && t.hasVideo && TransStreamGBCascaded != transStream.GetProtocol() {
 		t.DispatchGOPBuffer(transStream)
 	}
 
@@ -516,6 +602,11 @@ func (t *transStreamPublisher) doClose() {
 		t.gopBuffer = nil
 	}
 
+	// 关闭转码器
+	for _, track := range t.transcodeTracks {
+		track.Close()
+	}
+
 	// 关闭录制流
 	if t.recordSink != nil {
 		t.recordSink.Close()
@@ -523,7 +614,16 @@ func (t *transStreamPublisher) doClose() {
 
 	// 保留推流信息
 	if t.sinkCount > 0 && len(t.originTracks.All()) > 0 {
-		sourceHistory := StreamEndInfoBride(t.source, t.originTracks.All(), t.transStreams)
+		var tracks []*Track
+		for _, track := range t.originTracks.All() {
+			tracks = append(tracks, track)
+		}
+
+		for _, track := range t.transcodeTracks {
+			tracks = append(tracks, track.track)
+		}
+
+		sourceHistory := StreamEndInfoBride(t.source, tracks, t.transStreams)
 		streamEndInfoManager.Add(sourceHistory)
 	}
 
@@ -582,8 +682,7 @@ func (t *transStreamPublisher) WriteHeader() {
 		t.streamEndInfo = streamInfo
 
 		// 恢复每路track的时间戳
-		tracks := t.originTracks.All()
-		for _, track := range tracks {
+		for _, track := range t.originTracks.All() {
 			timestamps := streamInfo.Timestamps[track.Stream.CodecID]
 			track.Dts = timestamps[0]
 			track.Pts = timestamps[1]
@@ -613,7 +712,7 @@ func (t *transStreamPublisher) WriteHeader() {
 	}
 
 	// 如果不存在视频帧, 清空GOP缓存
-	if !t.existVideo {
+	if !t.hasVideo {
 		t.ClearGopBuffer(false)
 		t.gopBuffer = nil
 	}
@@ -643,11 +742,16 @@ func (t *transStreamPublisher) ClearGopBuffer(free bool) {
 			t.bitstreamFilterBuffer.Pop()
 		}
 	})
+
+	// 丢弃转码track中的缓存
+	for _, track := range t.transcodeTracks {
+		track.Clear()
+	}
 }
 
 func (t *transStreamPublisher) OnPacket(packet *collections.ReferenceCounter[*avformat.AVPacket]) {
 	// 保存到GOP缓存
-	if (AppConfig.GOPCache && t.existVideo) || !t.completed.Load() {
+	if (AppConfig.GOPCache && t.hasVideo) || !t.completed.Load() {
 		packet.Get().OnBufferAlloc = func(size int) []byte {
 			if t.bitstreamFilterBuffer == nil {
 				t.bitstreamFilterBuffer = collections.NewRBBlockBuffer(1024 * 1024 * 2)
@@ -669,14 +773,18 @@ func (t *transStreamPublisher) OnPacket(packet *collections.ReferenceCounter[*av
 		t.CorrectTimestamp(packet.Get())
 
 		// 分发给各个传输流
-		for _, transStream := range t.transStreams {
-			if TransStreamGBCascaded != transStream.GetProtocol() {
-				t.DispatchPacket(transStream, packet.Get())
+		t.DispatchPacket(packet.Get())
+
+		// 转码
+		for _, track := range t.transcodeTracks {
+			transcodePackets := track.Input(packet.Get())
+			for _, transcodePkt := range transcodePackets {
+				t.DispatchPacket(transcodePkt)
 			}
 		}
 
 		// 未开启GOP缓存或只存在音频流, 立即释放
-		if !AppConfig.GOPCache || !t.existVideo {
+		if !AppConfig.GOPCache || !t.hasVideo {
 			packet.Release()
 		}
 	}
@@ -687,7 +795,7 @@ func (t *transStreamPublisher) OnNewTrack(track *Track) {
 	t.originTracks.Add(track)
 
 	if utils.AVMediaTypeVideo == stream.MediaType {
-		t.existVideo = true
+		t.hasVideo = true
 	}
 
 	// 创建GOPBuffer
@@ -704,10 +812,13 @@ func (t *transStreamPublisher) CorrectTimestamp(packet *avformat.AVPacket) {
 
 		timestamps := t.streamEndInfo.Timestamps[packet.CodecID]
 		t.accumulateTimestamps = true
-		log.Sugar.Infof("累加时间戳 上次推流dts: %d, pts: %d", timestamps[0], timestamps[1])
+		log.Sugar.Infof("使用上次推流的时间戳 dts: %d, pts: %d", timestamps[0], timestamps[1])
 	}
 
 	track := t.originTracks.Find(packet.CodecID)
+	if track == nil {
+		return
+	}
 	duration := packet.GetDuration(packet.Timebase)
 
 	// 根据duration来累加时间戳
@@ -731,7 +842,7 @@ func (t *transStreamPublisher) GetStreamEndInfo() *StreamEndInfo {
 }
 
 func (t *transStreamPublisher) TranscodeTracks() []*Track {
-	return t.allStreamTracks.All()
+	return t.originTracks.All()
 }
 
 func (t *transStreamPublisher) LastStreamEndTime() time.Time {

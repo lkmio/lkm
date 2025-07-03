@@ -8,6 +8,7 @@ import (
 	"github.com/lkmio/lkm/jt1078"
 	"github.com/lkmio/lkm/record"
 	"github.com/lkmio/lkm/rtsp"
+	"github.com/lkmio/lkm/transcode"
 	"github.com/lkmio/mpeg"
 	"github.com/lkmio/rtp"
 	"github.com/lkmio/transport"
@@ -28,7 +29,7 @@ import (
 
 func init() {
 	stream.RegisterTransStreamFactory(stream.TransStreamRtmp, rtmp.TransStreamFactory, flv2.SupportedCodecs)
-	stream.RegisterTransStreamFactory(stream.TransStreamHls, hls.TransStreamFactory, mpeg.SupportedCodecs)
+	stream.RegisterTransStreamFactory(stream.TransStreamHls, hls.TransStreamFactory, mpeg.TSSupportedCodecs)
 	stream.RegisterTransStreamFactory(stream.TransStreamFlv, flv.TransStreamFactory, flv2.SupportedCodecs)
 	stream.RegisterTransStreamFactory(stream.TransStreamRtsp, rtsp.TransStreamFactory, rtp.SupportedCodecs)
 	stream.RegisterTransStreamFactory(stream.TransStreamRtc, rtc.TransStreamFactory, rtc.SupportedCodecs)
@@ -180,6 +181,10 @@ func main() {
 		go func() {
 			_, _ = stream.Hook(stream.HookEventStarted, "", nil)
 		}()
+	}
+
+	if transcode.CreateAudioTranscoder != nil {
+		log.Sugar.Info("启用音频转码功能")
 	}
 
 	// 开启pprof调试

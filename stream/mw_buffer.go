@@ -46,7 +46,7 @@ type mergeWritingBuffer struct {
 
 	hasKeyVideoDataInCurrentSegment bool // 当前切片是否存在关键视频帧
 	hasVideoDataInCurrentSegment    bool // 当前切片是否存在视频帧
-	existVideo                      bool // 是否存在视频
+	hasVideo                        bool // 是否存在视频
 }
 
 func (m *mergeWritingBuffer) TryAlloc(size int, ts int64, videoPkt, videoKey bool) ([]byte, bool) {
@@ -108,7 +108,7 @@ func (m *mergeWritingBuffer) FlushSegment() (*collections.ReferenceCounter[[]byt
 	counter := collections.NewReferenceCounter(data)
 	// 遇到完整关键帧切片, 替代前一组
 	// 或者只保留最近的音频切片
-	if m.hasKeyVideoDataInCurrentSegment || !m.existVideo {
+	if m.hasKeyVideoDataInCurrentSegment || !m.hasVideo {
 		for m.lastKeyVideoDataSegments.Size() > 0 {
 			segment := m.lastKeyVideoDataSegments.Pop()
 			segment.Release()
@@ -185,9 +185,9 @@ func (m *mergeWritingBuffer) Close() *collections.Queue[*mbBuffer] {
 
 func NewMergeWritingBuffer(existVideo bool) MergeWritingBuffer {
 	buffer := &mergeWritingBuffer{
-		startTS:    -1,
-		existVideo: existVideo,
-		buffers:    collections.NewQueue[*mbBuffer](24),
+		startTS:  -1,
+		hasVideo: existVideo,
+		buffers:  collections.NewQueue[*mbBuffer](24),
 	}
 
 	if AppConfig.GOPCache {

@@ -198,7 +198,7 @@ func modifySSRC(data []byte, ssrc uint32) {
 // 使用wireshark直接导出的rtp流
 // 根据ssrc来查找每个rtp包, rtp不要带扩展字段
 func TestPublish(t *testing.T) {
-	path := "../../source_files/gb28181_h264.rtp"
+	path := "../../source_files/gb28181_tcp_h264_pcma.raw"
 	var rawSsrc uint32 = 0xBEBC201
 	localAddr := "0.0.0.0:20001"
 	id := "hls_mystream"
@@ -319,12 +319,14 @@ func TestPublish(t *testing.T) {
 
 func TestDecode(t *testing.T) {
 	t.Run("decode_raw", func(t *testing.T) {
-		file, err2 := os.ReadFile("../dump/gb28181-192.168.2.103.37841")
+		file, err2 := os.ReadFile("../../source_files/gb28181-114.103.207.33.20872")
 		if err2 != nil {
 			panic(err2)
 		}
 
-		filter := NewSingleFilter(NewPassiveSource())
+		source := NewPassiveSource()
+		source.Init()
+		filter := NewSingleFilter(source)
 		session := NewTCPSession(nil, filter)
 		reader := bufio.NewBytesReader(file)
 

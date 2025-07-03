@@ -48,7 +48,7 @@ type TransStream interface {
 	// Close 关闭传输流, 返回还未flush的合并写块
 	Close() ([]*collections.ReferenceCounter[[]byte], int64, error)
 
-	IsExistVideo() bool
+	HasVideo() bool
 
 	IsTCPStreaming() bool
 
@@ -60,7 +60,7 @@ type BaseTransStream struct {
 	Tracks     []*Track
 	MuxerIndex map[int]int // stream index->muxer track index
 	Completed  bool
-	ExistVideo bool
+	hasVideo   bool
 	Protocol   TransStreamProtocol
 
 	OutBuffer     []*collections.ReferenceCounter[[]byte] // 传输流的合并写块队列
@@ -90,7 +90,7 @@ func (t *BaseTransStream) AddTrack(track *Track) (int, error) {
 func (t *BaseTransStream) SetMuxerTrack(muxerIndex int, track *Track) {
 	t.Tracks = append(t.Tracks, track)
 	if utils.AVMediaTypeVideo == track.Stream.MediaType {
-		t.ExistVideo = true
+		t.hasVideo = true
 	}
 
 	if t.MuxerIndex == nil {
@@ -159,8 +159,8 @@ func (t *BaseTransStream) GetTracks() []*Track {
 	return t.Tracks
 }
 
-func (t *BaseTransStream) IsExistVideo() bool {
-	return t.ExistVideo
+func (t *BaseTransStream) HasVideo() bool {
+	return t.hasVideo
 }
 
 func (t *BaseTransStream) ReadExtraData(timestamp int64) ([]*collections.ReferenceCounter[[]byte], int64, error) {

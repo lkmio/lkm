@@ -50,7 +50,7 @@
         let remote_view = document.getElementById("videoview");
         let source = document.getElementById("source").value;
         let pc = new RTCPeerConnection(null);
-        // pc.addTransceiver("audio", {direction: "recvonly"});
+        pc.addTransceiver("audio", {direction: "recvonly"});
         pc.addTransceiver("video", {direction: "recvonly"});
         let offer = await pc.createOffer();
 

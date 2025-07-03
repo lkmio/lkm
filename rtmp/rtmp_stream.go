@@ -219,7 +219,7 @@ func (t *transStream) WriteHeader() error {
 
 	n += size
 	t.sequenceHeader = t.sequenceHeader[:n]
-	t.MWBuffer = stream.NewMergeWritingBuffer(t.ExistVideo)
+	t.MWBuffer = stream.NewMergeWritingBuffer(t.HasVideo())
 	return nil
 }
 

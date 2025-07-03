@@ -43,7 +43,7 @@ func (t *TransStream) Input(packet *avformat.AVPacket, index int) ([]*collection
 	// 创建一下个切片
 	// 已缓存时长>=指定时长, 如果存在视频, 还需要等遇到关键帧才切片
 	var newSegment bool
-	if (!t.ExistVideo || utils.AVMediaTypeVideo == packet.MediaType && packet.Key) && float32(t.muxer.Duration())/90000 >= float32(t.duration) {
+	if (!t.HasVideo() || utils.AVMediaTypeVideo == packet.MediaType && packet.Key) && float32(t.muxer.Duration())/90000 >= float32(t.duration) {
 		// 保存当前切片文件
 		if t.ctx.file != nil {
 			err := t.flushSegment(false)

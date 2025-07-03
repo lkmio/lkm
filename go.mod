@@ -1,11 +1,12 @@
 module github.com/lkmio/lkm
 
 require (
-	github.com/lkmio/mpeg v0.0.0
+	github.com/lkmio/audio-transcoder v0.0.0-20250702123727-6c54138868c6
 	github.com/lkmio/flv v0.0.0
+	github.com/lkmio/mpeg v0.0.0
 	github.com/lkmio/rtmp v0.0.0
-	github.com/lkmio/transport v0.0.0
 	github.com/lkmio/rtp v0.0.0
+	github.com/lkmio/transport v0.0.0
 )
 
 require (
@@ -14,13 +15,16 @@ require (
 	github.com/lkmio/avformat v0.0.0
 	github.com/natefinch/lumberjack v2.0.0+incompatible
 	github.com/pion/interceptor v0.1.25
+	github.com/pion/rtcp v1.2.12
+	github.com/pion/rtp v1.8.5
+	github.com/pion/sdp/v3 v3.0.8
 	github.com/pion/webrtc/v3 v3.2.29
 	github.com/sirupsen/logrus v1.9.3
 	github.com/x-cray/logrus-prefixed-formatter v0.5.2
 	go.uber.org/zap v1.27.0
 )
 
-require (   
+require (
 	github.com/BurntSushi/toml v1.3.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/google/uuid v1.3.1 // indirect
@@ -33,10 +37,7 @@ require (
 	github.com/pion/logging v0.2.2 // indirect
 	github.com/pion/mdns v0.0.12 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
-	github.com/pion/rtcp v1.2.12 // indirect
-	github.com/pion/rtp v1.8.5 // indirect
 	github.com/pion/sctp v1.8.12 // indirect
-	github.com/pion/sdp/v3 v3.0.8 // indirect
 	github.com/pion/srtp/v2 v2.0.18 // indirect
 	github.com/pion/stun v0.6.1 // indirect
 	github.com/pion/transport/v2 v2.2.3 // indirect
