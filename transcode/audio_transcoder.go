@@ -28,14 +28,21 @@ func (t *AudioTranscoder) Transcode(src *avformat.AVPacket, cb func([]byte, int)
 		return 0, fmt.Errorf("unsupported media type: %s", src.MediaType.String())
 	}
 
-	pcmN, err := t.decoder.Decode(src.Data, t.pcmData)
+	var err error
+	pcmData := src.Data
+	pcmN := len(pcmData)
+	if t.decoder != nil {
+		pcmN, err = t.decoder.Decode(src.Data, t.pcmData)
+		pcmData = t.pcmData
+	}
+
 	if err != nil {
 		return 0, err
 	} else if pcmN < 1 {
 		return 0, nil
 	}
 
-	pktN, err := t.encoder.Encode(t.pcmData[:pcmN], func(bytes []byte) {
+	pktN, err := t.encoder.Encode(pcmData[:pcmN], func(bytes []byte) {
 		cb(bytes, t.encoder.PacketDurationMS())
 	})
 
@@ -43,7 +50,9 @@ func (t *AudioTranscoder) Transcode(src *avformat.AVPacket, cb func([]byte, int)
 }
 
 func (t *AudioTranscoder) Close() {
-	t.decoder.Destroy()
+	if t.decoder != nil {
+		t.decoder.Destroy()
+	}
 	t.encoder.Destroy()
 }
 
@@ -52,13 +61,32 @@ func (t *AudioTranscoder) GetEncoderID() utils.AVCodecID {
 }
 
 func NewAudioTranscoder(src *avformat.AVStream, dst []utils.AVCodecID) (Transcoder, *avformat.AVStream, error) {
-	decoder := audio_transcoder.FindDecoder(src.CodecID.String())
-	if decoder == nil {
-		return nil, nil, fmt.Errorf("unsupported audio codec: %s", src.CodecID.String())
+	var err error
+	var decoder audio_transcoder.Decoder
+	var encoder audio_transcoder.Encoder
+
+	defer func() {
+		if err == nil {
+			return
+		}
+
+		if decoder != nil {
+			decoder.Destroy()
+		}
+		if encoder != nil {
+			encoder.Destroy()
+		}
+	}()
+
+	// 如果是pcm数据, 不需要解码
+	if utils.AVCodecIdPCMS16LE != src.CodecID {
+		decoder = audio_transcoder.FindDecoder(src.CodecID.String())
+		if decoder == nil {
+			return nil, nil, fmt.Errorf("unsupported audio codec: %s", src.CodecID.String())
+		}
 	}
 
-	var err error
-	var encoder audio_transcoder.Encoder
+	// 查找合适的编码器
 	var dstCodec utils.AVCodecID
 	for _, codec := range dst {
 		encoder, err = audio_transcoder.FindEncoder(codec.String(), src.SampleRate, src.Channels)
@@ -74,30 +102,33 @@ func NewAudioTranscoder(src *avformat.AVStream, dst []utils.AVCodecID) (Transcod
 		return nil, nil, fmt.Errorf("unsupported audio codec: %s", src.CodecID.String())
 	}
 
-	switch src.CodecID {
-	case utils.AVCodecIdAAC:
-		if err = decoder.(*audio_transcoder.AACDecoder).Create(nil, src.Data); err != nil {
-			return nil, nil, err
+	// 创建解码器
+	if decoder != nil {
+		switch src.CodecID {
+		case utils.AVCodecIdAAC:
+			if err = decoder.(*audio_transcoder.AACDecoder).Create(nil, src.Data); err != nil {
+				return nil, nil, err
+			}
+			break
+		case utils.AVCodecIdOPUS:
+			if err = decoder.(*audio_transcoder.OpusDecoder).Create(src.SampleRate, src.Channels); err != nil {
+				return nil, nil, err
+			}
+			break
 		}
-		break
-	case utils.AVCodecIdOPUS:
-		if err = decoder.(*audio_transcoder.OpusDecoder).Create(src.SampleRate, src.Channels); err != nil {
-			return nil, nil, err
-		}
-		break
 	}
 
+	// aac编码是否添加adts头
 	adtsHeader := 1
+	// 创建编码器
 	switch dstCodec {
 	case utils.AVCodecIdAAC:
 		if _, err = encoder.(*audio_transcoder.AACEncoder).Create(src.SampleRate, src.Channels, adtsHeader); err != nil {
-			decoder.Destroy()
 			return nil, nil, err
 		}
 		break
 	case utils.AVCodecIdOPUS:
 		if _, err = encoder.(*audio_transcoder.OpusEncoder).Create(src.SampleRate, src.Channels); err != nil {
-			decoder.Destroy()
 			return nil, nil, err
 		}
 	}

@@ -196,10 +196,19 @@ func modifySSRC(data []byte, ssrc uint32) {
 }
 
 // 使用wireshark直接导出的rtp流
-// 根据ssrc来查找每个rtp包, rtp不要带扩展字段
+// udp需要填写对应的ssrc来查找来分割rtp包
 func TestPublish(t *testing.T) {
-	path := "../../source_files/gb28181_tcp_h264_pcma.raw"
-	var rawSsrc uint32 = 0xBEBC201
+	//path := "../../source_files/rtp_ps_h264_pcm8k_0xBEBC206.raw"
+	//var rawSsrc uint32 = 0xBEBC206
+	//path := "../../source_files/rtp_ps_h264_pcm16k_0xBEBC203.raw"
+	//var rawSsrc uint32 = 0xBEBC203
+
+	//path := "../../source_files/rtp_ps_h264_pcm32k_0xBEBC207.raw"
+	//var rawSsrc uint32 = 0xBEBC207
+
+	path := "../../source_files/rtp_ps_h264_G7221_0xBEBC204.raw"
+	var rawSsrc uint32 = 0xBEBC204
+
 	localAddr := "0.0.0.0:20001"
 	id := "hls_mystream"
 

@@ -5,6 +5,7 @@ import (
 	"github.com/lkmio/avformat"
 	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/flv"
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/transcode"
 	"github.com/lkmio/transport"
@@ -214,12 +215,29 @@ func (t *transStreamPublisher) CreateTransStream(protocol TransStreamProtocol, t
 	// 匹配和创建适合TransStream流协议的track
 	var finalTracks []*Track
 	for _, track := range tracks {
+		// 对应传输流支持的编码器列表
 		supportedCodecs, ok := SupportedCodes[protocol]
 		if !ok {
 			panic(fmt.Sprintf("unknown protocol %s", protocol.String()))
 		}
 
+		// 是否支持该编码器
 		_, ok = supportedCodecs[track.Stream.CodecID]
+
+		// 如果PCM采样率不符合FLV的标准, 也开启转码
+		if ok && utils.AVCodecIdPCMS16LE == track.Stream.CodecID && (TransStreamRtmp == protocol || TransStreamFlv == protocol) {
+			for _, sampleRate := range flv.SupportedSampleRates {
+				ok = sampleRate == track.Stream.SampleRate
+				if ok {
+					break
+				}
+			}
+
+			if !ok {
+				log.Sugar.Warnf("FLV不支持的PCM采样率 source: %s stream: %s sampleRate: %d", t.source, protocol.String(), track.Stream.SampleRate)
+			}
+		}
+
 		if !ok {
 			log.Sugar.Warnf("不支持的编码器 source: %s stream: %s codec: %s", t.source, protocol.String(), track.Stream.CodecID)
 			// 尝试音频转码
@@ -227,11 +245,19 @@ func (t *transStreamPublisher) CreateTransStream(protocol TransStreamProtocol, t
 				continue
 			}
 
-			transcodeTrack := t.transcodeTracks[track.Stream.CodecID]
+			var transcodeTrack *TranscodeTrack
+			// 从已经存在的转码track中查找传输流支持的编码器
+			for _, old := range t.transcodeTracks {
+				if _, ok = supportedCodecs[old.transcoder.GetEncoderID()]; ok {
+					transcodeTrack = old
+					break
+				}
+			}
+
 			if transcodeTrack == nil {
 				// 创建音频转码器
 				var codecs []utils.AVCodecID
-				for codec := range SupportedCodes[protocol] {
+				for codec := range supportedCodecs {
 					codecs = append(codecs, codec)
 				}
 
@@ -260,6 +286,8 @@ func (t *transStreamPublisher) CreateTransStream(protocol TransStreamProtocol, t
 
 				// 转码GOPBuffer中的音频
 				t.transcodeGOPBuffer(transcodeTrack)
+			} else {
+				log.Sugar.Infof("使用已经存在的音频转码track source: %s stream: %s src: %s dst: %s", t.source, protocol.String(), track.Stream.CodecID, transcodeTrack.transcoder.GetEncoderID())
 			}
 
 			track = transcodeTrack.track
@@ -459,7 +487,18 @@ func (t *transStreamPublisher) doAddSink(sink Sink, resume bool) bool {
 		tracks = append(tracks, track)
 	}
 
-	transStream, exist := t.transStreams[GenerateTransStreamID(sink.GetProtocol(), tracks...)]
+	var transStream TransStream
+	var exist bool
+	// 查找已经存在的传输流
+	for _, stream := range t.transStreams {
+		if stream.GetID().Protocol() == sink.GetProtocol() {
+			transStream = stream
+			exist = true
+			break
+		}
+	}
+
+	// 不存在创建新的传输流
 	if !exist {
 		var err error
 		transStream, err = t.CreateTransStream(sink.GetProtocol(), tracks, sink)

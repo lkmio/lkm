@@ -17,6 +17,10 @@ func (id TransStreamID) HasTrack(index int) bool {
 	return false
 }
 
+func (id TransStreamID) Protocol() TransStreamProtocol {
+	return TransStreamProtocol(id & 0xFF)
+}
+
 // GenerateTransStreamID 根据传入的推拉流协议和编码器ID生成StreamId
 // 请确保ids根据值升序排序传参
 /*func GenerateTransStreamID(protocol GetProtocol, ids ...utils.AVCodecID) GetTransStreamID {
