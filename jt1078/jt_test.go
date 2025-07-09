@@ -81,9 +81,9 @@ func (h Handler) OnPacket(packet *avformat.AVPacket) {
 	}
 }
 
-func publish(path string) {
+func publish(path string, port string) {
 	client := transport.TCPClient{}
-	addr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:1078")
+	addr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort("127.0.0.1", port))
 	if err != nil {
 		panic(err)
 	}
@@ -106,9 +106,27 @@ func publish(path string) {
 	}
 }
 
+func PackType2String(t int) string {
+	if t == AudioFrameMark {
+		return "audio"
+	} else if t == VideoBFrameMark {
+		return "b frame"
+	} else if t == VideoIFrameMark {
+		return "i frame"
+	} else if t == VideoPFrameMark {
+		return "p frame"
+	} else if t == TransmissionDataMark {
+		return "transmission"
+	} else {
+		return "unknown"
+	}
+}
+
 func TestPublish(t *testing.T) {
 	t.Run("decode_1078_data", func(t *testing.T) {
-		data, err := os.ReadFile("../dump/jt1078-127.0.0.1.50659")
+		//data, err := os.ReadFile("../dump/jt1078-127.0.0.1.50659")
+		data, err := os.ReadFile("../dump/jt1078-127.0.0.1.5472")
+
 		if err != nil {
 			panic(err)
 		}
@@ -140,7 +158,7 @@ func TestPublish(t *testing.T) {
 					panic(err)
 				}
 
-				fmt.Printf("1078 packet ts: %d\r\n", packet.ts)
+				fmt.Printf("1078 packet seq: %d type: %s ts: %d\r\n", packet.seq, PackType2String(int(packet.packetType)), packet.ts)
 			}
 
 			j += size
@@ -150,8 +168,12 @@ func TestPublish(t *testing.T) {
 
 	t.Run("publish", func(t *testing.T) {
 		path := "../../source_files/10352264314-2.bin"
-		//path := "../../source_files/013800138000-1.bin"
-		publish(path)
+		publish(path, "1078")
+	})
+
+	t.Run("publish_2019", func(t *testing.T) {
+		path := "../../source_files/jt_1078_2019.raw"
+		publish(path, "1079")
 	})
 
 	// 1078->ps->rtp
@@ -176,7 +198,7 @@ func TestPublish(t *testing.T) {
 			panic(err)
 		}
 
-		demuxer := NewDemuxer()
+		demuxer := NewDemuxer(2016)
 		demuxer.SetHandler(&Handler{
 			muxer:   mpeg.NewPsMuxer(),
 			buffer:  make([]byte, 1024*1024*2),
@@ -240,7 +262,7 @@ func TestPublish(t *testing.T) {
 			}
 
 			w.WriteHeader(http.StatusOK)
-			go publish(path)
+			go publish(path, "1078")
 		})
 
 		server := &http.Server{

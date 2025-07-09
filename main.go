@@ -163,18 +163,26 @@ func main() {
 	}
 
 	if stream.AppConfig.JT1078.Enable {
-		jtAddr, err := net.ResolveTCPAddr("tcp", stream.ListenAddr(stream.AppConfig.JT1078.Port))
-		if err != nil {
-			panic(err)
+		// 无法通过包头区分2016和2019, 每个版本创建一个Server
+		ports := [][2]int{{stream.AppConfig.JT1078.Port, 2016}}
+		if stream.AppConfig.JT1078.Port2019 > 0 {
+			ports = append(ports, [2]int{stream.AppConfig.JT1078.Port2019, 2019})
 		}
 
-		server := jt1078.NewServer()
-		err = server.Start(jtAddr)
-		if err != nil {
-			panic(err)
-		}
+		for _, port := range ports {
+			jtAddr, err := net.ResolveTCPAddr("tcp", stream.ListenAddr(port[0]))
+			if err != nil {
+				panic(err)
+			}
 
-		log.Sugar.Info("启动jt1078服务成功 addr:", jtAddr.String())
+			server := jt1078.NewServer(port[1])
+			err = server.Start(jtAddr)
+			if err != nil {
+				panic(err)
+			}
+
+			log.Sugar.Info("启动jt1078服务成功 addr:", jtAddr.String())
+		}
 	}
 
 	if stream.AppConfig.Hooks.IsEnableOnStarted() {

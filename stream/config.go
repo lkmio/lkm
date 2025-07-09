@@ -72,6 +72,8 @@ type HlsConfig struct {
 type JT1078Config struct {
 	enableConfig
 	portConfig
+
+	Port2019 int `json:"port_2019"`
 }
 
 type RtspConfig struct {

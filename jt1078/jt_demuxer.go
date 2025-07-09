@@ -11,6 +11,7 @@ type Demuxer struct {
 	sim        string
 	channel    int
 	lastError  string
+	version    int
 }
 
 func (d *Demuxer) ProcessPrevPacket() error {
@@ -42,7 +43,9 @@ func (d *Demuxer) ProcessPrevPacket() error {
 }
 
 func (d *Demuxer) Input(data []byte) (int, error) {
-	packet := Packet{}
+	packet := Packet{
+		version: d.version,
+	}
 	if err := packet.Unmarshal(data); err != nil {
 		return 0, err
 	} else if len(packet.payload) == 0 {
@@ -86,12 +89,13 @@ func (d *Demuxer) Input(data []byte) (int, error) {
 	return len(data), nil
 }
 
-func NewDemuxer() *Demuxer {
+func NewDemuxer(version int) *Demuxer {
 	return &Demuxer{
 		BaseDemuxer: avformat.BaseDemuxer{
 			DataPipeline: &avformat.StreamsBuffer{},
 			Name:         "jt1078", // vob
 			AutoFree:     false,
 		},
+		version: version,
 	}
 }

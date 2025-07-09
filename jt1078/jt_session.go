@@ -65,13 +65,13 @@ func (s *Session) Close() {
 	stream.TCPReceiveBufferPool.Put(s.receiveBuffer[:cap(s.receiveBuffer)])
 }
 
-func NewSession(conn net.Conn) *Session {
+func NewSession(conn net.Conn, version int) *Session {
 	delimiter := [4]byte{0x30, 0x31, 0x63, 0x64}
 	session := Session{
 		PublishSource: stream.PublishSource{
 			Conn:         conn,
 			Type:         stream.SourceType1078,
-			TransDemuxer: NewDemuxer(),
+			TransDemuxer: NewDemuxer(version),
 		},
 
 		decoder:       transport.NewDelimiterFrameDecoder(1024*1024*2, delimiter[:]),

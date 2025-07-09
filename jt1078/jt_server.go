@@ -16,11 +16,12 @@ type Server interface {
 
 type jtServer struct {
 	stream.StreamServer[*Session]
-	tcp *transport.TCPServer
+	tcp     *transport.TCPServer
+	version int
 }
 
 func (s *jtServer) OnNewSession(conn net.Conn) *Session {
-	return NewSession(conn)
+	return NewSession(conn, s.version)
 }
 
 func (s *jtServer) OnCloseSession(session *Session) {
@@ -57,8 +58,10 @@ func (s *jtServer) Close() {
 	panic("implement me")
 }
 
-func NewServer() Server {
-	j := &jtServer{}
+func NewServer(version int) Server {
+	j := &jtServer{
+		version: version,
+	}
 	j.StreamServer = stream.StreamServer[*Session]{
 		SourceType: stream.SourceType1078,
 		Handler:    j,
