@@ -1,7 +1,7 @@
 module github.com/lkmio/lkm
 
 require (
-	github.com/lkmio/audio-transcoder v0.0.0-20250702123727-6c54138868c6
+	github.com/lkmio/audio-transcoder v0.2.1
 	github.com/lkmio/flv v0.0.0
 	github.com/lkmio/mpeg v0.0.0
 	github.com/lkmio/rtmp v0.0.0
@@ -28,6 +28,7 @@ require (
 	github.com/BurntSushi/toml v1.3.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/google/uuid v1.3.1 // indirect
+	github.com/lkmio/g726 v0.1.3 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.16 // indirect
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d // indirect

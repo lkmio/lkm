@@ -146,8 +146,8 @@ func PT2CodecID(pt byte) (error, utils.AVCodecID) {
 		return nil, utils.AVCodecIdPCMMULAW
 	case PTAudioAAC:
 		return nil, utils.AVCodecIdAAC
-	//case PTAudioADPCMA:
-	//	return nil, utils.AVCodecIdADPCMAFC
+	case PTAudioG726:
+		return nil, utils.AVCodecIdADPCMG726
 	default:
 		return fmt.Errorf("the codec %d is not implemented", pt), utils.AVCodecIdNONE
 	}

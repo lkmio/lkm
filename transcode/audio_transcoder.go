@@ -8,6 +8,7 @@ import (
 	audio_transcoder "github.com/lkmio/audio-transcoder"
 	"github.com/lkmio/avformat"
 	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/g726"
 )
 
 func init() {
@@ -58,6 +59,20 @@ func (t *AudioTranscoder) Close() {
 
 func (t *AudioTranscoder) GetEncoderID() utils.AVCodecID {
 	return t.encoderID
+}
+
+func bitRate2G726Rate(bitRate int) (g726.G726Rate, error) {
+	if bitRate <= 16000 {
+		return g726.G726Rate16kbps, nil
+	} else if bitRate <= 24000 {
+		return g726.G726Rate24kbps, nil
+	} else if bitRate <= 32000 {
+		return g726.G726Rate32kbps, nil
+	} else if bitRate <= 40000 {
+		return g726.G726Rate40kbps, nil
+	} else {
+		return g726.G726Rate(-1), fmt.Errorf("unsupported bit rate: %d", bitRate)
+	}
 }
 
 func NewAudioTranscoder(src *avformat.AVStream, dst []utils.AVCodecID) (Transcoder, *avformat.AVStream, error) {
@@ -115,6 +130,15 @@ func NewAudioTranscoder(src *avformat.AVStream, dst []utils.AVCodecID) (Transcod
 				return nil, nil, err
 			}
 			break
+		case utils.AVCodecIdADPCMG726:
+			var rate g726.G726Rate
+			rate, err = bitRate2G726Rate(src.BitRate)
+			if err != nil {
+				return nil, nil, err
+			} else if err = decoder.(*audio_transcoder.G726Decoder).Create(rate); err != nil {
+				return nil, nil, err
+			}
+			break
 		}
 	}
 
@@ -131,6 +155,16 @@ func NewAudioTranscoder(src *avformat.AVStream, dst []utils.AVCodecID) (Transcod
 		if _, err = encoder.(*audio_transcoder.OpusEncoder).Create(src.SampleRate, src.Channels); err != nil {
 			return nil, nil, err
 		}
+		break
+	case utils.AVCodecIdADPCMG726:
+		var rate g726.G726Rate
+		rate, err = bitRate2G726Rate(src.BitRate)
+		if err != nil {
+			return nil, nil, err
+		} else if err = encoder.(*audio_transcoder.G726Encoder).Create(rate); err != nil {
+			return nil, nil, err
+		}
+		break
 	}
 
 	dstStream := &avformat.AVStream{}

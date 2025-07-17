@@ -206,8 +206,11 @@ func TestPublish(t *testing.T) {
 	//path := "../../source_files/rtp_ps_h264_pcm32k_0xBEBC207.raw"
 	//var rawSsrc uint32 = 0xBEBC207
 
-	path := "../../source_files/rtp_ps_h264_G7221_0xBEBC204.raw"
-	var rawSsrc uint32 = 0xBEBC204
+	//path := "../../source_files/rtp_ps_h264_G7221_0xBEBC204.raw"
+	//var rawSsrc uint32 = 0xBEBC204
+
+	path := "../../source_files/rtp_ps_h264_G726_0xBEBC205.raw"
+	var rawSsrc uint32 = 0xBEBC205
 
 	localAddr := "0.0.0.0:20001"
 	id := "hls_mystream"

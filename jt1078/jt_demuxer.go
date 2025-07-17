@@ -37,7 +37,7 @@ func (d *Demuxer) ProcessPrevPacket() error {
 	}
 
 	if !d.Completed && d.Tracks.Size() > 1 {
-		d.ProbeComplete()
+		d.TryCompleteProbe()
 	}
 	return nil
 }

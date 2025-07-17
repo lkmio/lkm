@@ -166,8 +166,61 @@ func TestPublish(t *testing.T) {
 
 	})
 
+	t.Run("decode_1078_raw", func(t *testing.T) {
+		//path := "../../source_files/0714-1.bin"
+		path := "../../source_files/013800138000-1.bin"
+		data, err := os.ReadFile(path)
+
+		if err != nil {
+			panic(err)
+		}
+
+		os.Remove(path + ".video")
+		os.Remove(path + ".audio")
+
+		delimiter := [4]byte{0x30, 0x31, 0x63, 0x64}
+		decoder := transport.NewDelimiterFrameDecoder(1024*1024*2, delimiter[:])
+
+		length := len(data)
+		for n := 0; n < length; {
+			i, bytes, err := decoder.Input(data[n:])
+			if err != nil {
+				panic(err)
+			} else if len(bytes) < 1 {
+				break
+			}
+
+			n += i
+			packet := Packet{}
+			err = packet.Unmarshal(bytes)
+			if err != nil {
+				panic(err)
+			}
+
+			if packet.packetType < AudioFrameMark {
+				f, err := os.OpenFile(path+".video", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+				if err != nil {
+					panic(err)
+				}
+
+				f.Write(packet.payload)
+				f.Close()
+			} else if packet.packetType == AudioFrameMark {
+				f, err := os.OpenFile(path+".audio", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+				if err != nil {
+					panic(err)
+				}
+
+				f.Write(packet.payload)
+				f.Close()
+			}
+		}
+	})
+
 	t.Run("publish", func(t *testing.T) {
-		path := "../../source_files/10352264314-2.bin"
+		//path := "../../source_files/10352264314-2.bin"
+		//path := "../../source_files/013800138000-1.bin"
+		path := "../../source_files/0714-1.bin"
 		publish(path, "1078")
 	})
 
