@@ -246,7 +246,7 @@ func (t *transStreamPublisher) CreateTransStream(protocol TransStreamProtocol, t
 			}
 
 			var transcodeTrack *TranscodeTrack
-			// 从已经存在的转码track中查找传输流支持的编码器
+			// 优先从已经转码的track列表中查找支持的track
 			for _, old := range t.transcodeTracks {
 				if _, ok = supportedCodecs[old.transcoder.GetEncoderID()]; ok {
 					transcodeTrack = old
@@ -282,7 +282,7 @@ func (t *transStreamPublisher) CreateTransStream(protocol TransStreamProtocol, t
 				}
 
 				transcodeTrack = NewTranscodeTrack(newTrack, transcoder)
-				t.transcodeTracks[track.Stream.CodecID] = transcodeTrack
+				t.transcodeTracks[transcoder.GetEncoderID()] = transcodeTrack
 
 				// 转码GOPBuffer中的音频
 				t.transcodeGOPBuffer(transcodeTrack)
