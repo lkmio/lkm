@@ -7,6 +7,7 @@ import (
 	"github.com/lkmio/avformat/avc"
 	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/avformat/utils"
+	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
 	"github.com/lkmio/rtp"
 	"github.com/pion/sdp/v3"
@@ -28,9 +29,8 @@ type TransStream struct {
 	urlFormat string
 
 	RtspTracks []*Track
-	//oldTracks  []*Track
-	oldTracks map[int]uint16
-	sdp       string
+	oldTracks  map[utils.AVCodecID]uint16 // 上次推流的rtp seq
+	sdp        string
 
 	rtpBuffer *stream.RtpBuffer
 }
@@ -45,11 +45,16 @@ func (t *TransStream) Input(packet *avformat.AVPacket, trackIndex int) ([]*colle
 	var ts uint32
 	var result []*collections.ReferenceCounter[[]byte]
 	track := t.RtspTracks[trackIndex]
+
+	duration := packet.GetDuration(track.payload.ClockRate)
+	//dts := t.Tracks[trackIndex].Dts
+	ts = uint32(t.Tracks[trackIndex].Pts)
+	t.Tracks[trackIndex].Dts += duration
+	t.Tracks[trackIndex].Pts = t.Tracks[trackIndex].Dts + packet.GetPtsDtsDelta(track.payload.ClockRate)
+
 	if utils.AVMediaTypeAudio == packet.MediaType {
-		ts = uint32(packet.ConvertPts(track.payload.ClockRate))
 		result = t.PackRtpPayload(track, trackIndex, packet.Data, ts)
 	} else if utils.AVMediaTypeVideo == packet.MediaType {
-		ts = uint32(packet.ConvertPts(track.payload.ClockRate))
 		annexBData := avformat.AVCCPacket2AnnexB(t.BaseTransStream.Tracks[trackIndex].Stream, packet)
 		data := avc.RemoveStartCode(annexBData)
 		result = t.PackRtpPayload(track, trackIndex, data, ts)
@@ -92,9 +97,11 @@ func (t *TransStream) PackRtpPayload(track *Track, channel int, data []byte, tim
 		counter.Refer()
 
 		packet = counter.Get()
+		// 预留rtp over tcp 4字节头部
 		return packet[OverTcpHeaderSize:]
 	}, func(bytes []byte) {
 		track.EndSeq = track.Muxer.GetHeader().Seq
+		// 每个包都存在rtp over tcp 4字节头部
 		overTCPPacket := packet[:OverTcpHeaderSize+len(bytes)]
 		t.OverTCP(overTCPPacket, channel)
 
@@ -115,7 +122,7 @@ func (t *TransStream) AddTrack(track *stream.Track) (int, error) {
 	var startSeq uint16
 	if t.oldTracks != nil {
 		var ok bool
-		startSeq, ok = t.oldTracks[int(track.Stream.CodecID)]
+		startSeq, ok = t.oldTracks[track.Stream.CodecID]
 		utils.Assert(ok)
 	}
 
@@ -238,7 +245,7 @@ func (t *TransStream) WriteHeader() error {
 				mediaDescription.Attributes = append(mediaDescription.Attributes, fmtp)
 			}
 
-		} else {
+		} else if utils.AVMediaTypeVideo == track.MediaType {
 			mediaDescription.MediaName.Media = "video"
 		}
 
@@ -254,7 +261,7 @@ func (t *TransStream) WriteHeader() error {
 	return nil
 }
 
-func NewTransStream(addr net.IPAddr, urlFormat string, oldTracks map[int]uint16) stream.TransStream {
+func NewTransStream(addr net.IPAddr, urlFormat string, oldTracks map[utils.AVCodecID]uint16) stream.TransStream {
 	t := &TransStream{
 		addr:      addr,
 		urlFormat: urlFormat,
@@ -273,9 +280,14 @@ func NewTransStream(addr net.IPAddr, urlFormat string, oldTracks map[int]uint16)
 
 func TransStreamFactory(source stream.Source, _ stream.TransStreamProtocol, _ []*stream.Track, _ stream.Sink) (stream.TransStream, error) {
 	trackFormat := "?track=%d"
-	var oldTracks map[int]uint16
+	var oldTracks map[utils.AVCodecID]uint16
 	if endInfo := source.GetTransStreamPublisher().GetStreamEndInfo(); endInfo != nil {
 		oldTracks = endInfo.RtspTracks
+		if oldTracks != nil {
+			for codecID, seq := range oldTracks {
+				log.Sugar.Infof("track codecID: %s, seq: %d", codecID, seq)
+			}
+		}
 	}
 
 	return NewTransStream(net.IPAddr{

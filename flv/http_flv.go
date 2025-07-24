@@ -18,7 +18,7 @@ type TransStream struct {
 	flvExtraDataBlock []byte // metadata和sequence header
 }
 
-func (t *TransStream) Input(packet *avformat.AVPacket, _ int) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
+func (t *TransStream) Input(packet *avformat.AVPacket, index int) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
 	t.ClearOutStreamBuffer()
 
 	var flvTagSize int
@@ -29,12 +29,19 @@ func (t *TransStream) Input(packet *avformat.AVPacket, _ int) ([]*collections.Re
 	var keyBuffer bool
 	var frameType int
 
-	dts = packet.ConvertDts(1000)
-	pts = packet.ConvertPts(1000)
+	duration := packet.GetDuration(1000)
+	track := t.Tracks[index]
+	dts = track.Dts
+	pts = track.Pts
+	track.Dts += duration
+	track.Pts = track.Dts + packet.GetPtsDtsDelta(1000)
+
 	if utils.AVMediaTypeAudio == packet.MediaType {
+		//log.Sugar.Infof("audio packet dts: %d, pts: %d data size: %d", dts, pts, len(packet.Data))
 		data = packet.Data
 		flvTagSize = flv.TagHeaderSize + t.Muxer.ComputeAudioDataHeaderSize() + len(packet.Data)
 	} else if utils.AVMediaTypeVideo == packet.MediaType {
+		//log.Sugar.Infof("video packet dts: %d, pts: %d", dts, pts)
 		data = avformat.AnnexBPacket2AVCC(packet)
 		flvTagSize = flv.TagHeaderSize + t.Muxer.ComputeVideoDataHeaderSize(uint32(pts-dts)) + len(data)
 		if videoKey = packet.Key; videoKey {

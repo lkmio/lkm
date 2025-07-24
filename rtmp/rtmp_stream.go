@@ -21,7 +21,7 @@ type transStream struct {
 	metaData   *amf0.Object // 推流方携带的元数据
 }
 
-func (t *transStream) Input(packet *avformat.AVPacket, _ int) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
+func (t *transStream) Input(packet *avformat.AVPacket, index int) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
 	t.ClearOutStreamBuffer()
 
 	var data []byte
@@ -37,9 +37,12 @@ func (t *transStream) Input(packet *avformat.AVPacket, _ int) ([]*collections.Re
 	var keyBuffer bool
 	var frameType int
 
-	dts = packet.ConvertDts(1000)
-	pts = packet.ConvertPts(1000)
+	duration := packet.GetDuration(1000)
+	dts = t.Tracks[index].Dts
+	pts = t.Tracks[index].Pts
 	ct := pts - dts
+	t.Tracks[index].Dts += duration
+	t.Tracks[index].Pts = t.Tracks[index].Dts + packet.GetPtsDtsDelta(1000)
 
 	// chunk = header+payload(audio data / video data)
 	if utils.AVMediaTypeAudio == packet.MediaType {

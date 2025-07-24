@@ -35,8 +35,8 @@ type TransStream struct {
 	duration       int      // 切片时长, 单位秒
 	playlistLength int      // 最大切片文件个数
 
-	PlaylistFormatPtr        *string                                 // 位于内存中的m3u8播放列表，每个sink都引用指针地址.
-	PlaylistFormatPtrCounter []*collections.ReferenceCounter[[]byte] // string指针转byte[], 方便发送给sink
+	PlaylistFormat    *string                                 // 位于内存中的m3u8播放列表，每个sink都引用指针地址.
+	PlaylistFormatPtr []*collections.ReferenceCounter[[]byte] // string指针转byte[], 方便发送给sink
 }
 
 func (t *TransStream) Input(packet *avformat.AVPacket, index int) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
@@ -60,8 +60,12 @@ func (t *TransStream) Input(packet *avformat.AVPacket, index int) ([]*collection
 		newSegment = true
 	}
 
-	pts := packet.ConvertPts(90000)
-	dts := packet.ConvertDts(90000)
+	duration := packet.GetDuration(90000)
+	dts := t.Tracks[index].Dts
+	pts := t.Tracks[index].Pts
+	t.Tracks[index].Dts += duration
+	t.Tracks[index].Pts = t.Tracks[index].Dts + packet.GetPtsDtsDelta(90000)
+
 	data := packet.Data
 	if utils.AVMediaTypeVideo == packet.MediaType {
 		data = avformat.AVCCPacket2AnnexB(t.FindTrackWithStreamIndex(packet.Index).Stream, packet)
@@ -83,7 +87,7 @@ func (t *TransStream) Input(packet *avformat.AVPacket, index int) ([]*collection
 
 	// 缓存完第二个切片, 才响应发送m3u8文件. 如果一个切片就发, 播放器缓存少会卡顿.
 	if newSegment && t.M3U8Writer.Size() > 1 {
-		return t.PlaylistFormatPtrCounter, -1, true, nil
+		return t.PlaylistFormatPtr, -1, true, nil
 	}
 
 	return nil, -1, true, nil
@@ -132,7 +136,7 @@ func (t *TransStream) flushSegment(end bool) error {
 	//	m3u8Txt += "#EXT-X-ENDLIST"
 	//}
 
-	*t.PlaylistFormatPtr = m3u8Txt
+	*t.PlaylistFormat = m3u8Txt
 
 	// 写入最新的m3u8到文件
 	if t.m3u8File != nil {
@@ -273,13 +277,13 @@ func NewTransStream(dir, m3u8Name, tsFormat, tsUrl string, segmentDuration, play
 	}
 
 	if playlistFormat != nil {
-		transStream.PlaylistFormatPtr = playlistFormat
+		transStream.PlaylistFormat = playlistFormat
 	} else {
-		transStream.PlaylistFormatPtr = new(string)
+		transStream.PlaylistFormat = new(string)
 	}
 
-	playlistFormatPtrCounter := collections.NewReferenceCounter[[]byte](stringPtrToBytes(transStream.PlaylistFormatPtr))
-	transStream.PlaylistFormatPtrCounter = append(transStream.PlaylistFormatPtrCounter, playlistFormatPtrCounter)
+	playlistFormatPtrCounter := collections.NewReferenceCounter[[]byte](stringPtrToBytes(transStream.PlaylistFormat))
+	transStream.PlaylistFormatPtr = append(transStream.PlaylistFormatPtr, playlistFormatPtrCounter)
 	// 创建TS封装器
 	muxer := mpeg.NewTSMuxer()
 
