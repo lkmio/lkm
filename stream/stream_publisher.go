@@ -667,7 +667,7 @@ func (t *transStreamPublisher) doClose() {
 			tracks = append(tracks, track.track)
 		}
 
-		sourceHistory := StreamEndInfoBride(t.source, t.transStreams)
+		sourceHistory := StreamEndInfoBride(t.source, t.originTracks.All(), t.transStreams)
 		streamEndInfoManager.Add(sourceHistory)
 	}
 

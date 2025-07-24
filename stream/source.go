@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	StreamEndInfoBride func(source string, streams map[TransStreamID]TransStream) *StreamEndInfo
+	StreamEndInfoBride func(source string, originTracks []*Track, streams map[TransStreamID]TransStream) *StreamEndInfo
 )
 
 // Source 对推流源的封装

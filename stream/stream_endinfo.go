@@ -18,7 +18,8 @@ func init() {
 // 如果重新推流之前，陆续有拉流端断开，直至sink计数为0，删除保存的推流信息。
 type StreamEndInfo struct {
 	ID             string
-	Timestamps     map[TransStreamID]map[utils.AVCodecID][2]int64 // 每路track结束时间戳
+	Timestamps     map[TransStreamID]map[utils.AVCodecID][2]int64 // 每个传输流的结束时间戳
+	OriginTracks   map[utils.AVCodecID]interface{}                // 原始推流track
 	M3U8Writer     M3U8Writer                                     // 保存M3U8生成器
 	PlaylistFormat *string                                        // M3U8播放列表
 	RtspTracks     map[utils.AVCodecID]uint16                     // rtsp每路track的结束序号
@@ -26,15 +27,15 @@ type StreamEndInfo struct {
 }
 
 func EqualsTracks(info *StreamEndInfo, tracks []*Track) bool {
-	//if len(info.Timestamps) != len(tracks) {
-	//	return false
-	//}
+	if len(info.OriginTracks) != len(tracks) {
+		return false
+	}
 
-	//for _, track := range tracks {
-	//	if _, ok := info.Timestamps[track.Stream.CodecID]; !ok {
-	//		return false
-	//	}
-	//}
+	for _, track := range tracks {
+		if _, ok := info.OriginTracks[track.Stream.CodecID]; !ok {
+			return false
+		}
+	}
 
 	return true
 }
