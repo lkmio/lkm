@@ -1,7 +1,7 @@
 package rtsp
 
-
 import (
+	"encoding/hex"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/transport"
@@ -64,20 +64,25 @@ func (s *server) OnConnected(conn net.Conn) []byte {
 func (s *server) OnPacket(conn net.Conn, data []byte) []byte {
 	t := conn.(*transport.Conn)
 
+	// 丢弃rtp/rtcp包
+	if data[0] == OverTcpMagic || data[0]>>7&0x1 == 1 {
+		return nil
+	}
+
 	method, url, header, err := parseMessage(data)
 	if err != nil {
-		log.Sugar.Errorf("failed to prase message:%s. err:%s conn:%s", string(data), err.Error(), conn.RemoteAddr().String())
+		log.Sugar.Errorf("failed to prase message: %s. err: %s conn: %s", hex.EncodeToString(data), err.Error(), conn.RemoteAddr().String())
 		_ = conn.Close()
 		return nil
 	}
 
 	err = s.handler.Process(t.Data.(*session), method, url, header)
 	if err != nil {
-		log.Sugar.Errorf("failed to process message of RTSP. err:%s conn:%s msg:%s", err.Error(), conn.RemoteAddr().String(), string(data))
+		log.Sugar.Errorf("failed to process message of RTSP. err: %s conn: %s msg: %s", err.Error(), conn.RemoteAddr().String(), hex.EncodeToString(data))
 		_ = conn.Close()
 	}
 
-	//后续实现rtsp推流, 需要返回收流buffer
+	// 后续实现rtsp推流, 需要返回收流buffer
 	return nil
 }
 
