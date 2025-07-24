@@ -100,8 +100,10 @@ func (s *Sink) Write(index int, data []*collections.ReferenceCounter[[]byte], rt
 				continue
 			}
 
-			nano := uint64(time.Now().UnixNano())
-			ntp := (nano/1000000000 + 2208988800<<32) | (nano % 1000000000)
+			nano := time.Now().UnixNano()
+			seconds := uint64(nano/1e9 + 2208988800)
+			fraction := uint64((nano % 1e9) * (1 << 32) / 1e9)
+			ntp := (seconds << 32) | fraction
 			sr := rtcp.SenderReport{
 				SSRC:        sender.SSRC,
 				NTPTime:     ntp,
