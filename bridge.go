@@ -10,14 +10,15 @@ import (
 
 // 处理不同包不能相互引用的需求
 
-func NewStreamEndInfo(source string, streams map[stream.TransStreamID]stream.TransStream) *stream.StreamEndInfo {
+func NewStreamEndInfo(source string, originTracks []*stream.Track, streams map[stream.TransStreamID]stream.TransStream) *stream.StreamEndInfo {
 	if len(streams) < 1 {
 		return nil
 	}
 
 	info := stream.StreamEndInfo{
-		ID:         source,
-		Timestamps: make(map[stream.TransStreamID]map[utils.AVCodecID][2]int64, len(streams)),
+		ID:           source,
+		Timestamps:   make(map[stream.TransStreamID]map[utils.AVCodecID][2]int64, len(streams)),
+		OriginTracks: make(map[utils.AVCodecID]interface{}, len(originTracks)),
 	}
 
 	for _, transStream := range streams {
@@ -47,6 +48,10 @@ func NewStreamEndInfo(source string, streams map[stream.TransStreamID]stream.Tra
 		}
 
 		info.Timestamps[transStream.GetID()] = ts
+	}
+
+	for _, track := range originTracks {
+		info.OriginTracks[track.Stream.CodecID] = nil
 	}
 
 	return &info
