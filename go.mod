@@ -65,4 +65,4 @@ replace github.com/lkmio/transport => ../transport
 
 replace github.com/lkmio/rtp => ../rtp
 
-go 1.19
+go 1.20
