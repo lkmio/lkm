@@ -6,7 +6,7 @@ import (
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/stream"
 	"github.com/pion/interceptor"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 	"net"
 )
 
@@ -37,11 +37,6 @@ func (t *transStream) Input(packet *avformat.AVPacket, _ int) ([]*collections.Re
 		t.AppendOutStreamBuffer(collections.NewReferenceCounter(packet.Data))
 	} else if utils.AVMediaTypeVideo == packet.MediaType {
 		avStream := t.FindTrackWithStreamIndex(packet.Index).Stream
-		if packet.Key {
-			extra := avStream.CodecParameters.AnnexBExtraData()
-			t.AppendOutStreamBuffer(collections.NewReferenceCounter(extra))
-		}
-
 		data := avformat.AVCCPacket2AnnexB(avStream, packet)
 		t.AppendOutStreamBuffer(collections.NewReferenceCounter(data))
 	}

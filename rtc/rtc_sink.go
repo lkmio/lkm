@@ -6,8 +6,8 @@ import (
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
-	"github.com/pion/webrtc/v3"
-	"github.com/pion/webrtc/v3/pkg/media"
+	"github.com/pion/webrtc/v4"
+	"github.com/pion/webrtc/v4/pkg/media"
 	"io"
 	"time"
 )
@@ -96,6 +96,12 @@ func (s *Sink) StartStreaming(transStream stream.TransStream) error {
 		return err
 	}
 
+	// offer的sdp, 应答给http请求
+	if s.cb != nil {
+		log.Sugar.Infof("answer: %s", connection.LocalDescription().SDP)
+		s.cb(connection.LocalDescription().SDP)
+	}
+
 	<-complete
 	connection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		s.state = state
@@ -109,10 +115,6 @@ func (s *Sink) StartStreaming(transStream stream.TransStream) error {
 
 	s.peer = connection
 
-	// offer的sdp, 应答给http请求
-	if s.cb != nil {
-		s.cb(connection.LocalDescription().SDP)
-	}
 	return nil
 }
 

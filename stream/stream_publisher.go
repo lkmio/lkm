@@ -766,12 +766,12 @@ func (t *transStreamPublisher) ClearGopBuffer(free bool) {
 		if packet.Release() && free {
 			avformat.FreePacket(packet.Get())
 		}
-
-		// 释放annexb和avcc格式转换的缓存
-		if t.bitstreamFilterBuffer != nil {
-			t.bitstreamFilterBuffer.Pop()
-		}
 	})
+
+	// 释放annexb和avcc格式转换的缓存
+	if t.bitstreamFilterBuffer != nil {
+		t.bitstreamFilterBuffer.Clear()
+	}
 
 	// 丢弃转码track中的缓存
 	for _, track := range t.transcodeTracks {
