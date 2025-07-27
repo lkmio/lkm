@@ -349,6 +349,9 @@ func (t *transStreamPublisher) CreateTransStream(protocol TransStreamProtocol, t
 	// 设置转发流
 	if TransStreamGBCascaded == transStream.GetProtocol() {
 		t.forwardTransStream = transStream
+	} else if AppConfig.GOPCache && t.hasVideo {
+		// 新建传输流,发送GOP缓存
+		t.DispatchGOPBuffer(transStream)
 	}
 
 	return transStream, nil
@@ -423,6 +426,12 @@ func (t *transStreamPublisher) DispatchBuffer(transStream TransStream, index int
 	}
 }
 
+func (t *transStreamPublisher) DispatchSegments(transStream TransStream, segments []TransStreamSegment) {
+	for _, segment := range segments {
+		t.DispatchBuffer(transStream, segment.Index, segment.Data, segment.TS, segment.Key)
+	}
+}
+
 func (t *transStreamPublisher) pendingSink(sink Sink) {
 	log.Sugar.Errorf("向sink推流超时,关闭连接. %s-sink: %s source: %s", sink.GetProtocol().String(), sink.GetID(), t.source)
 	go sink.Close()
@@ -443,6 +452,12 @@ func (t *transStreamPublisher) write(sink Sink, index int, data []*collections.R
 	}
 
 	return false
+}
+
+func (t *transStreamPublisher) writeSegments(sink Sink, segments []TransStreamSegment) {
+	for _, segment := range segments {
+		t.write(sink, segment.Index, segment.Data, segment.TS, segment.Key)
+	}
 }
 
 // 创建sink需要的输出流
@@ -554,18 +569,13 @@ func (t *transStreamPublisher) doAddSink(sink Sink, resume bool) bool {
 	}
 
 	// 发送已缓存的合并写切片
-	keyBuffer, timestamp, _ := transStream.ReadKeyFrameBuffer()
-	if len(keyBuffer) > 0 {
-		if extraData, _, _ := transStream.ReadExtraData(timestamp); len(extraData) > 0 {
-			t.write(sink, 0, extraData, timestamp, false)
+	segments, _ := transStream.ReadKeyFrameBuffer()
+	if len(segments) > 0 {
+		if extraData, _, _ := transStream.ReadExtraData(0); len(extraData) > 0 {
+			t.write(sink, 0, extraData, 0, false)
 		}
 
-		t.write(sink, 0, keyBuffer, timestamp, true)
-	}
-
-	// 新建传输流，发送已经缓存的音视频帧
-	if !exist && AppConfig.GOPCache && t.hasVideo && TransStreamGBCascaded != transStream.GetProtocol() {
-		t.DispatchGOPBuffer(transStream)
+		t.writeSegments(sink, segments)
 	}
 
 	return true
@@ -674,9 +684,9 @@ func (t *transStreamPublisher) doClose() {
 	// 关闭所有输出流
 	for _, transStream := range t.transStreams {
 		// 发送剩余包
-		data, ts, _ := transStream.Close()
-		if len(data) > 0 {
-			t.DispatchBuffer(transStream, -1, data, ts, true)
+		segments, _ := transStream.Close()
+		if len(segments) > 0 {
+			t.DispatchSegments(transStream, segments)
 		}
 
 		// 如果是tcp传输流, 归还合并写缓冲区

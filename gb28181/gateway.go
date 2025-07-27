@@ -65,9 +65,9 @@ func (s *GBGateway) Input(packet *avformat.AVPacket, index int) ([]*collections.
 	return result, 0, true, nil
 }
 
-func (s *GBGateway) Close() ([]*collections.ReferenceCounter[[]byte], int64, error) {
+func (s *GBGateway) Close() ([]stream.TransStreamSegment, error) {
 	s.rtpBuffer.Clear()
-	return nil, 0, nil
+	return nil, nil
 }
 
 func NewGBGateway(ssrc uint32) *GBGateway {

@@ -10,11 +10,11 @@ type RtpBuffer struct {
 
 func (r *RtpBuffer) Get() *collections.ReferenceCounter[[]byte] {
 	if r.queue.Size() > 0 {
-		rtp := r.queue.Peek(0)
-		if rtp.UseCount() < 2 {
-			bytes := rtp.Get()
-			rtp.ResetData(bytes[:cap(bytes)])
-			return rtp
+		pkt := r.queue.Peek(0)
+		if pkt.UseCount() < 2 {
+			r.queue.Pop()
+			r.Put(pkt)
+			return pkt
 		}
 	}
 
@@ -32,6 +32,13 @@ func (r *RtpBuffer) Clear() {
 		bytes := r.queue.Pop().Get()
 		UDPReceiveBufferPool.Put(bytes[:cap(bytes)])
 	}
+}
+
+// Put 归还rtp包
+func (r *RtpBuffer) Put(pkt *collections.ReferenceCounter[[]byte]) {
+	bytes := pkt.Get()
+	pkt.ResetData(bytes[:cap(bytes)])
+	r.queue.Push(pkt)
 }
 
 func NewRtpBuffer(capacity int) *RtpBuffer {

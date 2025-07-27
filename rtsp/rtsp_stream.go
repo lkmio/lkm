@@ -21,18 +21,17 @@ const (
 )
 
 // TransStream rtsp传输流封装
-// 低延迟是rtsp特性, 所以不考虑实现GOP缓存
 type TransStream struct {
 	stream.BaseTransStream
 	addr      net.IPAddr
 	addrType  string
 	urlFormat string
 
-	RtspTracks []*Track
-	oldTracks  map[utils.AVCodecID]uint16 // 上次推流的rtp seq
-	sdp        string
-
-	rtpBuffer *stream.RtpBuffer
+	sdp             string
+	RtspTracks      []*Track
+	lastEndSeq      map[utils.AVCodecID]uint16  // 上次结束推流的rtp seq
+	segments        []stream.TransStreamSegment // 缓存的切片
+	packetAllocator *stream.RtpBuffer           // 分配rtp包
 }
 
 func (t *TransStream) OverTCP(data []byte, channel int) {
@@ -53,65 +52,87 @@ func (t *TransStream) Input(packet *avformat.AVPacket, trackIndex int) ([]*colle
 	t.Tracks[trackIndex].Pts = t.Tracks[trackIndex].Dts + packet.GetPtsDtsDelta(track.payload.ClockRate)
 
 	if utils.AVMediaTypeAudio == packet.MediaType {
-		result = t.PackRtpPayload(track, trackIndex, packet.Data, ts)
+		result = t.PackRtpPayload(track, trackIndex, packet.Data, ts, false)
 	} else if utils.AVMediaTypeVideo == packet.MediaType {
 		annexBData := avformat.AVCCPacket2AnnexB(t.BaseTransStream.Tracks[trackIndex].Stream, packet)
-		data := avc.RemoveStartCode(annexBData)
-		result = t.PackRtpPayload(track, trackIndex, data, ts)
+		result = t.PackRtpPayload(track, trackIndex, annexBData, ts, packet.Key)
 	}
 
 	return result, int64(ts), utils.AVMediaTypeVideo == packet.MediaType && packet.Key, nil
 }
 
-func (t *TransStream) ReadExtraData(ts int64) ([]*collections.ReferenceCounter[[]byte], int64, error) {
-	// 返回视频编码数据的rtp包
-	for _, track := range t.RtspTracks {
-		if utils.AVMediaTypeVideo != track.MediaType {
-			continue
-		}
-
-		// 回滚序号和时间戳
-		index := int(track.StartSeq) - len(track.ExtraDataBuffer)
-		for i, packet := range track.ExtraDataBuffer {
-			rtp.RollbackSeq(packet.Get()[OverTcpHeaderSize:], index+i+1)
-			binary.BigEndian.PutUint32(packet.Get()[OverTcpHeaderSize+4:], uint32(ts))
-		}
-
-		// 目前只有视频需要发送扩展数据的rtp包, 所以直接返回
-		return track.ExtraDataBuffer, ts, nil
-	}
-
-	return nil, ts, nil
+func (t *TransStream) ReadKeyFrameBuffer() ([]stream.TransStreamSegment, error) {
+	// 默认不开启rtsp的关键帧缓存, 一次发送rtp包过多, 播放器的jitter buffer可能会溢出丢弃, 造成播放花屏
+	//return t.segments, nil
+	return nil, nil
 }
 
 // PackRtpPayload 打包返回rtp over tcp的数据包
-func (t *TransStream) PackRtpPayload(track *Track, channel int, data []byte, timestamp uint32) []*collections.ReferenceCounter[[]byte] {
+func (t *TransStream) PackRtpPayload(track *Track, trackIndex int, data []byte, timestamp uint32, videoKey bool) []*collections.ReferenceCounter[[]byte] {
+	// 分割nalu
+	var payloads [][]byte
+	if utils.AVCodecIdH264 == track.CodecID || utils.AVCodecIdH265 == track.CodecID {
+		avc.SplitNalU(data, func(nalu []byte) {
+			payloads = append(payloads, avc.RemoveStartCode(nalu))
+		})
+	} else {
+		payloads = append(payloads, data)
+	}
+
 	var result []*collections.ReferenceCounter[[]byte]
 	var packet []byte
 	var counter *collections.ReferenceCounter[[]byte]
 
-	// 保存开始序号
-	track.StartSeq = track.Muxer.GetHeader().Seq
-	track.Muxer.Input(data, timestamp, func() []byte {
-		counter = t.rtpBuffer.Get()
-		counter.Refer()
+	for _, payload := range payloads {
+		// 保存开始序号
+		track.StartSeq = track.Muxer.GetHeader().Seq
+		track.Muxer.Input(payload, timestamp, func() []byte {
+			counter = t.packetAllocator.Get()
+			counter.Refer()
 
-		packet = counter.Get()
-		// 预留rtp over tcp 4字节头部
-		return packet[OverTcpHeaderSize:]
-	}, func(bytes []byte) {
-		track.EndSeq = track.Muxer.GetHeader().Seq
-		// 每个包都存在rtp over tcp 4字节头部
-		overTCPPacket := packet[:OverTcpHeaderSize+len(bytes)]
-		t.OverTCP(overTCPPacket, channel)
+			packet = counter.Get()
+			// 预留rtp over tcp 4字节头部
+			return packet[OverTcpHeaderSize:]
+		}, func(bytes []byte) {
+			track.EndSeq = track.Muxer.GetHeader().Seq
+			// 每个包都存在rtp over tcp 4字节头部
+			overTCPPacket := packet[:OverTcpHeaderSize+len(bytes)]
+			t.OverTCP(overTCPPacket, trackIndex)
 
-		counter.ResetData(overTCPPacket)
-		result = append(result, counter)
-	})
+			counter.ResetData(overTCPPacket)
+			result = append(result, counter)
+		})
+	}
 
 	// 引用计数保持为1
 	for _, pkt := range result {
 		pkt.Release()
+	}
+
+	if t.HasVideo() && stream.AppConfig.GOPCache {
+		// 遇到视频关键帧, 丢弃前一帧缓存
+		if videoKey {
+			for _, segment := range t.segments {
+				for _, pkt := range segment.Data {
+					pkt.Release()
+				}
+			}
+
+			t.segments = t.segments[:0]
+		}
+
+		// 计数+1
+		for _, pkt := range result {
+			pkt.Refer()
+		}
+
+		// 放在缓存末尾
+		t.segments = append(t.segments, stream.TransStreamSegment{
+			Data:  result,
+			TS:    int64(timestamp),
+			Key:   videoKey,
+			Index: trackIndex,
+		})
 	}
 
 	return result
@@ -120,9 +141,9 @@ func (t *TransStream) PackRtpPayload(track *Track, channel int, data []byte, tim
 func (t *TransStream) AddTrack(track *stream.Track) (int, error) {
 	// 恢复上次拉流的序号
 	var startSeq uint16
-	if t.oldTracks != nil {
+	if t.lastEndSeq != nil {
 		var ok bool
-		startSeq, ok = t.oldTracks[track.Stream.CodecID]
+		startSeq, ok = t.lastEndSeq[track.Stream.CodecID]
 		utils.Assert(ok)
 	}
 
@@ -139,15 +160,9 @@ func (t *TransStream) AddTrack(track *stream.Track) (int, error) {
 	trackIndex := len(t.RtspTracks) - 1
 
 	// 将sps和pps按照单一模式打包
-	var extraDataPackets []*collections.ReferenceCounter[[]byte]
 	packAndAdd := func(data []byte) {
-		packets := t.PackRtpPayload(rtspTrack, trackIndex, data, 0)
-		for _, packet := range packets {
-			extra := packet.Get()
-			bytes := make([]byte, len(extra))
-			copy(bytes, extra)
-			extraDataPackets = append(extraDataPackets, collections.NewReferenceCounter(bytes))
-		}
+		packets := t.PackRtpPayload(rtspTrack, trackIndex, data, 0, true)
+		utils.Assert(len(packets) == 1)
 	}
 
 	if utils.AVMediaTypeVideo == track.Stream.MediaType {
@@ -161,21 +176,19 @@ func (t *TransStream) AddTrack(track *stream.Track) (int, error) {
 		ppsBytes := parameters.PPS()
 		packAndAdd(avc.RemoveStartCode(spsBytes[0]))
 		packAndAdd(avc.RemoveStartCode(ppsBytes[0]))
-
-		t.RtspTracks[trackIndex].ExtraDataBuffer = extraDataPackets
 	}
 
 	return trackIndex, nil
 }
 
-func (t *TransStream) Close() ([]*collections.ReferenceCounter[[]byte], int64, error) {
+func (t *TransStream) Close() ([]stream.TransStreamSegment, error) {
 	for _, track := range t.RtspTracks {
 		if track != nil {
 			track.Close()
 		}
 	}
 
-	return nil, 0, nil
+	return nil, nil
 }
 
 func (t *TransStream) WriteHeader() error {
@@ -263,10 +276,10 @@ func (t *TransStream) WriteHeader() error {
 
 func NewTransStream(addr net.IPAddr, urlFormat string, oldTracks map[utils.AVCodecID]uint16) stream.TransStream {
 	t := &TransStream{
-		addr:      addr,
-		urlFormat: urlFormat,
-		oldTracks: oldTracks,
-		rtpBuffer: stream.NewRtpBuffer(512),
+		addr:            addr,
+		urlFormat:       urlFormat,
+		lastEndSeq:      oldTracks,
+		packetAllocator: stream.NewRtpBuffer(512),
 	}
 
 	if addr.IP.To4() != nil {

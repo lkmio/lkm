@@ -191,7 +191,7 @@ func (t *TransStream) createSegment() error {
 	return nil
 }
 
-func (t *TransStream) Close() ([]*collections.ReferenceCounter[[]byte], int64, error) {
+func (t *TransStream) Close() ([]stream.TransStreamSegment, error) {
 	var err error
 
 	if t.ctx.file != nil {
@@ -210,7 +210,7 @@ func (t *TransStream) Close() ([]*collections.ReferenceCounter[[]byte], int64, e
 		t.m3u8File = nil
 	}
 
-	return nil, 0, err
+	return nil, err
 }
 
 func stringPtrToBytes(ptr *string) []byte {

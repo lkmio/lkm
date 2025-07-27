@@ -43,16 +43,23 @@ type TransStream interface {
 	ReadExtraData(timestamp int64) ([]*collections.ReferenceCounter[[]byte], int64, error)
 
 	// ReadKeyFrameBuffer 读取最近的包含视频关键帧的合并写队列
-	ReadKeyFrameBuffer() ([]*collections.ReferenceCounter[[]byte], int64, error)
+	ReadKeyFrameBuffer() ([]TransStreamSegment, error)
 
 	// Close 关闭传输流, 返回还未flush的合并写块
-	Close() ([]*collections.ReferenceCounter[[]byte], int64, error)
+	Close() ([]TransStreamSegment, error)
 
 	HasVideo() bool
 
 	IsTCPStreaming() bool
 
 	GetMWBuffer() MergeWritingBuffer
+}
+
+type TransStreamSegment struct {
+	Data  []*collections.ReferenceCounter[[]byte]
+	TS    int64
+	Key   bool
+	Index int
 }
 
 type BaseTransStream struct {
@@ -119,8 +126,8 @@ func (t *BaseTransStream) FindTrackWithStreamIndex(streamIndex int) *Track {
 	return nil
 }
 
-func (t *BaseTransStream) Close() ([]*collections.ReferenceCounter[[]byte], int64, error) {
-	return nil, 0, nil
+func (t *BaseTransStream) Close() ([]TransStreamSegment, error) {
+	return nil, nil
 }
 
 func (t *BaseTransStream) GetProtocol() TransStreamProtocol {
@@ -167,8 +174,8 @@ func (t *BaseTransStream) ReadExtraData(timestamp int64) ([]*collections.Referen
 	return nil, 0, nil
 }
 
-func (t *BaseTransStream) ReadKeyFrameBuffer() ([]*collections.ReferenceCounter[[]byte], int64, error) {
-	return nil, 0, nil
+func (t *BaseTransStream) ReadKeyFrameBuffer() ([]TransStreamSegment, error) {
+	return nil, nil
 }
 
 func (t *BaseTransStream) IsTCPStreaming() bool {

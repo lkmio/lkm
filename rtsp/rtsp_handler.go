@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Request struct {
@@ -72,7 +73,7 @@ func (h handler) Process(session *session, method string, url_ *url.URL, headers
 
 	source, _ := stream.Path2SourceID(url_.Path, "")
 
-	//反射调用各个处理函数
+	// 反射调用各个处理函数
 	results := m.Call([]reflect.Value{
 		reflect.ValueOf(&h),
 		reflect.ValueOf(Request{session, source, method, url_, headers}),
@@ -220,9 +221,14 @@ func (h handler) OnSetup(request Request) (*http.Response, []byte, error) {
 
 func (h handler) OnPlay(request Request) (*http.Response, []byte, error) {
 	response := NewOKResponse(request.headers.Get("Cseq"))
-	sessionHeader := request.headers.Get("Session")
-	if sessionHeader != "" {
+
+	response.Header.Set("Date", time.Now().Format("Mon, 02 Jan 2006 15:04:05 GMT"))
+	if sessionHeader := request.headers.Get("Session"); sessionHeader != "" {
 		response.Header.Set("Session", sessionHeader)
+	}
+
+	if rangeV := request.headers.Get("Range"); rangeV != "" {
+		response.Header.Set("Range", rangeV)
 	}
 
 	sink := request.session.sink
@@ -233,6 +239,10 @@ func (h handler) OnPlay(request Request) (*http.Response, []byte, error) {
 	}
 
 	source.GetTransStreamPublisher().AddSink(sink)
+
+	// RTP-Info: url=rtsp://192.168.2.110:8554/hls/mystream/trackID=0;seq=21592;rtptime=4586400,url=rtsp://192.168.2.110:8554/hls/mystream/trackID=1;seq=403;rtptime=412672\r\n
+	//info := <-sink.onPlayResponse
+	//response.Header.Set("RTP-Info", fmt.Sprintf("url=%s;seq=%d;rtptime=%d", "rtsp://192.168.2.119:554/hls/mystream/?track=0", info[0], info[1]))
 	return response, nil, nil
 }
 

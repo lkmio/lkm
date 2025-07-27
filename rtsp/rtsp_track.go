@@ -1,7 +1,6 @@
 package rtsp
 
 import (
-	"github.com/lkmio/avformat/collections"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/rtp"
 )
@@ -13,20 +12,19 @@ type Track struct {
 	StartSeq  uint16
 	EndSeq    uint16
 	CodecID   utils.AVCodecID
-
-	Muxer           rtp.Muxer
-	ExtraDataBuffer []*collections.ReferenceCounter[[]byte] // 缓存带有编码信息的rtp包, 对所有sink通用
+	Muxer     rtp.Muxer
 }
 
 func (r *Track) Close() {
+
 }
 
 func NewRTSPTrack(muxer rtp.Muxer, payload rtp.PayloadType, mediaType utils.AVMediaType, id utils.AVCodecID) *Track {
 	stream := &Track{
 		payload:   payload,
-		Muxer:     muxer,
 		MediaType: mediaType,
 		CodecID:   id,
+		Muxer:     muxer,
 	}
 
 	return stream

@@ -308,7 +308,7 @@ func SetDefaultConfig(config *AppConfig_) {
 	if !config.GOPCache {
 		config.GOPCache = true
 		config.MergeWriteLatency = 350
-		log.Sugar.Warnf("强制开启GOP缓存")
+		println("强制开启GOP缓存")
 	}
 
 	config.MergeWriteLatency = limitInt(350, 2000, config.MergeWriteLatency) // 最低缓存350毫秒数据才发送 最高缓存2秒数据才发送

@@ -136,7 +136,7 @@ func (t *TransStream) ReadExtraData(_ int64) ([]*collections.ReferenceCounter[[]
 	return []*collections.ReferenceCounter[[]byte]{collections.NewReferenceCounter(GetHttpFLVBlock(t.flvHeaderBlock)), collections.NewReferenceCounter(GetHttpFLVBlock(t.flvExtraDataBlock))}, 0, nil
 }
 
-func (t *TransStream) ReadKeyFrameBuffer() ([]*collections.ReferenceCounter[[]byte], int64, error) {
+func (t *TransStream) ReadKeyFrameBuffer() ([]stream.TransStreamSegment, error) {
 	t.ClearOutStreamBuffer()
 
 	// 发送当前内存池已有的合并写切片
@@ -144,20 +144,42 @@ func (t *TransStream) ReadKeyFrameBuffer() ([]*collections.ReferenceCounter[[]by
 		t.AppendOutStreamBuffer(segment)
 	})
 
-	return t.OutBuffer[:t.OutBufferSize], 0, nil
+	if t.OutBufferSize < 1 {
+		return nil, nil
+	}
+
+	return []stream.TransStreamSegment{
+		{
+			Data: t.OutBuffer[:t.OutBufferSize],
+			TS:   0,
+			Key:  true,
+		},
+	}, nil
 }
 
-func (t *TransStream) Close() ([]*collections.ReferenceCounter[[]byte], int64, error) {
+func (t *TransStream) Close() ([]stream.TransStreamSegment, error) {
 	t.ClearOutStreamBuffer()
 
 	// 发送剩余的流
+	var key bool
+	var segment *collections.ReferenceCounter[[]byte]
 	if !t.MWBuffer.IsNewSegment() {
-		if segment, _ := t.flushSegment(); segment != nil {
+		if segment, key = t.flushSegment(); segment != nil {
 			t.AppendOutStreamBuffer(segment)
 		}
 	}
 
-	return t.OutBuffer[:t.OutBufferSize], 0, nil
+	if t.OutBufferSize < 1 {
+		return nil, nil
+	}
+
+	return []stream.TransStreamSegment{
+		{
+			Data: t.OutBuffer[:t.OutBufferSize],
+			TS:   0,
+			Key:  key,
+		},
+	}, nil
 }
 
 // 保存为完整的http-flv切片

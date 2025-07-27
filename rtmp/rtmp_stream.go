@@ -125,7 +125,7 @@ func (t *transStream) ReadExtraData(_ int64) ([]*collections.ReferenceCounter[[]
 	return []*collections.ReferenceCounter[[]byte]{collections.NewReferenceCounter(t.sequenceHeader)}, 0, nil
 }
 
-func (t *transStream) ReadKeyFrameBuffer() ([]*collections.ReferenceCounter[[]byte], int64, error) {
+func (t *transStream) ReadKeyFrameBuffer() ([]stream.TransStreamSegment, error) {
 	t.ClearOutStreamBuffer()
 
 	// 发送当前内存池已有的合并写切片
@@ -133,7 +133,17 @@ func (t *transStream) ReadKeyFrameBuffer() ([]*collections.ReferenceCounter[[]by
 		t.AppendOutStreamBuffer(bytes)
 	})
 
-	return t.OutBuffer[:t.OutBufferSize], 0, nil
+	if t.OutBufferSize < 1 {
+		return nil, nil
+	}
+
+	return []stream.TransStreamSegment{
+		{
+			Data: t.OutBuffer[:t.OutBufferSize],
+			TS:   0,
+			Key:  true,
+		},
+	}, nil
 }
 
 func (t *transStream) WriteHeader() error {
@@ -226,15 +236,27 @@ func (t *transStream) WriteHeader() error {
 	return nil
 }
 
-func (t *transStream) Close() ([]*collections.ReferenceCounter[[]byte], int64, error) {
+func (t *transStream) Close() ([]stream.TransStreamSegment, error) {
 	t.ClearOutStreamBuffer()
 
 	// 发送剩余的流
-	if segment, _ := t.MWBuffer.FlushSegment(); segment != nil {
+	var key bool
+	var segment *collections.ReferenceCounter[[]byte]
+	if segment, key = t.MWBuffer.FlushSegment(); segment != nil {
 		t.AppendOutStreamBuffer(segment)
 	}
 
-	return t.OutBuffer[:t.OutBufferSize], 0, nil
+	if t.OutBufferSize < 1 {
+		return nil, nil
+	}
+
+	return []stream.TransStreamSegment{
+		{
+			Data: t.OutBuffer[:t.OutBufferSize],
+			TS:   0,
+			Key:  key,
+		},
+	}, nil
 }
 
 func NewTransStream(chunkSize int, metaData *amf0.Object) stream.TransStream {
