@@ -28,20 +28,42 @@ var (
 
 type transStream struct {
 	stream.BaseTransStream
+	segments []stream.TransStreamSegment
 }
 
-func (t *transStream) Input(packet *avformat.AVPacket, _ int) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
+func (t *transStream) Input(packet *avformat.AVPacket, trackIndex int) ([]*collections.ReferenceCounter[[]byte], int64, bool, error) {
 	t.ClearOutStreamBuffer()
 
+	var data *collections.ReferenceCounter[[]byte]
 	if utils.AVMediaTypeAudio == packet.MediaType {
-		t.AppendOutStreamBuffer(collections.NewReferenceCounter(packet.Data))
+		data = collections.NewReferenceCounter(packet.Data)
 	} else if utils.AVMediaTypeVideo == packet.MediaType {
-		avStream := t.FindTrackWithStreamIndex(packet.Index).Stream
-		data := avformat.AVCCPacket2AnnexB(avStream, packet)
-		t.AppendOutStreamBuffer(collections.NewReferenceCounter(data))
+		annexBData := avformat.AVCCPacket2AnnexB(t.FindTrackWithStreamIndex(packet.Index).Stream, packet)
+		data = collections.NewReferenceCounter(annexBData)
 	}
 
-	return t.OutBuffer[:t.OutBufferSize], int64(uint32(packet.GetDuration(1000))), utils.AVMediaTypeVideo == packet.MediaType && packet.Key, nil
+	duration := int64(uint32(packet.GetDuration(1000)))
+	key := utils.AVMediaTypeVideo == packet.MediaType && packet.Key
+	if t.HasVideo() && stream.AppConfig.GOPCache {
+		// 遇到视频关键帧, 丢弃前一帧缓存
+		if key {
+			t.segments = t.segments[:0]
+		}
+
+		t.segments = append(t.segments, stream.TransStreamSegment{
+			Data:  []*collections.ReferenceCounter[[]byte]{data},
+			TS:    duration,
+			Key:   key,
+			Index: trackIndex,
+		})
+	}
+
+	t.AppendOutStreamBuffer(data)
+	return t.OutBuffer[:t.OutBufferSize], duration, key, nil
+}
+
+func (t *transStream) ReadKeyFrameBuffer() ([]stream.TransStreamSegment, error) {
+	return t.segments, nil
 }
 
 func (t *transStream) WriteHeader() error {
