@@ -2,17 +2,17 @@ module github.com/lkmio/lkm
 
 require (
 	github.com/lkmio/audio-transcoder v0.2.1
-	github.com/lkmio/flv v0.0.0
-	github.com/lkmio/mpeg v0.0.0
-	github.com/lkmio/rtmp v0.0.0
-	github.com/lkmio/rtp v0.0.0
-	github.com/lkmio/transport v0.0.0
+	github.com/lkmio/avformat v0.0.1
+	github.com/lkmio/flv v0.0.2
+	github.com/lkmio/mpeg v0.0.2
+	github.com/lkmio/rtmp v0.0.2
+	github.com/lkmio/rtp v0.0.2
+	github.com/lkmio/transport v0.0.1
 )
 
 require (
 	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/websocket v1.5.1
-	github.com/lkmio/avformat v0.0.0
 	github.com/lkmio/g726 v0.1.3
 	github.com/natefinch/lumberjack v2.0.0+incompatible
 	github.com/pion/interceptor v0.1.40
@@ -52,17 +52,5 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
-
-replace github.com/lkmio/avformat => ../avformat
-
-replace github.com/lkmio/mpeg => ../mpeg
-
-replace github.com/lkmio/flv => ../flv
-
-replace github.com/lkmio/rtmp => ../rtmp
-
-replace github.com/lkmio/transport => ../transport
-
-replace github.com/lkmio/rtp => ../rtp
 
 go 1.20
