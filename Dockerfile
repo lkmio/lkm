@@ -1,4 +1,4 @@
-FROM golang:1.19-alpine as builder
+FROM golang:1.20-alpine as builder
 
 # 设置构建参数
 ARG GOOS=linux
@@ -27,8 +27,6 @@ WORKDIR /build/lkm
 # 将代码复制到容器中
 COPY . .
 
-COPY ./avformat /build/avformat
- 
 RUN go mod download && go mod tidy -v && go build -o lkm .
  
 # 运行阶段指定scratch作为基础镜像
