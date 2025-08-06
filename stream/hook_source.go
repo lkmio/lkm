@@ -32,6 +32,7 @@ func PreparePublishSource(source Source, hook bool) (*http.Response, utils.HookS
 
 	log.Sugar.Infof("%s准备推流 source:%s 拉流地址:\r\n%s", source.GetType().String(), source.GetID(), indent)
 
+	source.SetState(SessionStateTransferring)
 	return response, utils.HookStateOK
 }
 
