@@ -341,6 +341,9 @@ func (t *transStreamPublisher) CreateTransStream(protocol TransStreamProtocol, t
 		}
 	}
 
+	// 尝试清空等待释放的合并写缓冲区
+	ReleasePendingBuffers(t.source, id)
+
 	t.transStreams[id] = transStream
 	// 创建输出流对应的拉流队列
 	t.transStreamSinks[id] = make(map[SinkID]Sink, 128)
@@ -700,7 +703,6 @@ func (t *transStreamPublisher) doClose() {
 	// 将所有sink添加到等待队列
 	for _, sink := range t.sinks {
 		transStreamID := sink.GetTransStreamID()
-		sink.SetTransStreamID(0)
 		if t.recordSink == sink {
 			continue
 		}

@@ -2,53 +2,83 @@ package stream
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/log"
 	"net/http"
 	"time"
 )
 
-func PreparePublishSource(source Source, hook bool) (*http.Response, utils.HookState) {
-	var response *http.Response
-
-	if err := SourceManager.Add(source); err != nil {
-		return nil, utils.HookStateOccupy
+func AddSource(source Source) error {
+	err := SourceManager.add(source)
+	if err == nil {
+		source.SetState(SessionStateHandshakeSuccess)
 	}
 
-	if hook && AppConfig.Hooks.IsEnablePublishEvent() {
-		rep, state := HookPublishEvent(source)
-		if utils.HookStateOK != state {
+	return err
+}
+
+func PreparePublishSource(source Source, add bool) (*http.Response, error) {
+	var response *http.Response
+
+	if add {
+		if err := AddSource(source); err != nil {
+			return nil, err
+		}
+	} else if SourceManager.Find(source.GetID()) == nil {
+		return nil, fmt.Errorf("not found")
+	}
+
+	if AppConfig.Hooks.IsEnablePublishEvent() {
+		rep, err := HookPublishEvent(source)
+		if err != nil {
 			_, _ = SourceManager.Remove(source.GetID())
-			return rep, state
+			return rep, err
 		}
 
 		response = rep
 	}
 
+	// 此时才认为source推流成功
+	source.SetState(SessionStateTransferring)
 	source.SetCreateTime(time.Now())
 
 	urls := GetStreamPlayUrls(source.GetID())
 	indent, _ := json.MarshalIndent(urls, "", "\t")
 
-	log.Sugar.Infof("%s准备推流 source:%s 拉流地址:\r\n%s", source.GetType().String(), source.GetID(), indent)
+	log.Sugar.Infof("%s推流 source: %s 拉流地址:\r\n%s", source.GetType().String(), source.GetID(), indent)
 
-	source.SetState(SessionStateTransferring)
-	return response, utils.HookStateOK
+	return response, nil
 }
 
-func HookPublishEvent(source Source) (*http.Response, utils.HookState) {
-	var response *http.Response
+func PreparePublishSourceWithAsync(source Source, add bool) {
+	go func() {
+		var err error
+		// 加锁执行, 保证并发安全
+		source.ExecuteWithDeleteLock(func() {
+			if source.IsClosed() {
+				err = fmt.Errorf("source is closed")
+			} else if _, err = PreparePublishSource(source, add); err == nil {
+			}
+		})
 
-	if AppConfig.Hooks.IsEnablePublishEvent() {
-		hook, err := Hook(HookEventPublish, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
 		if err != nil {
-			return hook, utils.HookStateFailure
-		}
+			log.Sugar.Errorf("GB28181推流失败 err: %s source: %s", err.Error(), source.GetID())
 
-		response = hook
+			if !source.IsClosed() {
+				source.Close()
+			}
+		}
+	}()
+
+}
+
+func HookPublishEvent(source Source) (*http.Response, error) {
+	if AppConfig.Hooks.IsEnablePublishEvent() {
+		return Hook(HookEventPublish, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
 	}
 
-	return response, utils.HookStateOK
+	return nil, nil
 }
 
 func HookPublishDoneEvent(source Source) {

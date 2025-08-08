@@ -1,24 +1,30 @@
 package gb28181
 
 import (
+	"github.com/lkmio/lkm/stream"
+	"github.com/lkmio/transport"
 	"net"
 )
 
 type ActiveSource struct {
-	PassiveSource
-
+	*PassiveSource
 	port       int
 	remoteAddr net.TCPAddr
-	tcp        *TCPClient
 }
 
 func (a *ActiveSource) Connect(remoteAddr *net.TCPAddr) error {
-	client, err := NewTCPClient(a.port, remoteAddr, a)
+	client := &transport.TCPClient{}
+	client.SetHandler(a.PassiveSource)
+
+	addr, err := net.ResolveTCPAddr("tcp", stream.ListenAddr(a.port))
 	if err != nil {
+		return err
+	} else if _, err = client.Connect(addr, remoteAddr); err != nil {
 		return err
 	}
 
-	a.tcp = client
+	go client.Receive()
+	a.transport = client
 	return nil
 }
 
@@ -28,12 +34,23 @@ func (a *ActiveSource) SetupType() SetupType {
 
 func NewActiveSource() (*ActiveSource, int, error) {
 	var port int
-	TransportManger.AllocPort(true, func(port_ uint16) error {
+	err := TransportManger.AllocPort(true, func(port_ uint16) error {
 		port = int(port_)
 		return nil
 	})
 
+	if err != nil {
+		return nil, 0, err
+	}
+
 	return &ActiveSource{
+		PassiveSource: &PassiveSource{
+			StreamServer: stream.StreamServer[GBSource]{
+				SourceType: stream.SourceType28181,
+			},
+			decoder:       transport.NewLengthFieldFrameDecoder(0xFFFF, 2),
+			receiveBuffer: stream.TCPReceiveBufferPool.Get().([]byte),
+		},
 		port: port,
 	}, port, nil
 }

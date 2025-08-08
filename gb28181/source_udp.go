@@ -1,14 +1,16 @@
 package gb28181
 
 import (
+	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
 	"github.com/pion/rtp"
+	"net"
 )
 
 // UDPSource 国标UDP推流源
 type UDPSource struct {
+	stream.StreamServer[interface{}]
 	BaseGBSource
-
 	jitterBuffer *stream.JitterBuffer[*rtp.Packet]
 }
 
@@ -18,12 +20,12 @@ func (u *UDPSource) SetupType() SetupType {
 
 // OnOrderedRtp 有序RTP包回调
 func (u *UDPSource) OnOrderedRtp(packet *rtp.Packet) {
-	// 此时还在网络收流携程, 交给Source的主协程处理
-	u.ProcessPacket(packet.Raw)
+	_ = u.ProcessPacket(packet.Raw)
+	// 处理完后, 归还buffer
 	stream.UDPReceiveBufferPool.Put(packet.Raw[:cap(packet.Raw)])
 }
 
-// InputRtpPacket 将RTP包排序后，交给Source的主协程处理
+// InputRtpPacket 将RTP包排序后，交给Source处理
 func (u *UDPSource) InputRtpPacket(pkt *rtp.Packet) error {
 	block := stream.UDPReceiveBufferPool.Get().([]byte)
 	copy(block, pkt.Raw)
@@ -45,8 +47,31 @@ func (u *UDPSource) Close() {
 	u.BaseGBSource.Close()
 }
 
+func (u *UDPSource) OnPacket(conn net.Conn, data []byte) []byte {
+	u.StreamServer.OnPacket(conn, data)
+
+	packet := rtp.Packet{}
+	err := packet.Unmarshal(data)
+	if err != nil {
+		log.Sugar.Errorf("解析rtp失败 err:%s conn:%s", err.Error(), conn.RemoteAddr().String())
+		return nil
+	} else if u.Conn == nil {
+		u.Conn = conn
+	}
+
+	packet.Raw = data
+	_ = u.InputRtpPacket(&packet)
+	return nil
+}
+
 func NewUDPSource() *UDPSource {
-	return &UDPSource{
+	source := &UDPSource{
 		jitterBuffer: stream.NewJitterBuffer[*rtp.Packet](),
 	}
+
+	source.StreamServer = stream.StreamServer[interface{}]{
+		SourceType: stream.SourceType28181,
+	}
+
+	return source
 }

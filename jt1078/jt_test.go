@@ -218,9 +218,9 @@ func TestPublish(t *testing.T) {
 	})
 
 	t.Run("publish", func(t *testing.T) {
-		//path := "../../source_files/10352264314-2.bin"
+		path := "../../source_files/10352264314-2.bin"
 		//path := "../../source_files/013800138000-1.bin"
-		path := "../../source_files/0714-1.bin"
+		//path := "../../source_files/0714-1.bin"
 		publish(path, "1078")
 	})
 

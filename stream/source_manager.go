@@ -16,7 +16,7 @@ type sourceManger struct {
 	m sync.Map
 }
 
-func (s *sourceManger) Add(source Source) error {
+func (s *sourceManger) add(source Source) error {
 	_, ok := s.m.LoadOrStore(source.GetID(), source)
 	if ok {
 		return fmt.Errorf("the source %s has been exist", source.GetID())

@@ -2,7 +2,6 @@ package gb28181
 
 import (
 	"fmt"
-	"strconv"
 	"sync"
 )
 
@@ -11,9 +10,8 @@ const (
 )
 
 var (
-	ssrcCount   uint32
-	lock        sync.Mutex
-	SSRCFilters []Filter
+	ssrcCount uint32
+	lock      sync.Mutex
 )
 
 func NextSSRC() uint32 {
@@ -23,19 +21,7 @@ func NextSSRC() uint32 {
 	return ssrcCount
 }
 
-func getUniqueSSRC(ssrc string, get func() string) string {
-	atoi, err := strconv.Atoi(ssrc)
-	if err != nil {
-		panic(err)
-	}
-
-	v := uint32(atoi)
-	for _, filter := range SSRCFilters {
-		if filter.FindSource(v) != nil {
-			ssrc = get()
-		}
-	}
-
+func getUniqueSSRC(ssrc string, _ func() string) string {
 	return ssrc
 }
 

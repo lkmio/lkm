@@ -80,7 +80,9 @@ type Source interface {
 
 	StartTimers(source Source)
 
-	ExecuteSyncEvent(cb func())
+	ExecuteWithStreamLock(cb func())
+
+	ExecuteWithDeleteLock(cb func())
 
 	UpdateReceiveStats(dataLen int)
 }
@@ -105,7 +107,8 @@ type PublishSource struct {
 	createTime     time.Time          // source创建时间
 	statistics     *BitrateStatistics // 码流统计
 	streamLogger   avformat.OnUnpackStream2FileHandler
-	streamLock     sync.Mutex // 收流、探测超时、关闭等操作互斥锁
+	streamLock     sync.Mutex // 收流、探测超时等操作互斥锁
+	deleteLock     sync.Mutex // 双重锁, 防止在关闭source时, 其他操作同时进行
 
 	timers struct {
 		receiveTimer *time.Timer // 收流超时计时器
@@ -157,10 +160,8 @@ func (s *PublishSource) Input(data []byte) (int, error) {
 	s.UpdateReceiveStats(len(data))
 	var n int
 	var err error
-	s.ExecuteSyncEvent(func() {
-		if s.closed.Load() {
-			err = fmt.Errorf("source closed")
-		} else {
+	s.ExecuteWithStreamLock(func() {
+		if !s.closed.Load() {
 			n, err = s.TransDemuxer.Input(data)
 		}
 	})
@@ -176,7 +177,7 @@ func (s *PublishSource) SetState(state SessionState) {
 	s.state = state
 }
 
-func (s *PublishSource) DoClose() {
+func (s *PublishSource) doClose() {
 	log.Sugar.Debugf("closing the %s source. id: %s. closed flag: %t", s.Type, s.ID, s.closed.Load())
 
 	// 已关闭, 直接返回
@@ -185,7 +186,7 @@ func (s *PublishSource) DoClose() {
 	}
 
 	var closed bool
-	s.ExecuteSyncEvent(func() {
+	s.ExecuteWithStreamLock(func() {
 		closed = s.closed.Swap(true)
 	})
 
@@ -221,20 +222,16 @@ func (s *PublishSource) DoClose() {
 	// 同步执行
 	s.streamPublisher.close()
 
-	// 只释放prepare成功的source, 否则在关闭失败的source时, 造成id相同的source被错误释放
-	if s.state < SessionStateTransferring {
-		return
-	}
-
 	s.state = SessionStateClosed
-	// 释放解复用器
-	// 释放转码器
-	// 释放每路转协议流， 将所有sink添加到等待队列
-	_, err := SourceManager.Remove(s.ID)
-	if err != nil {
-		// source不存在, 在创建source时, 未添加到manager中, 目前只有1078流会出现这种情况(tcp连接到端口, 没有推流或推流数据无效, 无法定位到手机号, 以至于无法执行PreparePublishSource函数), 将不再处理后续事情.
-		log.Sugar.Errorf("删除源失败 source: %s err: %s", s.ID, err.Error())
-		return
+
+	// 只删除被添加的source, 否则会造成id相同的source被误删
+	if s.state >= SessionStateHandshakeSuccess {
+		_, err := SourceManager.Remove(s.ID)
+		if err != nil {
+			// source不存在, 在创建source时, 未添加到manager中, 目前只有1078流会出现这种情况(tcp连接到端口, 没有推流或推流数据无效, 无法定位到手机号, 以至于无法执行PreparePublishSource函数), 将不再处理后续事情.
+			log.Sugar.Errorf("删除源失败 source: %s err: %s", s.ID, err.Error())
+			return
+		}
 	}
 
 	// 异步hook
@@ -249,7 +246,9 @@ func (s *PublishSource) DoClose() {
 }
 
 func (s *PublishSource) Close() {
-	s.DoClose()
+	s.ExecuteWithDeleteLock(func() {
+		s.doClose()
+	})
 }
 
 // 解析完所有track后, 创建各种输出流
@@ -265,8 +264,8 @@ func (s *PublishSource) writeHeader() {
 
 	if len(s.originTracks.All()) == 0 {
 		log.Sugar.Errorf("没有一路track, 删除source: %s", s.ID)
-		// 异步执行ProbeTimeout函数中还没释放锁
-		go s.DoClose()
+		// 此时还持有stream lock, 异步关闭source
+		go CloseSource(s.ID)
 		return
 	}
 }
@@ -399,7 +398,7 @@ func (s *PublishSource) SetUrlValues(values url.Values) {
 	s.urlValues = values
 }
 
-func (s *PublishSource) ExecuteSyncEvent(cb func()) {
+func (s *PublishSource) ExecuteWithStreamLock(cb func()) {
 	// 无竞争情况下, 接近原子操作
 	s.streamLock.Lock()
 	defer s.streamLock.Unlock()
@@ -420,7 +419,7 @@ func (s *PublishSource) GetBitrateStatistics() *BitrateStatistics {
 
 func (s *PublishSource) ProbeTimeout() {
 	if s.TransDemuxer != nil {
-		s.ExecuteSyncEvent(func() {
+		s.ExecuteWithStreamLock(func() {
 			if !s.closed.Load() {
 				s.TransDemuxer.ProbeComplete()
 			}
@@ -453,4 +452,10 @@ func (s *PublishSource) StartTimers(source Source) {
 		source.ProbeTimeout()
 	})
 
+}
+
+func (s *PublishSource) ExecuteWithDeleteLock(cb func()) {
+	s.deleteLock.Lock()
+	defer s.deleteLock.Unlock()
+	cb()
 }

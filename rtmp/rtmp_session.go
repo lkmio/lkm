@@ -6,6 +6,7 @@ import (
 	"github.com/lkmio/lkm/stream"
 	"github.com/lkmio/rtmp"
 	"net"
+	"strings"
 )
 
 // Session RTMP会话, 解析处理Message
@@ -40,9 +41,17 @@ func (s *Session) OnPublish(app, stream_ string) utils.HookState {
 	source.SetUrlValues(values)
 
 	// 统一处理source推流事件, source是否已经存在, hook回调....
-	_, state := stream.PreparePublishSource(source, true)
-	if utils.HookStateOK != state {
-		log.Sugar.Errorf("rtmp推流失败 source: %s", sourceId)
+	state := utils.HookStateOK
+	_, err := stream.PreparePublishSource(source, true)
+	if err != nil {
+		str := err.Error()
+		log.Sugar.Errorf("rtmp推流失败 source: %s err: %s", sourceId, str)
+
+		if strings.HasSuffix(str, "exist") {
+			state = utils.HookStateOccupy
+		} else {
+			state = utils.HookStateFailure
+		}
 	} else {
 		s.handle = source
 		s.isPublisher = true
@@ -77,7 +86,7 @@ func (s *Session) Input(data []byte) error {
 		s.handle.(*Publisher).UpdateReceiveStats(len(data))
 
 		var err error
-		s.handle.(*Publisher).ExecuteSyncEvent(func() {
+		s.handle.(*Publisher).ExecuteWithStreamLock(func() {
 			err = s.stack.Input(s.conn, data)
 		})
 

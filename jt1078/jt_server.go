@@ -26,6 +26,7 @@ func (s *jtServer) OnNewSession(conn net.Conn) *Session {
 
 func (s *jtServer) OnCloseSession(session *Session) {
 	session.Close()
+	stream.TCPReceiveBufferPool.Put(session.receiveBuffer[:cap(session.receiveBuffer)])
 }
 
 func (s *jtServer) OnPacket(conn net.Conn, data []byte) []byte {

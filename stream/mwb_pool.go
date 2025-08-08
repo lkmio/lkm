@@ -8,6 +8,8 @@ import (
 )
 
 const (
+	// BlockBufferSize 合并写缓冲区的内存块大小
+	// 一块缓冲区可以包含多个合并写切片
 	BlockBufferSize = 1024 * 1024 * 2
 )
 
@@ -23,37 +25,40 @@ var (
 		},
 	}
 
-	pendingReleaseBuffers = make(map[string]*collections.Queue[*mbBuffer])
+	pendingReleaseBuffers = make(map[string]*collections.Queue[*mbBuffer]) // 等待释放的合并写缓冲区
 	lock                  sync.Mutex
 )
 
+// AddMWBuffersToPending 添加合并写缓冲区到等待释放队列
 func AddMWBuffersToPending(sourceId string, transStreamId TransStreamID, buffers *collections.Queue[*mbBuffer]) {
 	key := fmt.Sprintf("%s-%d", sourceId, transStreamId)
 
 	lock.Lock()
 	defer lock.Unlock()
 
-	for buffers.Size() > 0 {
-		v, ok := pendingReleaseBuffers[key]
-		if ok {
-			// 第二次都推流结束了，第一次的内存还被占用
-			// 强制释放上次推流的内存池
-			log.Sugar.Warnf("force release last pending buffers of %s", key)
+	v, ok := pendingReleaseBuffers[key]
+	if ok {
+		// 第二次都推流结束了，第一次的内存还被占用
+		// 强制释放上次推流的内存池
+		log.Sugar.Warnf("force release last pending buffers of %s", key)
 
-			for v.Size() > 0 {
-				pop := v.Pop()
-				pop.buffer.Clear()
-				pop.segments.Clear()
-				MWBufferPool.Put(pop)
-			}
-
-			delete(pendingReleaseBuffers, key)
+		for v.Size() > 0 {
+			pop := v.Pop()
+			pop.buffer.Clear()
+			pop.segments.Clear()
+			MWBufferPool.Put(pop)
 		}
 
+		delete(pendingReleaseBuffers, key)
+	}
+
+	if buffers.Size() > 0 {
 		pendingReleaseBuffers[key] = buffers
 	}
 }
 
+// ReleasePendingBuffers 释放等待释放的合并写缓冲区
+// 拉流结束后主动调用一次, 创建传输流的时候也调用一次
 func ReleasePendingBuffers(sourceId string, transStreamId TransStreamID) {
 	key := fmt.Sprintf("%s-%d", sourceId, transStreamId)
 
@@ -68,6 +73,7 @@ func ReleasePendingBuffers(sourceId string, transStreamId TransStreamID) {
 	delete(pendingReleaseBuffers, key)
 }
 
+// release 释放合并写缓冲区
 func release(buffers *collections.Queue[*mbBuffer], length int) bool {
 	for i := 0; i < length; i++ {
 		buffer := buffers.Peek(0)

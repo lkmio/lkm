@@ -175,7 +175,7 @@ func (s *BaseSink) fastForward(firstSegment *collections.ReferenceCounter[[]byte
 
 func (s *BaseSink) doAsyncWrite() {
 	defer func() {
-		// 释放未发送的数据
+		// 释放未发送的合并写切片
 		for buffer := s.pendingSendQueue.Pop(); buffer != nil; buffer = s.pendingSendQueue.Pop() {
 			buffer.Release()
 		}
@@ -241,9 +241,12 @@ func (s *BaseSink) doAsyncWrite() {
 
 func (s *BaseSink) EnableAsyncWriteMode(queueSize int) {
 	utils.Assert(s.Conn != nil)
-	s.pendingSendQueue = NewNonBlockingChannel[*collections.ReferenceCounter[[]byte]](queueSize)
-	s.cancelCtx, s.cancelFunc = context.WithCancel(context.Background())
-	go s.doAsyncWrite()
+	// 只初始化一次
+	if s.pendingSendQueue == nil {
+		s.pendingSendQueue = NewNonBlockingChannel[*collections.ReferenceCounter[[]byte]](queueSize)
+		s.cancelCtx, s.cancelFunc = context.WithCancel(context.Background())
+		go s.doAsyncWrite()
+	}
 }
 
 func (s *BaseSink) Write(index int, data []*collections.ReferenceCounter[[]byte], ts int64, keyVideo bool) error {

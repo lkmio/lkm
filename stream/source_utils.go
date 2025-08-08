@@ -195,6 +195,13 @@ func StartIdleTimer(source Source) *time.Timer {
 	return idleTimer
 }
 
+func CloseSource(id string) {
+	source := SourceManager.Find(id)
+	if source != nil {
+		source.Close()
+	}
+}
+
 // LoopEvent 循环读取事件
 func LoopEvent(source Source) {
 	source.StartTimers(source)

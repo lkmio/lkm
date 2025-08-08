@@ -59,15 +59,16 @@ func Hook(event HookEvent, params string, body interface{}) (*http.Response, err
 	response, err := SendHookEvent(url, bytes)
 	if err != nil {
 		log.Sugar.Errorf("failed to %s the hook event. err: %s", event.ToString(), err.Error())
+		return response, err
 	} else {
 		log.Sugar.Infof("received response for hook %s event: status='%s', response body='%s'", event.ToString(), response.Status, responseBodyToString(response))
 	}
 
-	if err == nil && http.StatusOK != response.StatusCode {
-		return response, fmt.Errorf("unexpected response status: %s for request %s", response.Status, url)
+	if http.StatusOK != response.StatusCode {
+		return response, fmt.Errorf("unexpected response status: %s", response.Status)
 	}
 
-	return response, err
+	return response, nil
 }
 
 func NewHookPlayEventInfo(sink Sink) eventInfo {

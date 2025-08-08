@@ -75,11 +75,11 @@ func init() {
 	// 初始化日志
 	log.InitLogger(config.Log.FileLogging, zapcore.Level(stream.AppConfig.Log.Level), stream.AppConfig.Log.Name, stream.AppConfig.Log.MaxSize, stream.AppConfig.Log.MaxBackup, stream.AppConfig.Log.MaxAge, stream.AppConfig.Log.Compress)
 
-	if stream.AppConfig.GB28181.Enable && stream.AppConfig.GB28181.IsMultiPort() {
+	if stream.AppConfig.GB28181.Enable {
 		gb28181.TransportManger = transport.NewTransportManager(config.ListenIP, uint16(stream.AppConfig.GB28181.Port[0]), uint16(stream.AppConfig.GB28181.Port[1]))
 	}
 
-	if stream.AppConfig.Rtsp.Enable && stream.AppConfig.Rtsp.IsMultiPort() {
+	if stream.AppConfig.Rtsp.Enable {
 		rtsp.TransportManger = transport.NewTransportManager(config.ListenIP, uint16(stream.AppConfig.Rtsp.Port[1]), uint16(stream.AppConfig.Rtsp.Port[2]))
 	}
 
@@ -134,33 +134,7 @@ func main() {
 	log.Sugar.Info("启动http服务 addr:", stream.ListenAddr(stream.AppConfig.Http.Port))
 	go startApiServer(net.JoinHostPort(stream.AppConfig.ListenIP, strconv.Itoa(stream.AppConfig.Http.Port)))
 
-	// 单端口模式下, 启动时就创建收流端口
-	// 多端口模式下, 创建GBSource时才创建收流端口
-	if stream.AppConfig.GB28181.Enable && !stream.AppConfig.GB28181.IsMultiPort() {
-		if stream.AppConfig.GB28181.IsEnableUDP() {
-			filter := gb28181.NewSSRCFilter(128)
-			server, err := gb28181.NewUDPServer(filter)
-			if err != nil {
-				panic(err)
-			}
-
-			gb28181.SharedUDPServer = server
-			log.Sugar.Info("启动GB28181 udp收流端口成功:" + stream.ListenAddr(stream.AppConfig.GB28181.Port[0]))
-			gb28181.SSRCFilters = append(gb28181.SSRCFilters, filter)
-		}
-
-		if stream.AppConfig.GB28181.IsEnableTCP() {
-			filter := gb28181.NewSSRCFilter(128)
-			server, err := gb28181.NewTCPServer(filter)
-			if err != nil {
-				panic(err)
-			}
-
-			gb28181.SharedTCPServer = server
-			log.Sugar.Info("启动GB28181 tcp收流端口成功:" + stream.ListenAddr(stream.AppConfig.GB28181.Port[0]))
-			gb28181.SSRCFilters = append(gb28181.SSRCFilters, filter)
-		}
-	}
+	// GB28181收流时调用api创建收流端口
 
 	if stream.AppConfig.JT1078.Enable {
 		// 无法通过包头区分2016和2019, 每个版本创建一个Server

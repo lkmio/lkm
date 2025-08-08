@@ -11,7 +11,6 @@ import (
 	"github.com/lkmio/transport"
 	"github.com/pion/rtp"
 	"math"
-	"net"
 	"strings"
 )
 
@@ -23,7 +22,6 @@ const (
 	SetupActive  = SetupType(2)
 
 	PsProbeBufferSize = 1024 * 1024 * 2
-	JitterBufferSize  = 1024 * 1024
 )
 
 func (s SetupType) TransportType() stream.TransportType {
@@ -65,8 +63,6 @@ func SetupTypeFromString(setupType string) SetupType {
 
 var (
 	TransportManger transport.Manager
-	SharedUDPServer *UDPServer
-	SharedTCPServer *TCPServer
 )
 
 // GBSource GB28181推流Source, 统一解析PS流、级联转发.
@@ -75,23 +71,20 @@ type GBSource interface {
 
 	SetupType() SetupType
 
-	// PreparePublish 收到流时, 做一些初始化工作.
-	PreparePublish(conn net.Conn, ssrc uint32, source GBSource)
-
-	SetConn(conn net.Conn)
-
 	SetSSRC(ssrc uint32)
 
 	SSRC() uint32
 
 	ProcessPacket(data []byte) error
+
+	SetTransport(transport transport.Transport)
 }
 
 type BaseGBSource struct {
 	stream.PublishSource
 
-	transport   transport.Transport
 	probeBuffer *mpeg.PSProbeBuffer
+	transport   transport.Transport
 	ssrc        uint32
 
 	audioTimestamp         int64
@@ -103,22 +96,15 @@ type BaseGBSource struct {
 	sameTimePackets        [][]byte
 }
 
-func (source *BaseGBSource) Init() {
-	source.TransDemuxer = mpeg.NewPSDemuxer(false)
-	source.TransDemuxer.SetHandler(source)
-	source.TransDemuxer.SetOnPreprocessPacketHandler(func(packet *avformat.AVPacket) {
-		source.correctTimestamp(packet, packet.Dts, packet.Pts)
-	})
-	source.SetType(stream.SourceType28181)
-	source.probeBuffer = mpeg.NewProbeBuffer(PsProbeBufferSize)
-	source.PublishSource.Init()
-	source.lastRtpTimestamp = -1
-}
-
 // ProcessPacket 输入rtp包, 处理PS流, 负责解析->封装->推流
 func (source *BaseGBSource) ProcessPacket(data []byte) error {
 	packet := rtp.Packet{}
 	_ = packet.Unmarshal(data)
+
+	// 收到第一包, 初始化
+	if source.probeBuffer == nil {
+		source.InitializePublish(packet.SSRC)
+	}
 
 	// 国标级联转发
 	if source.GetTransStreamPublisher().GetForwardTransStream() != nil {
@@ -228,30 +214,17 @@ func (source *BaseGBSource) correctTimestamp(packet *avformat.AVPacket, dts, pts
 }
 
 func (source *BaseGBSource) Close() {
-	log.Sugar.Infof("GB28181推流结束 ssrc:%d %s", source.ssrc, source.PublishSource.String())
-
-	// 释放收流端口
-	if source.transport != nil {
-		source.transport.Close()
-		source.transport = nil
-	}
-
-	// 删除ssrc关联
-	if !stream.AppConfig.GB28181.IsMultiPort() {
-		if SharedTCPServer != nil {
-			SharedTCPServer.filter.RemoveSource(source.ssrc)
-		}
-
-		if SharedUDPServer != nil {
-			SharedUDPServer.filter.RemoveSource(source.ssrc)
-		}
-	}
+	log.Sugar.Infof("GB28181推流结束 ssrc: %d %s", source.ssrc, source.PublishSource.String())
 
 	source.PublishSource.Close()
-}
 
-func (source *BaseGBSource) SetConn(conn net.Conn) {
-	source.Conn = conn
+	// 加锁执行, 保证并发安全
+	source.ExecuteWithDeleteLock(func() {
+		if source.transport != nil {
+			source.transport.Close()
+			source.transport = nil
+		}
+	})
 }
 
 func (source *BaseGBSource) SetSSRC(ssrc uint32) {
@@ -262,27 +235,43 @@ func (source *BaseGBSource) SSRC() uint32 {
 	return source.ssrc
 }
 
-func (source *BaseGBSource) PreparePublish(conn net.Conn, ssrc uint32, source_ GBSource) {
-	source.SetConn(conn)
-	source.SetSSRC(ssrc)
-	source.SetState(stream.SessionStateTransferring)
+func (source *BaseGBSource) InitializePublish(ssrc uint32) {
+	if source.ssrc != ssrc {
+		log.Sugar.Warnf("创建source的ssrc与实际推流的ssrc不一致, 创建的ssrc: %x 实际推流的ssrc: %x source: %s", source.ssrc, ssrc, source.GetID())
+	}
+
+	// 初始化ps解复用器
+	source.TransDemuxer.SetOnPreprocessPacketHandler(func(packet *avformat.AVPacket) {
+		source.correctTimestamp(packet, packet.Dts, packet.Pts)
+	})
+	source.probeBuffer = mpeg.NewProbeBuffer(PsProbeBufferSize)
+	source.lastRtpTimestamp = -1
+
+	source.ssrc = ssrc
 	source.audioTimestamp = -1
 	source.videoTimestamp = -1
 	source.audioPacketCreatedTime = -1
 	source.videoPacketCreatedTime = -1
 
-	if stream.AppConfig.Hooks.IsEnablePublishEvent() {
-		go func() {
-			if _, state := stream.HookPublishEvent(source_); utils.HookStateOK == state {
-				return
-			}
-
-			log.Sugar.Errorf("GB28181 推流失败 source:%s", source.GetID())
-			if conn != nil {
-				conn.Close()
-			}
-		}()
+	p := stream.SourceManager.Find(source.GetID())
+	if p == nil {
+		log.Sugar.Errorf("GB28181推流失败, 未找到source: %s", source.GetID())
+		source.Close()
+		return
 	}
+
+	stream.PreparePublishSourceWithAsync(p, false)
+}
+
+func (source *BaseGBSource) Init() {
+	// 创建ps解复用器
+	source.TransDemuxer = mpeg.NewPSDemuxer(false)
+	source.TransDemuxer.SetHandler(source)
+	source.PublishSource.Init()
+}
+
+func (source *BaseGBSource) SetTransport(transport transport.Transport) {
+	source.transport = transport
 }
 
 // NewGBSource 创建国标推流源, 返回监听的收流端口
@@ -294,9 +283,10 @@ func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, int, 
 	}
 
 	if active {
-		utils.Assert(tcp && stream.AppConfig.GB28181.IsEnableTCP() && stream.AppConfig.GB28181.IsMultiPort())
+		utils.Assert(tcp && stream.AppConfig.GB28181.IsEnableTCP())
 	}
 
+	var transportServer transport.Transport
 	var source GBSource
 	var port int
 	var err error
@@ -304,55 +294,46 @@ func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, int, 
 	if active {
 		source, port, err = NewActiveSource()
 	} else if tcp {
+		transportServer, err = TransportManger.NewTCPServer()
+		if err != nil {
+			return nil, 0, err
+		}
+
 		source = NewPassiveSource()
+		transportServer.(*transport.TCPServer).SetHandler(source.(*PassiveSource))
+		transportServer.(*transport.TCPServer).Accept()
+		port = transportServer.ListenPort()
 	} else {
+		transportServer, err = TransportManger.NewUDPServer()
+		if err != nil {
+			return nil, 0, err
+		}
+
 		source = NewUDPSource()
+		transportServer.(*transport.UDPServer).SetHandler(source.(*UDPSource))
+		transportServer.(*transport.UDPServer).Receive()
+		port = transportServer.ListenPort()
 	}
 
-	if err != nil {
-		return nil, 0, err
-	}
-
-	// 单端口模式，绑定ssrc
-	if !stream.AppConfig.GB28181.IsMultiPort() {
-		var success bool
-		if tcp {
-			success = SharedTCPServer.filter.AddSource(ssrc, source)
-		} else {
-			success = SharedUDPServer.filter.AddSource(ssrc, source)
-		}
-
-		if !success {
-			return nil, 0, fmt.Errorf("ssrc conflict")
-		}
-
-		port = stream.AppConfig.GB28181.Port[0]
-	} else if !active {
-		// 多端口模式, 创建收流Server
-		if tcp {
-			tcpServer, err := NewTCPServer(NewSingleFilter(source))
-			if err != nil {
-				return nil, 0, err
-			}
-
-			port = tcpServer.tcp.ListenPort()
-			source.(*PassiveSource).transport = tcpServer.tcp
-		} else {
-			server, err := NewUDPServer(NewSingleFilter(source))
-			if err != nil {
-				return nil, 0, err
-			}
-
-			port = server.udp.ListenPort()
-			source.(*UDPSource).transport = server.udp
-		}
-	}
-
+	source.SetType(stream.SourceType28181)
 	source.SetID(id)
 	source.SetSSRC(ssrc)
-	source.Init()
-	if _, state := stream.PreparePublishSource(source, false); utils.HookStateOK != state {
-		return nil, 0, fmt.Errorf("error code %d", state)
+	// 加锁保护一下, 防止初始化阶段, 调用关闭source接口, 发生并发安全问题
+	source.ExecuteWithDeleteLock(func() {
+		if err = stream.AddSource(source); err != nil {
+			return
+		}
+
+		source.SetTransport(transportServer)
+		source.Init()
+	})
+
+	// id冲突
+	if err != nil {
+		if transportServer != nil {
+			transportServer.Close()
+		}
+		return nil, 0, err
 	}
 
 	stream.LoopEvent(source)

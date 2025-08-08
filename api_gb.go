@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"github.com/lkmio/avformat/bufio"
-	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/gb28181"
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
@@ -74,9 +73,7 @@ func (api *ApiServer) OnGBSourceCreate(v *SourceSDP, w http.ResponseWriter, r *h
 	}
 
 	if tcp && active {
-		if !stream.AppConfig.GB28181.IsMultiPort() {
-			err = fmt.Errorf("单端口模式下不能主动拉流")
-		} else if !tcp {
+		if !tcp {
 			err = fmt.Errorf("UDP不能主动拉流")
 		} else if !stream.AppConfig.GB28181.IsEnableTCP() {
 			err = fmt.Errorf("未开启TCP收流服务,UDP不能主动拉流")
@@ -218,9 +215,9 @@ func (api *ApiServer) OnGBTalk(w http.ResponseWriter, r *http.Request) {
 	talkSource.Init()
 	talkSource.SetUrlValues(r.Form)
 
-	_, state := stream.PreparePublishSource(talkSource, true)
-	if utils.HookStateOK != state {
-		log.Sugar.Errorf("对讲失败, source: %s", talkSource)
+	_, err = stream.PreparePublishSource(talkSource, true)
+	if err != nil {
+		log.Sugar.Errorf("对讲失败, err: %s source: %s", err, talkSource)
 		conn.Close()
 		return
 	}

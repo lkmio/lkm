@@ -124,14 +124,6 @@ func (g TransportConfig) IsEnableUDP() bool {
 	return strings.Contains(g.Transport, "UDP")
 }
 
-func (g GB28181Config) IsMultiPort() bool {
-	return len(g.Port) > 1
-}
-
-func (g RtspConfig) IsMultiPort() bool {
-	return len(g.Port) == 3
-}
-
 // M3U8Path 根据sourceId返回m3u8的磁盘路径
 // 切片及目录生成规则, 以SourceId为34020000001320000001/34020000001320000001为例:
 // 创建文件夹34020000001320000001, 34020000001320000001.m3u8文件, 文件列表中切片url为34020000001320000001_seq.ts

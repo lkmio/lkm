@@ -1,7 +1,6 @@
 package jt1078
 
 import (
-	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
 	"github.com/lkmio/transport"
@@ -33,20 +32,10 @@ func (s *Session) Input(data []byte) (int, error) {
 			return -1, err
 		}
 
-		// 首包处理, hook通知
+		// 首包处理
 		if firstOfPacket && demuxer.prevPacket != nil {
 			s.SetID(demuxer.sim + "/" + strconv.Itoa(demuxer.channel))
-
-			go func() {
-				_, state := stream.PreparePublishSource(s, true)
-				if utils.HookStateOK != state {
-					log.Sugar.Errorf("1078推流失败 source: %s", demuxer.sim)
-
-					if s.Conn != nil {
-						s.Conn.Close()
-					}
-				}
-			}()
+			stream.PreparePublishSourceWithAsync(s, true)
 		}
 	}
 
@@ -56,13 +45,7 @@ func (s *Session) Input(data []byte) (int, error) {
 func (s *Session) Close() {
 	log.Sugar.Infof("1078推流结束 %s", s.String())
 
-	if s.Conn != nil {
-		s.Conn.Close()
-		s.Conn = nil
-	}
-
 	s.PublishSource.Close()
-	stream.TCPReceiveBufferPool.Put(s.receiveBuffer[:cap(s.receiveBuffer)])
 }
 
 func NewSession(conn net.Conn, version int) *Session {

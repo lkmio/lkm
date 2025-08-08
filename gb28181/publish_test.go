@@ -24,7 +24,7 @@ import (
 func connectSource(source string, addr string) {
 	v := &struct {
 		Source     string `json:"source"` //GetSourceID
-		RemoteAddr string `json:"remote_addr"`
+		RemoteAddr string `json:"addr"`
 	}{
 		Source:     source,
 		RemoteAddr: addr,
@@ -35,7 +35,7 @@ func connectSource(source string, addr string) {
 		panic(err)
 	}
 
-	request, err := http.NewRequest("POST", "http://localhost:8080/v1/gb28181/source/connect", bytes.NewBuffer(marshal))
+	request, err := http.NewRequest("POST", "http://localhost:8080/api/v1/gb28181/answer/set", bytes.NewBuffer(marshal))
 	if err != nil {
 		panic(err)
 	}
@@ -209,11 +209,12 @@ func TestPublish(t *testing.T) {
 	//path := "../../source_files/rtp_ps_h264_G7221_0xBEBC204.raw"
 	//var rawSsrc uint32 = 0xBEBC204
 
-	path := "../../source_files/rtp_ps_h264_G726_0xBEBC205.raw"
+	//path := "../../source_files/rtp_ps_h264_G726_0xBEBC205.raw"
+	path := "../../source_files/rtp_ps_err_parse.raw"
 	var rawSsrc uint32 = 0xBEBC205
 
 	localAddr := "0.0.0.0:20001"
-	id := "hls_mystream"
+	id := "hls/mystream"
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -305,7 +306,7 @@ func TestPublish(t *testing.T) {
 	})
 
 	t.Run("active", func(t *testing.T) {
-		ip, port, ssrc := createSource(id, "active", rawSsrc)
+		_, _, ssrc := createSource(id, "active", rawSsrc)
 
 		addr, _ := net.ResolveTCPAddr("tcp", localAddr)
 		server := transport.TCPServer{}
@@ -317,6 +318,7 @@ func TestPublish(t *testing.T) {
 				ctrDelay(packet[2:])
 			}
 
+			server.Close()
 			return nil
 		}, nil, nil)
 
@@ -325,7 +327,9 @@ func TestPublish(t *testing.T) {
 			panic(err)
 		}
 
-		connectSource(id, fmt.Sprintf("%s:%d", ip, port))
+		server.Accept()
+		connectSource(id, localAddr)
+		select {}
 	})
 }
 
@@ -336,10 +340,10 @@ func TestDecode(t *testing.T) {
 			panic(err2)
 		}
 
-		source := NewPassiveSource()
-		source.Init()
-		filter := NewSingleFilter(source)
-		session := NewTCPSession(nil, filter)
+		source := &PassiveSource{
+			decoder: transport.NewLengthFieldFrameDecoder(0xFFFF, 2),
+		}
+
 		reader := bufio.NewBytesReader(file)
 
 		for {
@@ -353,7 +357,7 @@ func TestDecode(t *testing.T) {
 				break
 			}
 
-			err2 = session.DecodeGBRTPOverTCPPacket(bytes, filter, nil)
+			err2 = source.DecodeGBRTPOverTCPPacket(bytes)
 			if err2 != nil {
 				break
 			}

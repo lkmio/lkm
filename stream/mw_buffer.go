@@ -33,8 +33,8 @@ type MergeWritingBuffer interface {
 }
 
 type mbBuffer struct {
-	buffer   collections.BlockBuffer
-	segments *collections.Queue[*collections.ReferenceCounter[[]byte]]
+	buffer   collections.BlockBuffer                                   // 合并写内存缓冲区
+	segments *collections.Queue[*collections.ReferenceCounter[[]byte]] // 包含多个合并写切片
 }
 
 type mergeWritingBuffer struct {
@@ -56,13 +56,15 @@ func (m *mergeWritingBuffer) TryAlloc(size int, ts int64, videoPkt, videoKey boo
 
 	buffer := m.buffers.Peek(m.buffers.Size() - 1).buffer
 	bytes := buffer.AvailableBytes()
+	// 内存不足, 分配新的内存缓冲区
 	if bytes < size {
-		// 非完整切片，先保存切片再分配新的内存
+		// 让外部先flush, 再分配新的内存
 		if buffer.PendingBlockSize() > 0 {
 			return nil, false
 		}
 
-		// -1, 当前内存池不释放
+		// 释放未使用的内存缓冲区
+		// -1, 最新的内存缓冲区不释放
 		release(m.buffers, m.buffers.Size()-1)
 		m.buffers.Push(MWBufferPool.Get().(*mbBuffer))
 	}
@@ -116,6 +118,7 @@ func (m *mergeWritingBuffer) FlushSegment() (*collections.ReferenceCounter[[]byt
 	}
 
 	if AppConfig.GOPCache {
+		// +1=2
 		counter.Refer()
 		m.lastKeyVideoDataSegments.Push(counter)
 	}
@@ -172,11 +175,13 @@ func (m *mergeWritingBuffer) HasVideoDataInCurrentSegment() bool {
 }
 
 func (m *mergeWritingBuffer) Close() *collections.Queue[*mbBuffer] {
+	// 减少关键帧切片的引用计数
 	for m.lastKeyVideoDataSegments.Size() > 0 {
 		m.lastKeyVideoDataSegments.Pop().Release()
 	}
 
 	if m.buffers.Size() > 0 && !release(m.buffers, m.buffers.Size()) {
+		// 还有sink在使用, 返回未释放的内存缓冲区
 		return m.buffers
 	}
 
