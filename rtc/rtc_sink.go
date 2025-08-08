@@ -105,10 +105,10 @@ func (s *Sink) StartStreaming(transStream stream.TransStream) error {
 	<-complete
 	connection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		s.state = state
-		log.Sugar.Infof("ice state: %v sink: %d source: %s", state.String(), s.GetID(), s.SourceID)
+		log.Sugar.Infof("ice state: %v sink: %s source: %s", state.String(), stream.SinkID2String(s.GetID()), s.SourceID)
 
 		if state > webrtc.ICEConnectionStateDisconnected {
-			log.Sugar.Errorf("webrtc peer断开连接 sink: %v source: %s", s.GetID(), s.SourceID)
+			log.Sugar.Errorf("webrtc peer断开连接 sink: %s source: %s", stream.SinkID2String(s.GetID()), s.SourceID)
 			s.Close()
 		}
 	})
