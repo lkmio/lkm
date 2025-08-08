@@ -102,7 +102,7 @@ func (m *mergeWritingBuffer) alloc(size int, ts int64, videoPkt, videoKey bool) 
 
 func (m *mergeWritingBuffer) FlushSegment() (*collections.ReferenceCounter[[]byte], bool) {
 	buffer := m.buffers.Peek(m.buffers.Size() - 1)
-	data := buffer.buffer.Feat()
+	data := buffer.buffer.Fetch()
 	if len(data) == 0 {
 		return nil, false
 	}

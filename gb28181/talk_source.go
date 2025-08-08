@@ -33,7 +33,7 @@ func (d *Demuxer) Input(data []byte) (int, error) {
 	for i := 0; i < length; {
 		n := bufio.MinInt(length-i, 320)
 		_, _ = d.DataPipeline.Write(data[i:i+n], 0, utils.AVMediaTypeAudio)
-		pkt, _ := d.DataPipeline.Feat(0)
+		pkt, _ := d.DataPipeline.Fetch(0)
 		d.OnAudioPacket(0, utils.AVCodecIdPCMALAW, pkt, d.ts)
 		d.ts += int64(n)
 		i += n

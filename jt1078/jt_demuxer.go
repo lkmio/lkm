@@ -17,7 +17,7 @@ type Demuxer struct {
 func (d *Demuxer) ProcessPrevPacket() error {
 	var codec utils.AVCodecID
 	index := d.FindBufferIndex(int(d.prevPacket.pt))
-	bytes, err := d.BaseDemuxer.DataPipeline.Feat(index)
+	bytes, err := d.BaseDemuxer.DataPipeline.Fetch(index)
 	if err != nil {
 		return err
 	} else /*if d.prevPacket.packetType > AudioFrameMark {
