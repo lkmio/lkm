@@ -134,13 +134,8 @@ func startApiServer(addr string) {
 	}
 }
 
-func (api *ApiServer) generateSinkID(remoteAddr string) stream.SinkID {
-	tcpAddr, err := net.ResolveTCPAddr("tcp", remoteAddr)
-	if err != nil {
-		panic(err)
-	}
-
-	return stream.NetAddr2SinkID(tcpAddr)
+func (api *ApiServer) generateSinkID(_ string) stream.SinkID {
+	return utils.RandStringBytes(18)
 }
 
 func (api *ApiServer) onFlv(sourceId string, w http.ResponseWriter, r *http.Request) {
