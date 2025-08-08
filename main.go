@@ -75,12 +75,10 @@ func init() {
 	// 初始化日志
 	log.InitLogger(config.Log.FileLogging, zapcore.Level(stream.AppConfig.Log.Level), stream.AppConfig.Log.Name, stream.AppConfig.Log.MaxSize, stream.AppConfig.Log.MaxBackup, stream.AppConfig.Log.MaxAge, stream.AppConfig.Log.Compress)
 
-	if stream.AppConfig.GB28181.Enable {
-		gb28181.TransportManger = transport.NewTransportManager(config.ListenIP, uint16(stream.AppConfig.GB28181.Port[0]), uint16(stream.AppConfig.GB28181.Port[1]))
-	}
-
-	if stream.AppConfig.Rtsp.Enable {
-		rtsp.TransportManger = transport.NewTransportManager(config.ListenIP, uint16(stream.AppConfig.Rtsp.Port[1]), uint16(stream.AppConfig.Rtsp.Port[2]))
+	if stream.AppConfig.GB28181.Enable || stream.AppConfig.Rtsp.Enable {
+		transportManager := transport.NewTransportManager(config.ListenIP, uint16(stream.AppConfig.MediaPort[0]), uint16(stream.AppConfig.MediaPort[1]))
+		gb28181.TransportManger = transportManager
+		rtsp.TransportManger = transportManager
 	}
 
 	// 创建dump目录
@@ -112,7 +110,7 @@ func main() {
 	}
 
 	if stream.AppConfig.Rtsp.Enable {
-		rtspAddr, err := net.ResolveTCPAddr("tcp", stream.ListenAddr(stream.AppConfig.Rtsp.Port[0]))
+		rtspAddr, err := net.ResolveTCPAddr("tcp", stream.ListenAddr(stream.AppConfig.Rtsp.Port))
 		if err != nil {
 			panic(rtspAddr)
 		}

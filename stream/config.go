@@ -77,10 +77,8 @@ type JT1078Config struct {
 }
 
 type RtspConfig struct {
-	TransportConfig
-
 	enableConfig
-	Port     []int  `json:"port"`
+	Port     int    `json:"port"`
 	Password string `json:"password"`
 }
 
@@ -106,8 +104,6 @@ type HttpConfig struct {
 
 type GB28181Config struct {
 	enableConfig
-	TransportConfig
-	Port []int `json:"port"`
 }
 
 type WebRtcConfig struct {
@@ -207,7 +203,7 @@ func GetStreamPlayUrls(source string) []string {
 
 	if AppConfig.Rtsp.Enable {
 		// 不拼接userinfo
-		urls = append(urls, fmt.Sprintf("rtsp://%s:%d/%s", AppConfig.PublicIP, AppConfig.Rtsp.Port[0], source))
+		urls = append(urls, fmt.Sprintf("rtsp://%s:%d/%s", AppConfig.PublicIP, AppConfig.Rtsp.Port, source))
 	}
 
 	//if AppConfig.Http.Enable {
@@ -265,6 +261,7 @@ type AppConfig_ struct {
 	IdleTimeout    int64  `json:"idle_timeout"`    // 多长时间(单位秒)没有拉流. 如果开启hook通知, 根据hook响应, 决定是否关闭Source(200-不关闭/非200关闭). 否则会直接关闭Source.
 	ReceiveTimeout int64  `json:"receive_timeout"` // 多长时间(单位秒)没有收到流. 如果开启hook通知, 根据hook响应, 决定是否关闭Source(200-不关闭/非200关闭). 否则会直接关闭Source.
 	Debug          bool   `json:"debug"`           // debug模式, 开启将保存推流
+	MediaPort      []int  `json:"media_port"`      // 媒体端口范围
 
 	//缓存指定时长的包，满了之后才发送给Sink. 可以降低用户态和内核态的交互频率，大幅提升性能.
 	//合并写的大小范围，应当大于一帧的时长，不超过一组GOP的时长，在实际发送流的时候也会遵循此条例.

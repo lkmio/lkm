@@ -7,6 +7,7 @@
   "idle_timeout": 60,
   "receive_timeout":60,
   "debug": false,
+  "media_port": [50000,60000],
 
   "http": {
     "port": 8080
@@ -26,9 +27,8 @@
 
   "rtsp": {
     "enable": true,
-    "port": [554,20000,30000],
-    "password": "123456",
-    "transport": "UDP|TCP"
+    "port": 554,
+    "password": "123456"
   },
 
   "webrtc": {
@@ -38,9 +38,7 @@
   },
 
   "gb28181": {
-    "enable": true,
-    "port": [50000,60000],
-    "transport": "UDP|TCP"
+    "enable": true
   },
 
   "jt1078": {

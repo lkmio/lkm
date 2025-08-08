@@ -72,18 +72,6 @@ func (api *ApiServer) OnGBSourceCreate(v *SourceSDP, w http.ResponseWriter, r *h
 		//udp收流
 	}
 
-	if tcp && active {
-		if !tcp {
-			err = fmt.Errorf("UDP不能主动拉流")
-		} else if !stream.AppConfig.GB28181.IsEnableTCP() {
-			err = fmt.Errorf("未开启TCP收流服务,UDP不能主动拉流")
-		}
-
-		if err != nil {
-			return
-		}
-	}
-
 	var ssrc string
 	if v.SessionName == InviteTypeDownload || v.SessionName == InviteTypePlayback {
 		ssrc = gb28181.GetVodSSRC()

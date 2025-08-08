@@ -276,16 +276,6 @@ func (source *BaseGBSource) SetTransport(transport transport.Transport) {
 
 // NewGBSource 创建国标推流源, 返回监听的收流端口
 func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, int, error) {
-	if tcp {
-		utils.Assert(stream.AppConfig.GB28181.IsEnableTCP())
-	} else {
-		utils.Assert(stream.AppConfig.GB28181.IsEnableUDP())
-	}
-
-	if active {
-		utils.Assert(tcp && stream.AppConfig.GB28181.IsEnableTCP())
-	}
-
 	var transportServer transport.Transport
 	var source GBSource
 	var port int
