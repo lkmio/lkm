@@ -1,32 +1,23 @@
 ## 简介
 
-基于GoLang实现的流媒体服务器，支持RTMP、GB28181、jt1078推流、jt1078转GB28181，输出rtmp/http-flv/ws-flv/webrtc/hls/rtsp等拉流协议。支持如下编码器和流协议：
-
-| Codec\Stream | RTMP | FLV | HLS | RTC | RTSP |
-| ------------ | ---- | --- | --- | --- | ---- |
-| H264         | √    | √   | √   | √   | √    |
-| H265         | √    | √   | √   | -([有计划支持](https://linkingvision.com/webrtch265))   | √    |
-| G711A/U      | √    | √   | -   | √   | √    |
-| AAC          | √    | √   | √   | -   | √    |
-| OPUS         | -    | -   | -   | √   | -    |
+基于GoLang实现的流媒体服务器，支持RTMP、GB28181、jt1078推流、jt1078转GB28181，输出rtmp/http-flv/ws-flv/webrtc/hls/rtsp等拉流协议，支持AAC/G711/G726/OPUS音频转码。
 
 ## 编译
 
-在使用之前，建议先阅读[LKM启动配置文件参数说明](https://github.com/lkmio/lkm/wiki/Startup-Parameters)。如果你想修改源码，推荐阅读[LKM源码分析](https://github.com/lkmio/lkm/wiki/Source-Code-Analysis)。
+在使用之前，建议先阅读[LKM启动参数项说明](https://github.com/lkmio/lkm/wiki/Startup-Parameters)。如果你想修改源码，推荐阅读[LKM源码分析](https://github.com/lkmio/lkm/wiki/Source-Code-Analysis)。
 
 ### 源码编译
-
-     git clone https://github.com/lkmio/avformat.git
      git clone https://github.com/lkmio/lkm.git
      cd lkm
      go mod tidy
-     go mod vendor
-     go build
-
+     go build 
+     
+### 开启音频转码
+     -tags audio_transcode
+     
 ### docker编译
 
      ./build_docker_images.sh GOOS=linux GOARCH=amd64
-
 
 支持修改`GOOS`和`GOARCH`参数来决定编译平台。默认编译制作`linx amd64`平台的镜像，如果宿主机有golang编译环境，则以宿主机平台为准。优先级如下：编译时指定平台 > 宿主机平台 > 默认平台。
 
@@ -77,7 +68,10 @@ ffplay -i rtmp://127.0.0.1/34020000001320000001/34020000001310000001.session_id_
 
 ```
 
-## 1078推流
+## JT1078推流
 
 > 需自行安装信令服务, 告知设备推流到LKM的收流端口
+> 
+> [JT1078转GB28181](https://github.com/lkmio/gb-cms)
+ 
 
