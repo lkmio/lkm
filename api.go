@@ -18,7 +18,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -320,8 +319,7 @@ func (api *ApiServer) onRtc(sourceId string, w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	group := sync.WaitGroup{}
-	group.Add(1)
+	done := make(chan struct{})
 	sink := rtc.NewSink(api.generateSinkID(r.RemoteAddr), sourceId, v.SDP, func(sdp string) {
 		response := struct {
 			Type string `json:"type"`
@@ -338,8 +336,7 @@ func (api *ApiServer) onRtc(sourceId string, w http.ResponseWriter, r *http.Requ
 
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(marshal)
-
-		group.Done()
+		close(done)
 	})
 
 	log.Sugar.Infof("rtc拉流请求 source: %s sink: %s sdp:%v", sourceId, sink.String(), v.SDP)
@@ -348,10 +345,17 @@ func (api *ApiServer) onRtc(sourceId string, w http.ResponseWriter, r *http.Requ
 	if utils.HookStateOK != ok {
 		log.Sugar.Warnf("rtc拉流失败 source: %s sink: %s", sourceId, sink.String())
 		w.WriteHeader(http.StatusForbidden)
-		group.Done()
+		return
 	}
 
-	group.Wait()
+	select {
+	case <-r.Context().Done():
+		log.Sugar.Infof("rtc拉流请求取消 source: %s sink: %s", sourceId, stream.SinkID2String(sink.GetID()))
+		sink.Close()
+		break
+	case <-done:
+		break
+	}
 }
 
 func (api *ApiServer) OnSourceList(w http.ResponseWriter, r *http.Request) {
