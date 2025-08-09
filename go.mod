@@ -1,7 +1,7 @@
 module github.com/lkmio/lkm
 
 require (
-	github.com/lkmio/audio-transcoder v0.2.1
+	github.com/lkmio/audio-transcoder v0.2.2
 	github.com/lkmio/avformat v0.0.2
 	github.com/lkmio/flv v0.0.3
 	github.com/lkmio/mpeg v0.0.4
