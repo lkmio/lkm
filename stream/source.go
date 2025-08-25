@@ -325,6 +325,8 @@ func (s *PublishSource) OnTrackNotFind() {
 	}
 
 	log.Sugar.Errorf("no tracks found. source id: %s", s.ID)
+	// 异步关闭source
+	go CloseSource(s.ID)
 }
 
 func (s *PublishSource) OnPacket(packet *avformat.AVPacket) {
