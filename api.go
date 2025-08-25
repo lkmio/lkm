@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"github.com/gorilla/mux"
@@ -80,6 +81,23 @@ func startApiServer(addr string) {
 	  http://host:port/xxx_0.ts
 	  ws://host:port/xxx.flv
 	*/
+
+	apiServer.router.Use(func(handler http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// 添加 CORS 头以解决跨域问题
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
+			w.Header().Set("Access-Control-Allow-Headers", "*")
+
+			// 如果是OPTIONS请求，直接返回
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+
+			handler.ServeHTTP(w, r)
+		})
+	})
 	// {source}.flv和/{source}/{stream}.flv意味着, 推流id(路径)只能嵌套一层
 	apiServer.router.HandleFunc("/{source}.flv", filterSourceID(apiServer.onFlv, ".flv"))
 	apiServer.router.HandleFunc("/{source}/{stream}.flv", filterSourceID(apiServer.onFlv, ".flv"))
@@ -309,10 +327,23 @@ func (api *ApiServer) onRtc(sourceId string, w http.ResponseWriter, r *http.Requ
 	}{}
 
 	data, err := io.ReadAll(r.Body)
+	var liveGBSWF bool
+
 	if err != nil {
 		log.Sugar.Errorf("rtc拉流失败 err: %s remote: %s", err.Error(), r.RemoteAddr)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	} else if liveGBSWF = "livegbs" == r.URL.Query().Get("wf"); liveGBSWF {
+		// 兼容livegbs前端播放webrtc
+		offer, err := base64.StdEncoding.DecodeString(string(data))
+		if err != nil {
+			log.Sugar.Errorf("rtc拉流失败 err: %s remote: %s", err.Error(), r.RemoteAddr)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		v.Type = "offer"
+		v.SDP = string(offer)
 	} else if err := json.Unmarshal(data, &v); err != nil {
 		log.Sugar.Errorf("rtc拉流失败 err: %s remote: %s", err.Error(), r.RemoteAddr)
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -329,13 +360,19 @@ func (api *ApiServer) onRtc(sourceId string, w http.ResponseWriter, r *http.Requ
 			SDP:  sdp,
 		}
 
-		marshal, err := json.Marshal(response)
+		var body []byte
+		body, err = json.Marshal(response)
 		if err != nil {
 			panic(err)
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(marshal)
+		if liveGBSWF {
+			body = []byte(base64.StdEncoding.EncodeToString([]byte(sdp)))
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+		}
+
+		w.Write(body)
 		close(done)
 	})
 
