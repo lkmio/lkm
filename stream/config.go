@@ -220,6 +220,28 @@ func GetStreamPlayUrls(source string) []string {
 	return urls
 }
 
+func GetStreamPlayUrlsMap(source string) map[string]string {
+	urls := GetStreamPlayUrls(source)
+	playUrlMap := make(map[string]string)
+	for _, url := range urls {
+
+		if strings.HasPrefix(url, "ws") {
+			playUrlMap["ws_flv"] = url
+		} else if strings.HasSuffix(url, ".flv") {
+			playUrlMap["flv"] = url
+		} else if strings.HasSuffix(url, ".m3u8") {
+			playUrlMap["hls"] = url
+		} else if strings.HasSuffix(url, ".rtc") {
+			playUrlMap["rtc"] = url
+		} else if strings.HasPrefix(url, "rtmp") {
+			playUrlMap["rtmp"] = url
+		} else if strings.HasPrefix(url, "rtsp") {
+			playUrlMap["rtsp"] = url
+		}
+	}
+	return playUrlMap
+}
+
 // DumpStream2File 保存推流到文件, 用4字节帧长分割
 func DumpStream2File(sourceType SourceType, conn net.Conn, data []byte) {
 	path := fmt.Sprintf("dump/%s-%s", sourceType.String(), conn.RemoteAddr().String())

@@ -8,6 +8,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/lkmio/avformat/utils"
 	"github.com/lkmio/lkm/flv"
+	"github.com/lkmio/lkm/gb28181"
 	"github.com/lkmio/lkm/hls"
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/rtc"
@@ -131,6 +132,8 @@ func startApiServer(addr string) {
 	apiServer.router.HandleFunc("/api/v1/gc/force", func(writer http.ResponseWriter, request *http.Request) {
 		runtime.GC()
 	})
+
+	apiServer.router.HandleFunc("/api/v1/stream/info", apiServer.OnStreamInfo)
 
 	apiServer.router.PathPrefix("/web/").Handler(http.StripPrefix("/web/", http.FileServer(http.Dir("./web"))))
 
@@ -496,4 +499,154 @@ func (api *ApiServer) OnSinkClose(v *IDS, w http.ResponseWriter, r *http.Request
 	}
 
 	httpResponseOK(w, nil)
+}
+
+func (api *ApiServer) OnStreamInfo(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("streamid")
+	source := stream.SourceManager.Find(id)
+	if source == nil || !source.IsCompleted() || source.IsClosed() {
+		return
+	}
+
+	tracks := source.OriginTracks()
+	if len(tracks) < 1 {
+		return
+	}
+
+	var deviceId string
+	var channelId string
+	split := strings.Split(id, "/")
+	if len(split) < 2 {
+		return
+	}
+
+	deviceId = split[0]
+	channelId = split[1]
+	if len(split[1]) >= 20 {
+		channelId = split[1][:20]
+	}
+
+	var transport string
+	if stream.SourceType28181 == source.GetType() {
+		if gb28181.SetupUDP != source.(gb28181.GBSource).SetupType() {
+			transport = "TCP"
+		} else {
+			transport = "UDP"
+		}
+	}
+
+	var token string
+	cookie, err := r.Cookie("token")
+	if err == nil {
+		token = cookie.Value
+	}
+
+	urls := stream.GetStreamPlayUrlsMap(id)
+	liveGBSUrls := make(map[string]string)
+	for streamName, url := range urls {
+		url += "?stream_token=" + token
+
+		// 兼容livegbs前端播放webrtc
+		if streamName == "rtc" {
+			if strings.HasPrefix(url, "http") {
+				url = strings.Replace(url, "http", "webrtc", 1)
+			} else if strings.HasPrefix(url, "https") {
+				url = strings.Replace(url, "https", "webrtcs", 1)
+			}
+
+			url += "&wf=livegbs"
+		}
+
+		liveGBSUrls[streamName] = url
+	}
+
+	statistics := source.GetBitrateStatistics()
+	response := struct {
+		AudioEnable           bool   `json:"AudioEnable"`
+		CDN                   string `json:"CDN"`
+		CascadeSize           int    `json:"CascadeSize"`
+		ChannelID             string `json:"ChannelID"`
+		ChannelName           string `json:"ChannelName"`
+		CloudRecord           bool   `json:"CloudRecord"`
+		DecodeSize            int    `json:"DecodeSize"`
+		DeviceID              string `json:"DeviceID"`
+		Duration              int    `json:"Duration"`
+		FLV                   string `json:"FLV"`
+		HLS                   string `json:"HLS"`
+		InBitRate             int    `json:"InBitRate"`
+		InBytes               int    `json:"InBytes"`
+		NumOutputs            int    `json:"NumOutputs"`
+		Ondemand              bool   `json:"Ondemand"`
+		OutBytes              int    `json:"OutBytes"`
+		RTMP                  string `json:"RTMP"`
+		RTPCount              int    `json:"RTPCount"`
+		RTPLostCount          int    `json:"RTPLostCount"`
+		RTPLostRate           int    `json:"RTPLostRate"`
+		RTSP                  string `json:"RTSP"`
+		RecordStartAt         string `json:"RecordStartAt"`
+		RelaySize             int    `json:"RelaySize"`
+		SMSID                 string `json:"SMSID"`
+		SnapURL               string `json:"SnapURL"`
+		SourceAudioCodecName  string `json:"SourceAudioCodecName"`
+		SourceAudioSampleRate int    `json:"SourceAudioSampleRate"`
+		SourceVideoCodecName  string `json:"SourceVideoCodecName"`
+		SourceVideoFrameRate  int    `json:"SourceVideoFrameRate"`
+		SourceVideoHeight     int    `json:"SourceVideoHeight"`
+		SourceVideoWidth      int    `json:"SourceVideoWidth"`
+		StartAt               string `json:"StartAt"`
+		StreamID              string `json:"StreamID"`
+		Transport             string `json:"Transport"`
+		VideoFrameCount       int    `json:"VideoFrameCount"`
+		WEBRTC                string `json:"WEBRTC"`
+		WS_FLV                string `json:"WS_FLV"`
+	}{
+		AudioEnable:          true,
+		CDN:                  "",
+		CascadeSize:          0,
+		ChannelID:            channelId,
+		ChannelName:          "",
+		CloudRecord:          false,
+		DecodeSize:           0,
+		DeviceID:             deviceId,
+		Duration:             int(time.Since(source.CreateTime()).Seconds()),
+		FLV:                  liveGBSUrls["flv"],
+		HLS:                  liveGBSUrls["hls"],
+		InBitRate:            statistics.PreviousSecond() * 8 / 1024,
+		InBytes:              int(statistics.Total()),
+		NumOutputs:           0,
+		Ondemand:             true,
+		OutBytes:             0,
+		RTMP:                 liveGBSUrls["rtmp"],
+		RTPCount:             0,
+		RTPLostCount:         0,
+		RTPLostRate:          0,
+		RTSP:                 liveGBSUrls["rtsp"],
+		RecordStartAt:        "",
+		RelaySize:            0,
+		SMSID:                "",
+		SnapURL:              "",
+		SourceVideoFrameRate: 0,
+		StartAt:              source.CreateTime().Format("2006-01-02 15:04:05"),
+		StreamID:             id,
+		Transport:            transport,
+		VideoFrameCount:      0,
+		WEBRTC:               liveGBSUrls["rtc"],
+		WS_FLV:               liveGBSUrls["ws_flv"],
+	}
+
+	for _, track := range tracks {
+		if utils.AVMediaTypeAudio == track.Stream.MediaType {
+			response.SourceAudioCodecName = track.Stream.CodecID.String()
+			response.SourceAudioSampleRate = track.Stream.AudioConfig.SampleRate
+		} else if utils.AVMediaTypeVideo == track.Stream.MediaType {
+			response.SourceVideoCodecName = track.Stream.CodecID.String()
+			// response.SourceVideoFrameRate
+			if track.Stream.CodecParameters != nil {
+				response.SourceVideoWidth = track.Stream.CodecParameters.Width()
+				response.SourceVideoHeight = track.Stream.CodecParameters.Height()
+			}
+		}
+	}
+
+	httpResponseJson(w, &response)
 }
