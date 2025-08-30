@@ -613,7 +613,7 @@ func (api *ApiServer) OnStreamInfo(w http.ResponseWriter, r *http.Request) {
 		HLS:                  liveGBSUrls["hls"],
 		InBitRate:            statistics.PreviousSecond() * 8 / 1024,
 		InBytes:              int(statistics.Total()),
-		NumOutputs:           0,
+		NumOutputs:           source.GetTransStreamPublisher().SinkCount(),
 		Ondemand:             true,
 		OutBytes:             0,
 		RTMP:                 liveGBSUrls["rtmp"],
