@@ -81,12 +81,11 @@ func (f *ForwardSink) Write(index int, data []*collections.ReferenceCounter[[]by
 				f.rtpBuffer = NewRtpBuffer(1024)
 			}
 
-			processedData = make([]*collections.ReferenceCounter[[]byte], 0, len(data))
 		} else if f.rtpBuffer == nil {
 			f.rtpBuffer = NewRtpBuffer(1)
 		}
 
-		for i, datum := range data {
+		for _, datum := range data {
 			src := datum.Get()
 			counter := f.rtpBuffer.Get()
 			bytes := counter.Get()
@@ -103,7 +102,7 @@ func (f *ForwardSink) Write(index int, data []*collections.ReferenceCounter[[]by
 			} else {
 				counter.ResetData(bytes[:length])
 				counter.Refer()
-				processedData[i] = counter
+				processedData = append(processedData, counter)
 			}
 		}
 
@@ -169,7 +168,7 @@ func NewForwardSink(transportType TransportType, protocol TransStreamProtocol, s
 		BaseSink:         BaseSink{ID: sinkId, SourceID: sourceId, State: SessionStateCreated, Protocol: protocol},
 		transportType:    transportType,
 		ssrc:             ssrc,
-		requireSSRCMatch: true, // 默认要求ssrc一致
+		requireSSRCMatch: false, // 默认允许ssrc可以不一致
 	}
 
 	if transportType == TransportTypeUDP {
