@@ -16,7 +16,15 @@ func PreparePlaySink(sink Sink, waitTimeout bool) (*http.Response, utils.HookSta
 	var response *http.Response
 
 	if AppConfig.Hooks.IsEnableOnPlay() {
-		hook, err := Hook(HookEventPlay, sink.UrlValues().Encode(), NewHookPlayEventInfo(sink))
+		body := struct {
+			eventInfo
+			Sink string `json:"sink"`
+		}{
+			eventInfo: NewHookPlayEventInfo(sink),
+			Sink:      SinkID2String(sink.GetID()),
+		}
+
+		hook, err := Hook(HookEventPlay, sink.UrlValues().Encode(), body)
 		if err != nil {
 			log.Sugar.Errorf("播放事件-通知失败 err: %s sink: %s-%v source: %s", err.Error(), sink.GetProtocol().String(), sink.GetID(), sink.GetSourceID())
 
