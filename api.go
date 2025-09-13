@@ -99,6 +99,11 @@ func startApiServer(addr string) {
 			handler.ServeHTTP(w, r)
 		})
 	})
+
+	// 点播, 映射录制资源
+	// 放在最前面, 避免被后面的路由拦截
+	apiServer.router.PathPrefix("/record/").Handler(http.StripPrefix("/record/", http.FileServer(http.Dir(stream.AppConfig.Record.Dir))))
+
 	// {source}.flv和/{source}/{stream}.flv意味着, 推流id(路径)只能嵌套一层
 	apiServer.router.HandleFunc("/{source}.flv", filterSourceID(apiServer.onFlv, ".flv"))
 	apiServer.router.HandleFunc("/{source}/{stream}.flv", filterSourceID(apiServer.onFlv, ".flv"))
@@ -120,6 +125,8 @@ func startApiServer(addr string) {
 	apiServer.router.HandleFunc("/api/v1/sink/list", withJsonParams(apiServer.OnSinkList, &IDS{}))       // 查询某个推流源下，所有的拉流端列表
 	apiServer.router.HandleFunc("/api/v1/sink/close", withJsonParams(apiServer.OnSinkClose, &IDS{}))     // 关闭拉流端
 	apiServer.router.HandleFunc("/api/v1/sink/add", withJsonParams(apiServer.OnSinkAdd, &GBOffer{}))     // 级联/广播/JT转GB
+	apiServer.router.HandleFunc("/api/v1/record/start", apiServer.OnRecordStart)                         // 开启录制
+	apiServer.router.HandleFunc("/api/v1/record/stop", apiServer.OnRecordStop)                           // 关闭录制
 
 	apiServer.router.HandleFunc("/api/v1/streams/statistics", nil) // 统计所有推拉流
 
@@ -560,6 +567,11 @@ func (api *ApiServer) OnStreamInfo(w http.ResponseWriter, r *http.Request) {
 		liveGBSUrls[streamName] = url
 	}
 
+	var recordStartTime string
+	if startTime := source.GetTransStreamPublisher().RecordStartTime(); !startTime.IsZero() {
+		recordStartTime = startTime.Format("2006-01-02 15:04:05")
+	}
+
 	statistics := source.GetBitrateStatistics()
 	response := struct {
 		AudioEnable           bool   `json:"AudioEnable"`
@@ -583,7 +595,7 @@ func (api *ApiServer) OnStreamInfo(w http.ResponseWriter, r *http.Request) {
 		RTPLostCount          int    `json:"RTPLostCount"`
 		RTPLostRate           int    `json:"RTPLostRate"`
 		RTSP                  string `json:"RTSP"`
-		RecordStartAt         string `json:"RecordStartAt"`
+		RecordStartAt         string `json:"RecordStartAt"` // 录制时间
 		RelaySize             int    `json:"RelaySize"`
 		SMSID                 string `json:"SMSID"`
 		SnapURL               string `json:"SnapURL"`
@@ -621,7 +633,7 @@ func (api *ApiServer) OnStreamInfo(w http.ResponseWriter, r *http.Request) {
 		RTPLostCount:         0,
 		RTPLostRate:          0,
 		RTSP:                 liveGBSUrls["rtsp"],
-		RecordStartAt:        "",
+		RecordStartAt:        recordStartTime,
 		RelaySize:            0,
 		SMSID:                "",
 		SnapURL:              "",
@@ -649,4 +661,35 @@ func (api *ApiServer) OnStreamInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httpResponseJson(w, &response)
+}
+
+func (api *ApiServer) OnRecordStart(w http.ResponseWriter, req *http.Request) {
+	streamId := req.FormValue("streamid")
+	source := stream.SourceManager.Find(streamId)
+	if source == nil {
+		log.Sugar.Errorf("OnRecordStart stream not found streamid %s", streamId)
+		w.WriteHeader(http.StatusNotFound)
+	} else if url, ok := source.GetTransStreamPublisher().StartRecord(); !ok {
+		w.WriteHeader(http.StatusBadRequest)
+	} else {
+		// 返回拉流地址
+		httpResponseJson(w, &struct {
+			DownloadURL string `json:"DownloadURL"`
+		}{
+			DownloadURL: url,
+		})
+	}
+
+}
+
+func (api *ApiServer) OnRecordStop(w http.ResponseWriter, req *http.Request) {
+	streamId := req.FormValue("streamid")
+	source := stream.SourceManager.Find(streamId)
+	if source == nil {
+		log.Sugar.Errorf("OnRecordStop stream not found streamid %s", streamId)
+		w.WriteHeader(http.StatusNotFound)
+	} else if err := source.GetTransStreamPublisher().StopRecord(); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		httpResponseJson(w, err.Error())
+	}
 }

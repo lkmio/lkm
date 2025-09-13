@@ -351,3 +351,8 @@ func limitInt(min, max, value int) int {
 
 	return value
 }
+
+// GenerateRecordStreamPlayUrl 生成录制文件的播放url
+func GenerateRecordStreamPlayUrl(recordFile string) string {
+	return fmt.Sprintf("http://%s:%d/record/%s", AppConfig.PublicIP, AppConfig.Http.Port, recordFile)
+}

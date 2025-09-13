@@ -11,6 +11,7 @@ import (
 type FLVFileSink struct {
 	stream.BaseSink
 	file *os.File
+	path string
 	fail bool
 }
 
@@ -47,22 +48,27 @@ func (f *FLVFileSink) Close() {
 		f.file.Close()
 		f.file = nil
 	}
+
+	if source := stream.SourceManager.Find(f.SourceID); source != nil {
+		stream.HookRecordEvent(source, f.path)
+	}
 }
 
 // NewFLVFileSink 创建FLV文件录制流Sink
 // 保存path: dir/sourceId/yyyy-MM-dd/HH-mm-ss.flv
 func NewFLVFileSink(sourceId string) (stream.Sink, string, error) {
 	now := time.Now().Format("2006-01-02/15-04-05")
-	path := filepath.Join(stream.AppConfig.Record.Dir, sourceId, now+".flv")
+	path := filepath.Join(sourceId, now+".flv")
+	dirPath := filepath.Join(stream.AppConfig.Record.Dir, path)
 
 	// 创建目录
-	dir := filepath.Dir(path)
+	dir := filepath.Dir(dirPath)
 	if err := os.MkdirAll(dir, 0666); err != nil {
 		return nil, "", err
 	}
 
 	// 创建flv文件
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0666)
+	file, err := os.OpenFile(dirPath, os.O_CREATE|os.O_RDWR, 0666)
 	if err != nil {
 		return nil, "", err
 	}

@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/lkmio/avformat"
 	"github.com/lkmio/avformat/collections"
@@ -9,6 +10,9 @@ import (
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/transcode"
 	"github.com/lkmio/transport"
+	"path/filepath"
+	"runtime"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -66,6 +70,16 @@ type TransStreamPublisher interface {
 	ExecuteSyncEvent(cb func())
 
 	SetSourceID(id string)
+
+	// StartRecord 开启录制
+	// 如果AppConfig已经开启了全局录制, 则无需手动开启, 返回false
+	StartRecord() (string, bool)
+
+	// StopRecord 停止录制
+	// 如果AppConfig已经开启了全局录制, 返回error
+	StopRecord() error
+
+	RecordStartTime() time.Time
 }
 
 type transStreamPublisher struct {
@@ -78,6 +92,7 @@ type transStreamPublisher struct {
 
 	recordSink      Sink                                // 每个Source的录制流
 	recordFilePath  string                              // 录制流文件路径
+	recordStartTime time.Time                           // 开始录制时间
 	hlsStream       TransStream                         // HLS传输流
 	originTracks    TrackManager                        // 推流的原始track
 	transcodeTracks map[utils.AVCodecID]*TranscodeTrack // 转码Track
@@ -99,7 +114,18 @@ func (t *transStreamPublisher) Post(event *StreamEvent) {
 	t.streamEvents.Post(event)
 }
 
+func getGoroutineID() uint64 {
+	b := make([]byte, 64)
+	b = b[:runtime.Stack(b, false)]
+	b = bytes.TrimPrefix(b, []byte("goroutine "))
+	b = b[:bytes.IndexByte(b, ' ')]
+	n, _ := strconv.ParseUint(string(b), 10, 64)
+	return n
+}
+
 func (t *transStreamPublisher) run() {
+	log.Sugar.Infof("transStreamPublisher run goroutine id: %d", getGoroutineID())
+
 	t.streamEvents = NewNonBlockingChannel[*StreamEvent](256)
 	t.mainContextEvents = make(chan func(), 256)
 
@@ -165,6 +191,19 @@ func (t *transStreamPublisher) ExecuteSyncEvent(cb func()) {
 	group.Wait()
 }
 
+func (t *transStreamPublisher) createRecordSink() bool {
+	sink, path, err := CreateRecordStream(t.source)
+	if err != nil {
+		log.Sugar.Errorf("创建录制sink失败 source: %s err: %s", t.source, err.Error())
+		return false
+	}
+
+	t.recordSink = sink
+	t.recordFilePath = path
+	t.recordStartTime = time.Now()
+	return true
+}
+
 func (t *transStreamPublisher) CreateDefaultOutStreams() {
 	if t.transStreams == nil {
 		t.transStreams = make(map[TransStreamID]TransStream, 10)
@@ -172,13 +211,7 @@ func (t *transStreamPublisher) CreateDefaultOutStreams() {
 
 	// 创建录制流
 	if AppConfig.Record.Enable {
-		sink, path, err := CreateRecordStream(t.source)
-		if err != nil {
-			log.Sugar.Errorf("创建录制sink失败 source: %s err: %s", t.source, err.Error())
-		} else {
-			t.recordSink = sink
-			t.recordFilePath = path
-		}
+		t.createRecordSink()
 	}
 
 	// 创建HLS输出流
@@ -628,12 +661,12 @@ func (t *transStreamPublisher) clearSinkStreaming(sink Sink) {
 	delete(transStreamSinks, sink.GetID())
 	t.lastStreamEndTime = time.Now()
 	sink.StopStreaming(t.transStreams[sink.GetTransStreamID()])
+	delete(t.sinks, sink.GetID())
 }
 
 func (t *transStreamPublisher) doRemoveSink(sink Sink) bool {
 	if _, ok := t.sinks[sink.GetID()]; ok {
 		t.clearSinkStreaming(sink)
-		delete(t.sinks, sink.GetID())
 
 		t.sinkCount--
 		log.Sugar.Infof("sink count: %d source: %s", t.sinkCount, t.source)
@@ -871,6 +904,49 @@ func (t *transStreamPublisher) GetForwardTransStream() TransStream {
 
 func (t *transStreamPublisher) SetSourceID(id string) {
 	t.source = id
+}
+
+func (t *transStreamPublisher) StartRecord() (string, bool) {
+	if AppConfig.Record.Enable || t.recordSink != nil {
+		return "", false
+	}
+
+	var ok bool
+	t.ExecuteSyncEvent(func() {
+		if t.recordSink == nil && t.createRecordSink() {
+			ok = t.doAddSink(t.recordSink, false)
+		}
+	})
+
+	var url string
+	if ok {
+		// 去掉反斜杠
+		url = GenerateRecordStreamPlayUrl(filepath.ToSlash(t.recordFilePath))
+	}
+
+	return url, ok
+}
+
+func (t *transStreamPublisher) StopRecord() error {
+	if AppConfig.Record.Enable {
+		return fmt.Errorf("录制常开")
+	}
+
+	t.ExecuteSyncEvent(func() {
+		if t.recordSink != nil {
+			t.clearSinkStreaming(t.recordSink)
+			t.recordSink.Close()
+			t.recordSink = nil
+			t.recordFilePath = ""
+			t.recordStartTime = time.Time{}
+		}
+	})
+
+	return nil
+}
+
+func (t *transStreamPublisher) RecordStartTime() time.Time {
+	return t.recordStartTime
 }
 
 func NewTransStreamPublisher(source string) TransStreamPublisher {
