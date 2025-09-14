@@ -131,9 +131,10 @@ func startApiServer(addr string) {
 	apiServer.router.HandleFunc("/api/v1/streams/statistics", nil) // 统计所有推拉流
 
 	if stream.AppConfig.GB28181.Enable {
-		apiServer.router.HandleFunc("/ws/v1/gb28181/talk", apiServer.OnGBTalk) // 对讲的主讲人WebSocket连接
+		apiServer.router.HandleFunc("/ws/v1/gb28181/talk", apiServer.OnGBTalk)                        // 对讲的主讲人WebSocket连接
+		apiServer.router.HandleFunc("/api/v1/control/ws-talk/{device}/{channel}", apiServer.OnGBTalk) // 对讲的主讲人WebSocket连接
 		apiServer.router.HandleFunc("/api/v1/gb28181/source/create", withJsonParams(apiServer.OnGBOfferCreate, &SourceSDP{}))
-		apiServer.router.HandleFunc("/api/v1/gb28181/answer/set", withJsonParams(apiServer.OnGBSourceConnect, &SourceSDP{})) // active拉流模式下, 设置对方的地址
+		apiServer.router.HandleFunc("/api/v1/gb28181/answer/set", withJsonParams(apiServer.OnGBSourceConnect, &SourceSDP{})) // 应答的sdp, 如果是active模式拉流, 设置对方的地址. 下载文件设置文件大小
 	}
 
 	apiServer.router.HandleFunc("/api/v1/gc/force", func(writer http.ResponseWriter, request *http.Request) {
@@ -511,8 +512,22 @@ func (api *ApiServer) OnSinkClose(v *IDS, w http.ResponseWriter, r *http.Request
 func (api *ApiServer) OnStreamInfo(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("streamid")
 	source := stream.SourceManager.Find(id)
-	if source == nil || !source.IsCompleted() || source.IsClosed() {
+	if source == nil || source.IsClosed() {
+		w.WriteHeader(http.StatusBadRequest)
+		httpResponseJson(w, "stream not found")
 		return
+	} else if !source.IsCompleted() {
+		// 在请求结束前, 每隔1秒检查track探测是否完成
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for !source.IsClosed() && !source.IsCompleted() && r.Context().Err() == nil {
+			select {
+			case <-ticker.C:
+				break
+			case <-r.Context().Done():
+				break
+			}
+		}
 	}
 
 	tracks := source.OriginTracks()
@@ -572,8 +587,26 @@ func (api *ApiServer) OnStreamInfo(w http.ResponseWriter, r *http.Request) {
 		recordStartTime = startTime.Format("2006-01-02 15:04:05")
 	}
 
+	gbSource := Source2GBSource(source)
+	var downloadInfo *DownloadInfo
+	if gbSource != nil && InviteTypeDownload == gbSource.GetSessionName() {
+		progress := gbSource.GetPlaybackProgress()
+		gbSource.GetTransStreamPublisher()
+		downloadInfo = &DownloadInfo{
+			PlaybackDuration:  gbSource.GetDuration(),
+			PlaybackSpeed:     gbSource.GetSpeed(),
+			PlaybackFileSize:  gbSource.GetFileSize(),
+			PlaybackStartTime: gbSource.GetStartTime(),
+			PlaybackEndTime:   gbSource.GetEndTime(),
+			PlaybackFileURL:   gbSource.GetTransStreamPublisher().GetRecordStreamPlayUrl(),
+			PlaybackProgress:  progress,
+			Progress:          progress,
+		}
+
+	}
 	statistics := source.GetBitrateStatistics()
 	response := struct {
+		*DownloadInfo
 		AudioEnable           bool   `json:"AudioEnable"`
 		CDN                   string `json:"CDN"`
 		CascadeSize           int    `json:"CascadeSize"`
@@ -612,6 +645,7 @@ func (api *ApiServer) OnStreamInfo(w http.ResponseWriter, r *http.Request) {
 		WEBRTC                string `json:"WEBRTC"`
 		WS_FLV                string `json:"WS_FLV"`
 	}{
+		DownloadInfo:         downloadInfo,
 		AudioEnable:          true,
 		CDN:                  "",
 		CascadeSize:          0,
@@ -669,14 +703,14 @@ func (api *ApiServer) OnRecordStart(w http.ResponseWriter, req *http.Request) {
 	if source == nil {
 		log.Sugar.Errorf("OnRecordStart stream not found streamid %s", streamId)
 		w.WriteHeader(http.StatusNotFound)
-	} else if url, ok := source.GetTransStreamPublisher().StartRecord(); !ok {
+	} else if ok := source.GetTransStreamPublisher().StartRecord(); !ok {
 		w.WriteHeader(http.StatusBadRequest)
 	} else {
 		// 返回拉流地址
 		httpResponseJson(w, &struct {
 			DownloadURL string `json:"DownloadURL"`
 		}{
-			DownloadURL: url,
+			DownloadURL: source.GetTransStreamPublisher().GetRecordStreamPlayUrl(),
 		})
 	}
 

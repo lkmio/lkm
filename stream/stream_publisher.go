@@ -1,7 +1,6 @@
 package stream
 
 import (
-	"bytes"
 	"fmt"
 	"github.com/lkmio/avformat"
 	"github.com/lkmio/avformat/collections"
@@ -11,8 +10,6 @@ import (
 	"github.com/lkmio/lkm/transcode"
 	"github.com/lkmio/transport"
 	"path/filepath"
-	"runtime"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -35,7 +32,7 @@ type StreamEvent struct {
 type TransStreamPublisher interface {
 	Post(event *StreamEvent)
 
-	run()
+	start()
 
 	close()
 
@@ -73,13 +70,15 @@ type TransStreamPublisher interface {
 
 	// StartRecord 开启录制
 	// 如果AppConfig已经开启了全局录制, 则无需手动开启, 返回false
-	StartRecord() (string, bool)
+	StartRecord() bool
 
 	// StopRecord 停止录制
 	// 如果AppConfig已经开启了全局录制, 返回error
 	StopRecord() error
 
 	RecordStartTime() time.Time
+
+	GetRecordStreamPlayUrl() string
 }
 
 type transStreamPublisher struct {
@@ -90,12 +89,13 @@ type transStreamPublisher struct {
 	sinkCount int       // 拉流计数
 	gopBuffer GOPBuffer // GOP缓存, 音频和视频混合使用, 以视频关键帧为界, 缓存第二个视频关键帧时, 释放前一组gop
 
-	recordSink      Sink                                // 每个Source的录制流
-	recordFilePath  string                              // 录制流文件路径
-	recordStartTime time.Time                           // 开始录制时间
-	hlsStream       TransStream                         // HLS传输流
-	originTracks    TrackManager                        // 推流的原始track
-	transcodeTracks map[utils.AVCodecID]*TranscodeTrack // 转码Track
+	recordSink         Sink                                // 每个Source的录制流
+	recordFilePath     string                              // 录制流文件路径
+	recordStartTime    time.Time                           // 开始录制时间
+	hasManualRecording bool                                // 是否开启手动录像
+	hlsStream          TransStream                         // HLS传输流
+	originTracks       TrackManager                        // 推流的原始track
+	transcodeTracks    map[utils.AVCodecID]*TranscodeTrack // 转码Track
 
 	transStreams       map[TransStreamID]TransStream     // 所有输出流
 	forwardTransStream TransStream                       // 转发流
@@ -114,26 +114,7 @@ func (t *transStreamPublisher) Post(event *StreamEvent) {
 	t.streamEvents.Post(event)
 }
 
-func getGoroutineID() uint64 {
-	b := make([]byte, 64)
-	b = b[:runtime.Stack(b, false)]
-	b = bytes.TrimPrefix(b, []byte("goroutine "))
-	b = b[:bytes.IndexByte(b, ' ')]
-	n, _ := strconv.ParseUint(string(b), 10, 64)
-	return n
-}
-
 func (t *transStreamPublisher) run() {
-	log.Sugar.Infof("transStreamPublisher run goroutine id: %d", getGoroutineID())
-
-	t.streamEvents = NewNonBlockingChannel[*StreamEvent](256)
-	t.mainContextEvents = make(chan func(), 256)
-
-	t.transStreams = make(map[TransStreamID]TransStream, 10)
-	t.sinks = make(map[SinkID]Sink, 128)
-	t.transStreamSinks = make(map[TransStreamID]map[SinkID]Sink, len(transStreamFactories)+1)
-	t.transcodeTracks = make(map[utils.AVCodecID]*TranscodeTrack, 4)
-
 	defer func() {
 		// 清空管道
 		for event := t.streamEvents.Pop(); event != nil; event = t.streamEvents.Pop() {
@@ -175,6 +156,18 @@ func (t *transStreamPublisher) run() {
 	}
 }
 
+func (t *transStreamPublisher) start() {
+	t.streamEvents = NewNonBlockingChannel[*StreamEvent](256)
+	t.mainContextEvents = make(chan func(), 256)
+
+	t.transStreams = make(map[TransStreamID]TransStream, 10)
+	t.sinks = make(map[SinkID]Sink, 128)
+	t.transStreamSinks = make(map[TransStreamID]map[SinkID]Sink, len(transStreamFactories)+1)
+	t.transcodeTracks = make(map[utils.AVCodecID]*TranscodeTrack, 4)
+
+	go t.run()
+}
+
 func (t *transStreamPublisher) PostEvent(cb func()) {
 	t.mainContextEvents <- cb
 }
@@ -210,7 +203,7 @@ func (t *transStreamPublisher) CreateDefaultOutStreams() {
 	}
 
 	// 创建录制流
-	if AppConfig.Record.Enable {
+	if AppConfig.Record.Enable || t.hasManualRecording {
 		t.createRecordSink()
 	}
 
@@ -906,25 +899,25 @@ func (t *transStreamPublisher) SetSourceID(id string) {
 	t.source = id
 }
 
-func (t *transStreamPublisher) StartRecord() (string, bool) {
+func (t *transStreamPublisher) StartRecord() bool {
 	if AppConfig.Record.Enable || t.recordSink != nil {
-		return "", false
+		return false
 	}
 
 	var ok bool
 	t.ExecuteSyncEvent(func() {
+		t.hasManualRecording = true
+		// 如果探测还未结束
+		if !t.completed.Load() {
+			return
+		}
+
 		if t.recordSink == nil && t.createRecordSink() {
 			ok = t.doAddSink(t.recordSink, false)
 		}
 	})
 
-	var url string
-	if ok {
-		// 去掉反斜杠
-		url = GenerateRecordStreamPlayUrl(filepath.ToSlash(t.recordFilePath))
-	}
-
-	return url, ok
+	return ok
 }
 
 func (t *transStreamPublisher) StopRecord() error {
@@ -933,6 +926,7 @@ func (t *transStreamPublisher) StopRecord() error {
 	}
 
 	t.ExecuteSyncEvent(func() {
+		t.hasManualRecording = false
 		if t.recordSink != nil {
 			t.clearSinkStreaming(t.recordSink)
 			t.recordSink.Close()
@@ -947,6 +941,10 @@ func (t *transStreamPublisher) StopRecord() error {
 
 func (t *transStreamPublisher) RecordStartTime() time.Time {
 	return t.recordStartTime
+}
+
+func (t *transStreamPublisher) GetRecordStreamPlayUrl() string {
+	return GenerateRecordStreamPlayUrl(filepath.ToSlash(t.recordFilePath))
 }
 
 func NewTransStreamPublisher(source string) TransStreamPublisher {

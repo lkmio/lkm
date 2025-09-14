@@ -205,5 +205,5 @@ func CloseSource(id string) {
 // LoopEvent 循环读取事件
 func LoopEvent(source Source) {
 	source.StartTimers(source)
-	go source.GetTransStreamPublisher().run()
+	source.GetTransStreamPublisher().start()
 }

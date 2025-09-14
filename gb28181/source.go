@@ -78,6 +78,21 @@ type GBSource interface {
 	ProcessPacket(data []byte) error
 
 	SetTransport(transport transport.Transport)
+
+	GetDuration() int
+	GetSpeed() int
+	GetSessionName() string
+	GetStartTime() string
+	GetEndTime() string
+	GetFileSize() int
+	GetPlaybackProgress() float64
+
+	SetDuration(duration int)
+	SetSpeed(speed int)
+	SetSessionName(sessionName string)
+	SetStartTime(startTime string)
+	SetEndTime(endTime string)
+	SetFileSize(fileSize int)
 }
 
 type BaseGBSource struct {
@@ -94,6 +109,15 @@ type BaseGBSource struct {
 	isSystemClock          bool // 推流时间戳不正确, 是否使用系统时间.
 	lastRtpTimestamp       int64
 	sameTimePackets        [][]byte
+
+	sessionName      string  // play/playback/download...
+	duration         int     // 回放/下载时长, 单位秒
+	speed            int     // 回放/下载速度
+	startTime        string  // 回放/下载开始时间
+	endTime          string  // 回放/下载结束时间
+	fileSize         int     // 回放/下载文件大小
+	playbackProgress float64 // 1-下载完成
+	playbackDataSize int     // 已下载数据大小
 }
 
 // ProcessPacket 输入rtp包, 处理PS流, 负责解析->封装->推流
@@ -104,6 +128,13 @@ func (source *BaseGBSource) ProcessPacket(data []byte) error {
 	// 收到第一包, 初始化
 	if source.probeBuffer == nil {
 		source.InitializePublish(packet.SSRC)
+	}
+
+	// 统计下载的进度
+	source.playbackDataSize += len(data)
+	source.playbackProgress = float64(source.playbackDataSize) / float64(source.fileSize)
+	if source.playbackProgress > 1 {
+		source.playbackProgress = 1
 	}
 
 	// 国标级联转发
@@ -272,6 +303,58 @@ func (source *BaseGBSource) Init() {
 
 func (source *BaseGBSource) SetTransport(transport transport.Transport) {
 	source.transport = transport
+}
+
+func (source *BaseGBSource) GetSessionName() string {
+	return source.sessionName
+}
+func (source *BaseGBSource) GetStartTime() string {
+	return source.startTime
+}
+
+func (source *BaseGBSource) GetEndTime() string {
+	return source.endTime
+}
+
+func (source *BaseGBSource) GetFileSize() int {
+	return source.fileSize
+}
+
+func (source *BaseGBSource) GetPlaybackProgress() float64 {
+	return source.playbackProgress
+}
+
+func (source *BaseGBSource) SetStartTime(startTime string) {
+	source.startTime = startTime
+}
+
+func (source *BaseGBSource) SetEndTime(endTime string) {
+	source.endTime = endTime
+}
+
+func (source *BaseGBSource) SetFileSize(fileSize int) {
+	source.fileSize = fileSize
+}
+
+func (source *BaseGBSource) SetSessionName(sessionName string) {
+	// 转小写
+	source.sessionName = strings.ToLower(sessionName)
+}
+
+func (source *BaseGBSource) GetDuration() int {
+	return source.duration
+}
+
+func (source *BaseGBSource) GetSpeed() int {
+	return source.speed
+}
+
+func (source *BaseGBSource) SetDuration(duration int) {
+	source.duration = duration
+}
+
+func (source *BaseGBSource) SetSpeed(speed int) {
+	source.speed = speed
 }
 
 // NewGBSource 创建国标推流源, 返回监听的收流端口
