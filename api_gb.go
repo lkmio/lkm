@@ -24,20 +24,20 @@ const (
 )
 
 type SDP struct {
-	SessionName string `json:"session_name,omitempty"` // play/download/playback/talk/broadcast
-	Addr        string `json:"addr,omitempty"`         // 连接地址
-	SSRC        string `json:"ssrc,omitempty"`
-	Setup       string `json:"setup,omitempty"`     // active/passive
-	Transport   string `json:"transport,omitempty"` // tcp/udp
-	Speed       int    `json:"speed,omitempty"`
-	StartTime   int    `json:"start_time,omitempty"`
-	EndTime     int    `json:"end_time,omitempty"`
-	FileSize    int    `json:"file_size,omitempty"`
+	SessionName string  `json:"session_name,omitempty"` // play/download/playback/talk/broadcast
+	Addr        string  `json:"addr,omitempty"`         // 连接地址
+	SSRC        string  `json:"ssrc,omitempty"`
+	Setup       string  `json:"setup,omitempty"`     // active/passive
+	Transport   string  `json:"transport,omitempty"` // tcp/udp
+	Speed       float64 `json:"speed,omitempty"`
+	StartTime   int     `json:"start_time,omitempty"`
+	EndTime     int     `json:"end_time,omitempty"`
+	FileSize    int     `json:"file_size,omitempty"`
 }
 
 type DownloadInfo struct {
 	PlaybackDuration  int     // 回放/下载时长
-	PlaybackSpeed     int     // 回放/下载速度
+	PlaybackSpeed     float64 // 回放/下载速度
 	PlaybackFileURL   string  // 回放/下载文件URL
 	PlaybackStartTime string  // 回放/下载开始时间
 	PlaybackEndTime   string  // 回放/下载结束时间
@@ -369,4 +369,17 @@ func (api *ApiServer) OnLiveGBSTalk(w http.ResponseWriter, r *http.Request) {
 	}
 
 	talkSource.Close()
+}
+
+func (api *ApiServer) OnGBSpeedSet(v *SourceSDP, w http.ResponseWriter, r *http.Request) {
+	source := stream.SourceManager.Find(v.Source)
+	if source == nil {
+		w.WriteHeader(http.StatusBadRequest)
+		httpResponseError(w, "stream not found")
+	} else if stream.SourceType28181 != source.GetType() {
+		w.WriteHeader(http.StatusBadRequest)
+		httpResponseError(w, "stream type not support")
+	} else if gbSource := Source2GBSource(source); gbSource != nil {
+		gbSource.SetSpeed(v.Speed)
+	}
 }

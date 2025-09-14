@@ -131,10 +131,11 @@ func startApiServer(addr string) {
 	apiServer.router.HandleFunc("/api/v1/streams/statistics", nil) // 统计所有推拉流
 
 	if stream.AppConfig.GB28181.Enable {
-		apiServer.router.HandleFunc("/ws/v1/gb28181/talk", apiServer.OnGBTalk)                        // 对讲的主讲人WebSocket连接
-		apiServer.router.HandleFunc("/api/v1/control/ws-talk/{device}/{channel}", apiServer.OnGBTalk) // 对讲的主讲人WebSocket连接
-		apiServer.router.HandleFunc("/api/v1/gb28181/source/create", withJsonParams(apiServer.OnGBOfferCreate, &SourceSDP{}))
-		apiServer.router.HandleFunc("/api/v1/gb28181/answer/set", withJsonParams(apiServer.OnGBSourceConnect, &SourceSDP{})) // 应答的sdp, 如果是active模式拉流, 设置对方的地址. 下载文件设置文件大小
+		apiServer.router.HandleFunc("/ws/v1/gb28181/talk", apiServer.OnGBTalk)                                                // 对讲的主讲人WebSocket连接
+		apiServer.router.HandleFunc("/api/v1/control/ws-talk/{device}/{channel}", apiServer.OnGBTalk)                         // 对讲的主讲人WebSocket连接
+		apiServer.router.HandleFunc("/api/v1/gb28181/source/create", withJsonParams(apiServer.OnGBOfferCreate, &SourceSDP{})) // 创建国标源
+		apiServer.router.HandleFunc("/api/v1/gb28181/answer/set", withJsonParams(apiServer.OnGBSourceConnect, &SourceSDP{}))  // 设置应答sdp, 如果是active模式拉流, 设置对方的地址. 下载文件设置文件大小
+		apiServer.router.HandleFunc("/api/v1/gb28181/speed/set", withJsonParams(apiServer.OnGBSpeedSet, &SourceSDP{}))
 	}
 
 	apiServer.router.HandleFunc("/api/v1/gc/force", func(writer http.ResponseWriter, request *http.Request) {

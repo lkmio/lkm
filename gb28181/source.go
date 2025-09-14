@@ -80,7 +80,7 @@ type GBSource interface {
 	SetTransport(transport transport.Transport)
 
 	GetDuration() int
-	GetSpeed() int
+	GetSpeed() float64
 	GetSessionName() string
 	GetStartTime() string
 	GetEndTime() string
@@ -88,7 +88,7 @@ type GBSource interface {
 	GetPlaybackProgress() float64
 
 	SetDuration(duration int)
-	SetSpeed(speed int)
+	SetSpeed(speed float64)
 	SetSessionName(sessionName string)
 	SetStartTime(startTime string)
 	SetEndTime(endTime string)
@@ -112,7 +112,7 @@ type BaseGBSource struct {
 
 	sessionName      string  // play/playback/download...
 	duration         int     // 回放/下载时长, 单位秒
-	speed            int     // 回放/下载速度
+	speed            float64 // 回放/下载速度
 	startTime        string  // 回放/下载开始时间
 	endTime          string  // 回放/下载结束时间
 	fileSize         int     // 回放/下载文件大小
@@ -345,7 +345,7 @@ func (source *BaseGBSource) GetDuration() int {
 	return source.duration
 }
 
-func (source *BaseGBSource) GetSpeed() int {
+func (source *BaseGBSource) GetSpeed() float64 {
 	return source.speed
 }
 
@@ -353,7 +353,7 @@ func (source *BaseGBSource) SetDuration(duration int) {
 	source.duration = duration
 }
 
-func (source *BaseGBSource) SetSpeed(speed int) {
+func (source *BaseGBSource) SetSpeed(speed float64) {
 	source.speed = speed
 }
 
