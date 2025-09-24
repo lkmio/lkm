@@ -85,6 +85,7 @@ type transStreamPublisher struct {
 	source            string
 	streamEvents      *NonBlockingChannel[*StreamEvent]
 	mainContextEvents chan func()
+	earlyEvents       collections.LinkedList[func()] // 早于启动前的事件, 等待启动后执行
 
 	sinkCount int       // 拉流计数
 	gopBuffer GOPBuffer // GOP缓存, 音频和视频混合使用, 以视频关键帧为界, 缓存第二个视频关键帧时, 释放前一组gop
@@ -108,6 +109,8 @@ type transStreamPublisher struct {
 	streamEndInfo         *StreamEndInfo             // 上次结束推流的信息
 	lastStreamEndTime     time.Time                  // 最近结束拉流的时间
 	bitstreamFilterBuffer *collections.RBBlockBuffer // annexb和avcc转换的缓冲区
+	mute                  sync.Mutex
+	started               bool
 }
 
 func (t *transStreamPublisher) Post(event *StreamEvent) {
@@ -157,6 +160,9 @@ func (t *transStreamPublisher) run() {
 }
 
 func (t *transStreamPublisher) start() {
+	t.mute.Lock()
+	defer t.mute.Unlock()
+
 	t.streamEvents = NewNonBlockingChannel[*StreamEvent](256)
 	t.mainContextEvents = make(chan func(), 256)
 
@@ -166,10 +172,26 @@ func (t *transStreamPublisher) start() {
 	t.transcodeTracks = make(map[utils.AVCodecID]*TranscodeTrack, 4)
 
 	go t.run()
+	t.started = true
+
+	// 放置先于启动的事件到主管道
+	for t.earlyEvents.Size() > 0 {
+		t.mainContextEvents <- t.earlyEvents.Remove(0)
+	}
 }
 
 func (t *transStreamPublisher) PostEvent(cb func()) {
-	t.mainContextEvents <- cb
+	if t.started {
+		t.mainContextEvents <- cb
+		return
+	}
+
+	// 早于启动前的事件, 添加到等待队列
+	t.mute.Lock()
+	defer t.mute.Unlock()
+	if !t.started {
+		t.earlyEvents.Add(cb)
+	}
 }
 
 func (t *transStreamPublisher) ExecuteSyncEvent(cb func()) {

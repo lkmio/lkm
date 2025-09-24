@@ -310,9 +310,7 @@ func (api *ApiServer) OnLiveGBSTalk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 获取id
 	id := device + "/" + channel + ".broadcast"
-
 	talkSource := gb28181.NewTalkSource(id, conn)
 	talkSource.Init()
 	talkSource.SetUrlValues(r.Form)
@@ -349,9 +347,9 @@ func (api *ApiServer) OnLiveGBSTalk(w http.ResponseWriter, r *http.Request) {
 
 		// base64解密
 		var pcmN int
-		pcmN, err = base64.StdEncoding.Decode(bytes, pcm)
-		if err == nil {
-			log.Sugar.Errorf(err.Error())
+		pcmN, err = base64.StdEncoding.Decode(pcm, bytes)
+		if err != nil {
+			log.Sugar.Errorf("base64解密失败, source: %s err: %s", id, err.Error())
 			continue
 		}
 
