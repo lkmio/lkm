@@ -98,7 +98,7 @@ func (s *Sink) StartStreaming(transStream stream.TransStream) error {
 
 	// offer的sdp, 应答给http请求
 	if s.cb != nil {
-		log.Sugar.Infof("answer: %s", connection.LocalDescription().SDP)
+		log.Sugar.Infof("sink: %s answer: %q", stream.SinkID2String(s.GetID()), connection.LocalDescription().SDP)
 		s.cb(connection.LocalDescription().SDP)
 	}
 

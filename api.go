@@ -388,7 +388,7 @@ func (api *ApiServer) onRtc(sourceId string, w http.ResponseWriter, r *http.Requ
 		close(done)
 	})
 
-	log.Sugar.Infof("rtc拉流请求 source: %s sink: %s sdp:%v", sourceId, sink.String(), v.SDP)
+	log.Sugar.Infof("rtc拉流请求 source: %s sink: %s sdp:%q", sourceId, sink.String(), v.SDP)
 
 	ok := stream.SubscribeStream(sink, r.URL.Query())
 	if utils.HookStateOK != ok {
