@@ -88,7 +88,7 @@ func (s *Sink) StartStreaming(transStream stream.TransStream) error {
 		return err
 	}
 
-	complete := webrtc.GatheringCompletePromise(connection)
+	//complete := webrtc.GatheringCompletePromise(connection)
 	answer, err := connection.CreateAnswer(nil)
 	if err != nil {
 		return err
@@ -102,7 +102,7 @@ func (s *Sink) StartStreaming(transStream stream.TransStream) error {
 		s.cb(connection.LocalDescription().SDP)
 	}
 
-	<-complete
+	//<-complete
 	connection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		s.state = state
 		log.Sugar.Infof("ice state: %v sink: %s source: %s", state.String(), stream.SinkID2String(s.GetID()), s.SourceID)
