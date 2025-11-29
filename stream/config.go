@@ -153,14 +153,15 @@ func (c HlsConfig) TSFormat(sourceId string) string {
 type HooksConfig struct {
 	enableConfig
 	Timeout             int64  `json:"timeout"`
-	OnStartedUrl        string `json:"on_started"`         //应用启动后回调
-	OnPublishUrl        string `json:"on_publish"`         //推流回调
-	OnPublishDoneUrl    string `json:"on_publish_done"`    //推流结束回调
-	OnPlayUrl           string `json:"on_play"`            //拉流回调
-	OnPlayDoneUrl       string `json:"on_play_done"`       //拉流结束回调
-	OnRecordUrl         string `json:"on_record"`          //录制流回调
-	OnIdleTimeoutUrl    string `json:"on_idle_timeout"`    //没有sink拉流回调
-	OnReceiveTimeoutUrl string `json:"on_receive_timeout"` //没有推流回调
+	OnStartedUrl        string `json:"on_started"`         // 应用启动后回调
+	OnPublishUrl        string `json:"on_publish"`         // 推流回调
+	OnPublishDoneUrl    string `json:"on_publish_done"`    // 推流结束回调
+	OnPlayUrl           string `json:"on_play"`            // 拉流回调
+	OnPlayDoneUrl       string `json:"on_play_done"`       // 拉流结束回调
+	OnRecordUrl         string `json:"on_record"`          // 录制流回调
+	OnIdleTimeoutUrl    string `json:"on_idle_timeout"`    // 没有sink拉流回调
+	OnReceiveTimeoutUrl string `json:"on_receive_timeout"` // 没有推流回调
+	OnSnapshotUrl       string `json:"on_snapshot"`        // 截图回调
 }
 
 func (hook *HooksConfig) IsEnablePublishEvent() bool {
@@ -193,6 +194,10 @@ func (hook *HooksConfig) IsEnableOnReceiveTimeout() bool {
 
 func (hook *HooksConfig) IsEnableOnStarted() bool {
 	return hook.Enable && hook.OnStartedUrl != ""
+}
+
+func (hook *HooksConfig) IsEnableOnSnapshot() bool {
+	return hook.Enable && hook.OnSnapshotUrl != ""
 }
 
 func GetStreamPlayUrls(source string) []string {

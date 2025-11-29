@@ -12,6 +12,7 @@ import (
 	"github.com/pion/rtp"
 	"math"
 	"strings"
+	"time"
 )
 
 type SetupType int
@@ -274,6 +275,7 @@ func (source *BaseGBSource) InitializePublish(ssrc uint32) {
 	// 初始化ps解复用器
 	source.TransDemuxer.SetOnPreprocessPacketHandler(func(packet *avformat.AVPacket) {
 		source.correctTimestamp(packet, packet.Dts, packet.Pts)
+		source.PublishSource.OnPreprocessPacket(packet)
 	})
 	source.probeBuffer = mpeg.NewProbeBuffer(PsProbeBufferSize)
 	source.lastRtpTimestamp = -1
@@ -409,6 +411,7 @@ func NewGBSource(id string, ssrc uint32, tcp bool, active bool) (GBSource, int, 
 		return nil, 0, err
 	}
 
+	source.SetSessionID(fmt.Sprintf("%d", time.Now().UnixMilli()))
 	stream.LoopEvent(source)
 	return source, port, err
 }

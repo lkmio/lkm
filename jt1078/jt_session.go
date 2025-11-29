@@ -1,11 +1,13 @@
 package jt1078
 
 import (
+	"fmt"
 	"github.com/lkmio/lkm/log"
 	"github.com/lkmio/lkm/stream"
 	"github.com/lkmio/transport"
 	"net"
 	"strconv"
+	"time"
 )
 
 type Session struct {
@@ -55,6 +57,7 @@ func NewSession(conn net.Conn, version int) *Session {
 			Conn:         conn,
 			Type:         stream.SourceType1078,
 			TransDemuxer: NewDemuxer(version),
+			SessionID:    fmt.Sprintf("%d", time.Now().UnixMilli()),
 		},
 
 		decoder:       transport.NewDelimiterFrameDecoder(1024*1024*2, delimiter[:]),
@@ -62,6 +65,7 @@ func NewSession(conn net.Conn, version int) *Session {
 	}
 
 	session.TransDemuxer.SetHandler(&session)
+	session.TransDemuxer.SetOnPreprocessPacketHandler(session.PublishSource.OnPreprocessPacket)
 	session.Init()
 	stream.LoopEvent(&session)
 	return &session

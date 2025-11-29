@@ -50,7 +50,7 @@ func (f *FLVFileSink) Close() {
 	}
 
 	if source := stream.SourceManager.Find(f.SourceID); source != nil {
-		stream.HookRecordEvent(source, f.path)
+		stream.NotifyRecordEvent(source, f.path)
 	}
 }
 

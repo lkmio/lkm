@@ -1,9 +1,11 @@
 package rtmp
 
 import (
+	"fmt"
 	"github.com/lkmio/lkm/stream"
 	"github.com/lkmio/rtmp"
 	"net"
+	"time"
 )
 
 // Publisher RTMP推流Source
@@ -19,8 +21,17 @@ func (p *Publisher) Close() {
 
 func NewPublisher(source string, stack *rtmp.ServerStack, conn net.Conn) *Publisher {
 	demuxer := stack.FLV
-	publisher := &Publisher{PublishSource: stream.PublishSource{ID: source, Type: stream.SourceTypeRtmp, TransDemuxer: demuxer, Conn: conn}, Stack: stack}
+	publisher := &Publisher{
+		PublishSource: stream.PublishSource{
+			ID:           source,
+			SessionID:    fmt.Sprintf("%d", time.Now().UnixMilli()),
+			Type:         stream.SourceTypeRtmp,
+			TransDemuxer: demuxer,
+			Conn:         conn},
+		Stack: stack}
+
 	// 设置回调, 接受从DeMuxer解析出来的音视频包
+	demuxer.SetOnPreprocessPacketHandler(publisher.OnPreprocessPacket)
 	demuxer.SetHandler(publisher)
 	demuxer.AutoFree = false
 	return publisher

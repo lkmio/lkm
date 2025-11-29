@@ -13,6 +13,7 @@ const (
 	HookEventIdleTimeout    = HookEvent(0x6)
 	HookEventReceiveTimeout = HookEvent(0x7)
 	HookEventStarted        = HookEvent(0x8)
+	HookEventSnapshot       = HookEvent(0x9)
 )
 
 var (
@@ -29,6 +30,7 @@ func InitHookUrls() {
 		HookEventIdleTimeout:    AppConfig.Hooks.OnIdleTimeoutUrl,
 		HookEventReceiveTimeout: AppConfig.Hooks.OnReceiveTimeoutUrl,
 		HookEventStarted:        AppConfig.Hooks.OnStartedUrl,
+		HookEventSnapshot:       AppConfig.Hooks.OnSnapshotUrl,
 	}
 }
 
@@ -49,6 +51,8 @@ func (h *HookEvent) ToString() string {
 		return "receive timeout"
 	} else if HookEventStarted == *h {
 		return "started"
+	} else if HookEventSnapshot == *h {
+		return "snapshot"
 	}
 
 	panic(fmt.Sprintf("unknow hook type %d", h))

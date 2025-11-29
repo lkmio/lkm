@@ -30,9 +30,12 @@ func PreparePublishSource(source Source, add bool) (*http.Response, error) {
 	}
 
 	if AppConfig.Hooks.IsEnablePublishEvent() {
-		rep, err := HookPublishEvent(source)
+		rep, err := NotifyPublishEvent(source)
 		if err != nil {
-			_, _ = SourceManager.Remove(source.GetID())
+			unPassedSource := SourceManager.Find(source.GetID())
+			if unPassedSource != nil {
+				unPassedSource.Close()
+			}
 			return rep, err
 		}
 
@@ -73,32 +76,48 @@ func PreparePublishSourceWithAsync(source Source, add bool) {
 
 }
 
-func HookPublishEvent(source Source) (*http.Response, error) {
+func NotifyPublishEvent(source Source) (*http.Response, error) {
 	if AppConfig.Hooks.IsEnablePublishEvent() {
-		return Hook(HookEventPublish, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
+		return PostHookEvent(HookEventPublish, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
 	}
 
 	return nil, nil
 }
 
-func HookPublishDoneEvent(source Source) {
+func NotifyPublishDoneEvent(source Source) {
 	if AppConfig.Hooks.IsEnablePublishEvent() {
-		_, _ = Hook(HookEventPublishDone, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
+		_, _ = PostHookEvent(HookEventPublishDone, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
 	}
 }
 
-func HookReceiveTimeoutEvent(source Source) (*http.Response, error) {
+func NotifyReceiveTimeoutEvent(source Source) (*http.Response, error) {
 	utils.Assert(AppConfig.Hooks.IsEnableOnReceiveTimeout())
-	return Hook(HookEventReceiveTimeout, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
+	return PostHookEvent(HookEventReceiveTimeout, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
 }
 
-func HookIdleTimeoutEvent(source Source) (*http.Response, error) {
+func NotifyIdleTimeoutEvent(source Source) (*http.Response, error) {
 	utils.Assert(AppConfig.Hooks.IsEnableOnIdleTimeout())
-	return Hook(HookEventIdleTimeout, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
+	return PostHookEvent(HookEventIdleTimeout, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
 }
 
-func HookRecordEvent(source Source, path string) {
+func NotifyRecordEvent(source Source, path string) {
 	if AppConfig.Hooks.IsEnableOnRecord() {
-		_, _ = Hook(HookEventRecord, "", NewRecordEventInfo(source, path))
+		_, _ = PostHookEvent(HookEventRecord, "", NewRecordEventInfo(source, path))
+	}
+}
+
+func NotifySnapshotEvent(source Source, codec string, keyFrameData []byte) {
+	if AppConfig.Hooks.IsEnableOnSnapshot() {
+		data := struct {
+			eventInfo
+			Codec        string
+			KeyFrameData []byte `json:"key_frame_data"`
+		}{
+			eventInfo:    NewHookPublishEventInfo(source),
+			Codec:        codec,
+			KeyFrameData: keyFrameData,
+		}
+
+		_, _ = PostHookEvent(HookEventSnapshot, "", &data)
 	}
 }

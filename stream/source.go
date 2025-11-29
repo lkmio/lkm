@@ -26,6 +26,10 @@ type Source interface {
 
 	SetID(id string)
 
+	SetSessionID(id string)
+
+	GetSessionID() string
+
 	// Input 输入推流数据
 	Input(data []byte) (int, error)
 
@@ -88,10 +92,11 @@ type Source interface {
 }
 
 type PublishSource struct {
-	ID    string
-	Type  SourceType
-	state SessionState
-	Conn  net.Conn
+	ID        string
+	SessionID string // 本次推流会话ID
+	Type      SourceType
+	state     SessionState
+	Conn      net.Conn
 
 	streamPublisher TransStreamPublisher // 解析出来的AVStream和AVPacket, 交由streamPublisher处理
 
@@ -102,13 +107,14 @@ type PublishSource struct {
 	completed  atomic.Bool // 推流track是否解析完毕, @see writeHeader 函数中赋值为true
 	existVideo bool        // 是否存在视频
 
-	lastPacketTime time.Time          // 最近收到推流包的时间
-	urlValues      url.Values         // 推流url携带的参数
-	createTime     time.Time          // source创建时间
-	statistics     *BitrateStatistics // 码流统计
-	streamLogger   avformat.OnUnpackStream2FileHandler
-	streamLock     sync.Mutex // 收流、探测超时等操作互斥锁
-	deleteLock     sync.Mutex // 双重锁, 防止在关闭source时, 其他操作同时进行
+	lastPacketTime       time.Time          // 最近收到推流包的时间
+	urlValues            url.Values         // 推流url携带的参数
+	createTime           time.Time          // source创建时间
+	statistics           *BitrateStatistics // 码流统计
+	streamLogger         avformat.OnUnpackStream2FileHandler
+	streamLock           sync.Mutex // 收流、探测超时等操作互斥锁
+	deleteLock           sync.Mutex // 双重锁, 防止在关闭source时, 其他操作同时进行
+	EarliestKeyFrameData []byte     // 最早的关键帧数据
 
 	timers struct {
 		receiveTimer *time.Timer // 收流超时计时器
@@ -241,7 +247,7 @@ func (s *PublishSource) doClose() {
 			s.Conn = nil
 		}
 
-		HookPublishDoneEvent(s)
+		NotifyPublishDoneEvent(s)
 	}()
 }
 
@@ -460,4 +466,31 @@ func (s *PublishSource) ExecuteWithDeleteLock(cb func()) {
 	s.deleteLock.Lock()
 	defer s.deleteLock.Unlock()
 	cb()
+}
+
+func (s *PublishSource) SetSessionID(id string) {
+	s.SessionID = id
+}
+
+func (s *PublishSource) GetSessionID() string {
+	return s.SessionID
+}
+
+func (s *PublishSource) OnPreprocessPacket(packet *avformat.AVPacket) {
+	if s.EarliestKeyFrameData == nil && packet.Key && utils.AVMediaTypeVideo == packet.MediaType {
+		tracks := s.TransDemuxer.GetTracks()
+		track := tracks.Find(packet.CodecID)
+		if track == nil {
+			return
+		}
+
+		annexB := avformat.AVCCPacket2AnnexB(track.GetStream(), packet)
+		if annexB == nil {
+			return
+		}
+
+		s.EarliestKeyFrameData = make([]byte, len(annexB))
+		copy(s.EarliestKeyFrameData, annexB)
+		go NotifySnapshotEvent(s, packet.CodecID.String(), s.EarliestKeyFrameData)
+	}
 }

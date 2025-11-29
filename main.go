@@ -159,7 +159,7 @@ func main() {
 
 	if stream.AppConfig.Hooks.IsEnableOnStarted() {
 		go func() {
-			_, _ = stream.Hook(stream.HookEventStarted, "", nil)
+			_, _ = stream.PostHookEvent(stream.HookEventStarted, "", nil)
 		}()
 	}
 

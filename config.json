@@ -67,7 +67,8 @@
 
     "on_record": "http://localhost:9000/api/v1/hook/on_record",
     "on_idle_timeout": "http://localhost:9000/api/v1/hook/on_idle_timeout",
-    "on_receive_timeout": "http://localhost:9000/api/v1/hook/on_receive_timeout"
+    "on_receive_timeout": "http://localhost:9000/api/v1/hook/on_receive_timeout",
+    "on_snapshot": "http://localhost:9000/api/v1/hook/on_snapshot"
   },
 
   "log": {

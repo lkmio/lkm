@@ -1,6 +1,7 @@
 package gb28181
 
 import (
+	"fmt"
 	"github.com/gorilla/websocket"
 	"github.com/lkmio/avformat"
 	"github.com/lkmio/avformat/bufio"
@@ -71,9 +72,10 @@ func (w WSConn) SetDeadline(t time.Time) error {
 func NewTalkSource(id string, conn *websocket.Conn) *TalkSource {
 	s := &TalkSource{
 		PublishSource: stream.PublishSource{
-			ID:   id,
-			Type: stream.SourceTypeGBTalk,
-			Conn: &WSConn{conn},
+			ID:        id,
+			SessionID: fmt.Sprintf("%d", time.Now().UnixMilli()),
+			Type:      stream.SourceTypeGBTalk,
+			Conn:      &WSConn{conn},
 			TransDemuxer: &Demuxer{
 				BaseDemuxer: avformat.BaseDemuxer{
 					DataPipeline: &avformat.StreamsBuffer{},

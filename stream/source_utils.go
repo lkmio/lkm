@@ -151,7 +151,7 @@ func StartReceiveDataTimer(source Source) *time.Timer {
 			var shouldClose = true
 			if AppConfig.Hooks.IsEnableOnReceiveTimeout() {
 				// 此处参考返回值err, 客观希望关闭Source
-				response, err := HookReceiveTimeoutEvent(source)
+				response, err := NotifyReceiveTimeoutEvent(source)
 				shouldClose = !(err == nil && response != nil && http.StatusOK == response.StatusCode)
 			}
 
@@ -182,7 +182,7 @@ func StartIdleTimer(source Source) *time.Timer {
 			log.Sugar.Errorf("拉流空闲超时 source: %s", source.GetID())
 
 			// 此处不参考返回值err, 客观希望不关闭Source
-			response, _ := HookIdleTimeoutEvent(source)
+			response, _ := NotifyIdleTimeoutEvent(source)
 			if response != nil && http.StatusOK != response.StatusCode {
 				source.Close()
 				return

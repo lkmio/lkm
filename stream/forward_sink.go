@@ -46,7 +46,9 @@ type ForwardSink struct {
 func (f *ForwardSink) OnConnected(conn net.Conn) []byte {
 	log.Sugar.Infof("%s 连接 conn: %s", f.Protocol, conn.RemoteAddr())
 
-	f.receiveTimer.Stop()
+	if f.receiveTimer != nil {
+		f.receiveTimer.Stop()
+	}
 
 	// 如果f.Conn赋值后, 发送数据先于EnableAsyncWriteMode执行, 可能会panic
 	// 所以保险一点, 放在主协程执行
