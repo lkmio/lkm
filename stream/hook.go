@@ -28,36 +28,13 @@ func responseBodyToString(resp *http.Response) string {
 	return string(bodyBytes)
 }
 
-func DoPost(url string, body []byte) (*http.Response, error) {
+func DoPostHookEvent(event HookEvent, req *http.Request, dumpBody []byte) (*http.Response, error) {
 	client := &http.Client{
 		Timeout: time.Duration(AppConfig.Hooks.Timeout),
 	}
-	request, err := http.NewRequest("post", url, bytes.NewBuffer(body))
-	if err != nil {
-		return nil, err
-	}
 
-	request.Header.Set("Content-Type", "application/json")
-	return client.Do(request)
-}
-
-func PostHookEvent(event HookEvent, params string, body interface{}) (*http.Response, error) {
-	url, ok := hookUrls[event]
-	if url == "" || !ok {
-		return nil, fmt.Errorf("the url for this %s event does not exist", event.ToString())
-	}
-
-	bytes, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-
-	if "" != params {
-		url += "?" + params
-	}
-
-	log.Sugar.Infof("sent a hook event for %s. url: %s body: %s", event.ToString(), url, bytes)
-	response, err := DoPost(url, bytes)
+	log.Sugar.Infof("sent a hook event for %s. url: %s body: %s", event.ToString(), req.URL.String(), dumpBody)
+	response, err := client.Do(req)
 	if err != nil {
 		log.Sugar.Errorf("failed to %s the hook event. err: %s", event.ToString(), err.Error())
 		return response, err
@@ -68,8 +45,31 @@ func PostHookEvent(event HookEvent, params string, body interface{}) (*http.Resp
 	if http.StatusOK != response.StatusCode {
 		return response, fmt.Errorf("unexpected response status: %s", response.Status)
 	}
-
 	return response, nil
+}
+
+func PostHookEventWithJson(event HookEvent, params string, body interface{}) (*http.Response, error) {
+	url, ok := hookUrls[event]
+	if url == "" || !ok {
+		return nil, fmt.Errorf("the url for this %s event does not exist", event.ToString())
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	if "" != params {
+		url += "?" + params
+	}
+
+	request, err := http.NewRequest("post", url, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, err
+	}
+
+	request.Header.Set("Content-Type", "application/json")
+	return DoPostHookEvent(event, request, jsonBody)
 }
 
 func NewHookPlayEventInfo(sink Sink) eventInfo {

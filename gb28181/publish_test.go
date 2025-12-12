@@ -364,3 +364,25 @@ func TestDecode(t *testing.T) {
 		}
 	})
 }
+
+func TestDecodeRtpOverTCPRaw(t *testing.T) {
+	file, err := os.ReadFile("./ptz_pw.raw")
+	if err != nil {
+		panic(err)
+	}
+
+	f, err := os.OpenFile("./ptz.ps", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+
+	for i := 2; i < len(file); i += 2 {
+		size := binary.BigEndian.Uint16(file[i-2:])
+		if len(file)-i < int(size) {
+			break
+		}
+
+		f.Write(file[i+12 : i+int(size)])
+		i += int(size)
+	}
+
+	f.Close()
+
+}

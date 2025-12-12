@@ -24,7 +24,7 @@ func PreparePlaySink(sink Sink, waitTimeout bool) (*http.Response, utils.HookSta
 			Sink:      SinkID2String(sink.GetID()),
 		}
 
-		hook, err := PostHookEvent(HookEventPlay, sink.UrlValues().Encode(), body)
+		hook, err := PostHookEventWithJson(HookEventPlay, sink.UrlValues().Encode(), body)
 		if err != nil {
 			log.Sugar.Errorf("播放事件-通知失败 err: %s sink: %s-%v source: %s", err.Error(), sink.GetProtocol().String(), sink.GetID(), sink.GetSourceID())
 
@@ -79,7 +79,7 @@ func HookPlayDoneEvent(sink Sink) (*http.Response, bool) {
 			Sink:      SinkID2String(sink.GetID()),
 		}
 
-		hook, err := PostHookEvent(HookEventPlayDone, sink.UrlValues().Encode(), body)
+		hook, err := PostHookEventWithJson(HookEventPlayDone, sink.UrlValues().Encode(), body)
 		if err != nil {
 			log.Sugar.Errorf("播放结束事件-通知失败 err: %s sink: %s-%v source: %s", err.Error(), sink.GetProtocol().String(), sink.GetID(), sink.GetSourceID())
 			return hook, false

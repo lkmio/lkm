@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/lkmio/avformat/utils"
@@ -78,7 +79,7 @@ func PreparePublishSourceWithAsync(source Source, add bool) {
 
 func NotifyPublishEvent(source Source) (*http.Response, error) {
 	if AppConfig.Hooks.IsEnablePublishEvent() {
-		return PostHookEvent(HookEventPublish, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
+		return PostHookEventWithJson(HookEventPublish, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
 	}
 
 	return nil, nil
@@ -86,38 +87,37 @@ func NotifyPublishEvent(source Source) (*http.Response, error) {
 
 func NotifyPublishDoneEvent(source Source) {
 	if AppConfig.Hooks.IsEnablePublishEvent() {
-		_, _ = PostHookEvent(HookEventPublishDone, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
+		_, _ = PostHookEventWithJson(HookEventPublishDone, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
 	}
 }
 
 func NotifyReceiveTimeoutEvent(source Source) (*http.Response, error) {
 	utils.Assert(AppConfig.Hooks.IsEnableOnReceiveTimeout())
-	return PostHookEvent(HookEventReceiveTimeout, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
+	return PostHookEventWithJson(HookEventReceiveTimeout, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
 }
 
 func NotifyIdleTimeoutEvent(source Source) (*http.Response, error) {
 	utils.Assert(AppConfig.Hooks.IsEnableOnIdleTimeout())
-	return PostHookEvent(HookEventIdleTimeout, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
+	return PostHookEventWithJson(HookEventIdleTimeout, source.UrlValues().Encode(), NewHookPublishEventInfo(source))
 }
 
 func NotifyRecordEvent(source Source, path string) {
 	if AppConfig.Hooks.IsEnableOnRecord() {
-		_, _ = PostHookEvent(HookEventRecord, "", NewRecordEventInfo(source, path))
+		_, _ = PostHookEventWithJson(HookEventRecord, "", NewRecordEventInfo(source, path))
 	}
 }
 
 func NotifySnapshotEvent(source Source, codec string, keyFrameData []byte) {
 	if AppConfig.Hooks.IsEnableOnSnapshot() {
-		data := struct {
-			eventInfo
-			Codec        string
-			KeyFrameData []byte `json:"key_frame_data"`
-		}{
-			eventInfo:    NewHookPublishEventInfo(source),
-			Codec:        codec,
-			KeyFrameData: keyFrameData,
-		}
+		req, _ := http.NewRequest("POST", AppConfig.Hooks.OnSnapshotUrl, bytes.NewReader(keyFrameData))
 
-		_, _ = PostHookEvent(HookEventSnapshot, "", &data)
+		req.Header.Add("stream", source.GetID())
+		req.Header.Add("session", source.GetSessionID())
+		req.Header.Add("protocol", source.GetType().String())
+		req.Header.Add("remote_addr", source.RemoteAddr())
+		req.Header.Add("codec", codec)
+		req.Header.Set("Content-Type", "application/octet-stream")
+
+		_, _ = DoPostHookEvent(HookEventSnapshot, req, nil)
 	}
 }

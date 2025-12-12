@@ -1,9 +1,9 @@
 package gb28181
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/lkmio/lkm/stream"
 	"github.com/lkmio/transport"
 	"net"
 	"net/http"
@@ -13,6 +13,16 @@ import (
 	"time"
 )
 
+func DoPost(url string, body []byte) (*http.Response, error) {
+	client := &http.Client{}
+	request, err := http.NewRequest("post", url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}
+
+	request.Header.Set("Content-Type", "application/json")
+	return client.Do(request)
+}
 func callForward(source, setup, addr string) string {
 	v := &struct {
 		Source string `json:"source"` //GetSourceID
@@ -31,7 +41,7 @@ func callForward(source, setup, addr string) string {
 		panic(err)
 	}
 
-	response, err := stream.SendHookEvent("http://localhost:8080/api/v1/gb28181/forward", body)
+	response, err := DoPost("http://localhost:8080/api/v1/gb28181/forward", body)
 	if err != nil {
 		panic(err)
 	}
@@ -76,7 +86,7 @@ func closeForwardSink(source, sink string) {
 		panic(err)
 	}
 
-	_, err = stream.SendHookEvent("http://localhost:8080/api/v1/sink/close", body)
+	_, err = DoPost("http://localhost:8080/api/v1/sink/close", body)
 	if err != nil {
 		panic(err)
 	}
